@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "blockwright": {
+      "cwd": ".",
+      "command": "node",
+      "args": ["./mcp/server.mjs"]
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "extends": "skybridge/tsconfig",
+
+  "include": ["src", ".skybridge/**/*.d.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

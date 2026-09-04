@@ -1,0 +1,43 @@
+{
+  "name": "blockwright",
+  "version": "0.4.0",
+  "description": "Version-aware Minecraft architect with adaptive palettes, unique seeded plans, state-aware 3D review, WorldEdit schematics, and safe local-world workflows.",
+  "author": {
+    "name": "Gildaltar",
+    "url": "https://github.com/gildaltar"
+  },
+  "homepage": "https://github.com/gildaltar/Blockwright",
+  "repository": "https://github.com/gildaltar/Blockwright",
+  "license": "GPL-2.0-only",
+  "keywords": ["minecraft", "building", "schematic", "worldedit", "3d-review"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Blockwright",
+    "shortDescription": "Plan and install exact Minecraft builds safely.",
+    "longDescription": "Blockwright interviews for exact palettes, checks build risk, generates distinct seeded architecture, audits and annotates state-aware 3D output, synchronizes Java registries, previews local textures, reads local world metadata, and creates verified WorldEdit schematics.",
+    "developerName": "Gildaltar",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Minecraft version sync",
+      "Texture preview",
+      "Adaptive palette studio",
+      "Seeded architectural candidates",
+      "State-aware 3D build reviewer",
+      "Whole-build structural audit",
+      "WorldEdit schematic import and export",
+      "Local world discovery"
+    ],
+    "defaultPrompt": [
+      "Design a Java 26.2 survival base.",
+      "Review and annotate my latest build in 3D.",
+      "Find my worlds and install a WorldEdit schematic."
+    ],
+    "brandColor": "#C87932",
+    "screenshots": [
+      "./assets/workbench.png",
+      "./assets/mobile.png"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}
