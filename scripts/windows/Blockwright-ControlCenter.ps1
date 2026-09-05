@@ -962,7 +962,7 @@ function Get-ManagedListeningPorts {
 function Read-BoundedResponseBody {
     param(
         [Parameter(Mandatory = $true)][System.IO.Stream]$Stream,
-        [ValidateRange(1024, 1048576)][int]$MaximumCharacters = 32768
+        [ValidateRange(1024, 4194304)][int]$MaximumCharacters = 32768
     )
     $reader = New-Object System.IO.StreamReader($Stream)
     try {
@@ -1071,7 +1071,7 @@ function Invoke-LocalMcpJsonRpc {
         [Parameter(Mandatory = $true)][string]$Method,
         [object]$Parameters = @{},
         [ValidateRange(1000, 60000)][int]$TimeoutMilliseconds = 30000,
-        [ValidateRange(32768, 1048576)][int]$MaximumResponseCharacters = 1048576
+        [ValidateRange(32768, 4194304)][int]$MaximumResponseCharacters = 1048576
     )
     if ([string]::IsNullOrWhiteSpace($script:LocalMcpToken)) {
         throw "The per-launch MCP credential is unavailable."
@@ -1139,7 +1139,10 @@ function Invoke-PrimaryWorkflowSmokeTest {
         throw "Installed MCP identity mismatch (name '$serverName', version '$serverVersion'; expected blockwright $ExpectedVersion)."
     }
 
-    $toolList = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-tools" -Method "tools/list"
+    # The complete local inventory includes rich input/output schemas and is
+    # currently larger than 1 MiB. Keep this probe bounded, but give the
+    # inventory enough headroom to validate the real installed server.
+    $toolList = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-tools" -Method "tools/list" -MaximumResponseCharacters 4194304
     $tools = @($toolList.result.tools)
     $toolNames = @($tools | ForEach-Object { [string]$_.name })
     $requiredTools = @("compile_build", "validate_build", "validate_build_contract", "export_build")

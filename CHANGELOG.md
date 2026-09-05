@@ -9,6 +9,7 @@
 - Added internally verified, spatially tiled Bedrock `.mcstructure`/`.mcpack` delivery with exact permutation lowering, canonical metadata, certificates, and checksums. Real iPhone runtime compatibility remains unverified until an on-device import-and-placement smoke test succeeds.
 - Added the complete five-sector Aqua Meridian brief as a permanent regression fixture.
 - Replaced public deterministic-id cache lookups with short-lived cryptographically random `cacheRef` capabilities and raised the still placement-bounded hosted cache to eight records so a five-sector project can be reviewed and exported without self-eviction behind a session-terminating proxy.
+- Kept the Windows Control Center MCP probe bounded while raising its explicit tool-inventory allowance to 4 MiB, covering the complete 38-tool schema instead of truncating valid JSON at the older 1 MiB limit.
 
 ## 0.6.0 - 2026-09-05
 
