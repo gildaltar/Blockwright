@@ -22,7 +22,7 @@
     "benchmark:v060": "tsx scripts/benchmark-v060.ts",
     "diagnose": "node scripts/diagnose.mjs",
     "install:runtime": "npm ci --omit=dev --no-audit --no-fund --prefer-offline --prefix app",
-    "verify": "npm test && npm run build && npm run package:plugin && npm run verify:runtime-lock && npm run install:runtime && npm run diagnose",
+    "verify": "npm run build && npm test && npm run package:plugin && npm run verify:runtime-lock && npm run install:runtime && npm run diagnose",
     "verify:packaged-sync": "node scripts/verify-packaged-sync.mjs",
     "verify:runtime-lock": "node scripts/verify-runtime-lock.mjs",
     "check:java": "tsx scripts/sync-java-version.ts --check",

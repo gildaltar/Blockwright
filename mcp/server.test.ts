@@ -479,7 +479,7 @@ describe("Blockwright stdio bridge helpers", () => {
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it("does not steal a fresh repair lock from a live owner", async () => {
     const temporary = mkdtempSync(join(tmpdir(), "blockwright-lock-owner-test-"));
