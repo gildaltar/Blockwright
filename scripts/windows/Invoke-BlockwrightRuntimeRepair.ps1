@@ -12,6 +12,9 @@ $resolvedPluginRoot = if ([string]::IsNullOrWhiteSpace($PluginRoot)) {
 } else {
     [System.IO.Path]::GetFullPath($PluginRoot)
 }
+$pathsModule = Join-Path $PSScriptRoot "Blockwright-Paths.psm1"
+if (-not (Test-Path -LiteralPath $pathsModule -PathType Leaf)) { throw "The Windows path/runtime helper is missing: $pathsModule" }
+Import-Module $pathsModule -Force
 $appRoot = [System.IO.Path]::GetFullPath((Join-Path $resolvedPluginRoot "app"))
 $lockPath = [System.IO.Path]::GetFullPath((Join-Path $appRoot ".blockwright-runtime-repair.lock"))
 $expectedLockPath = Join-Path $appRoot ".blockwright-runtime-repair.lock"
@@ -50,6 +53,9 @@ public static class BlockwrightNativeDirectoryLock
 }
 
 function Get-NpmExecutable {
+    $privateNpm = Get-BlockwrightPrivateNpm -InstallRoot $resolvedPluginRoot
+    if ($null -ne $privateNpm) { return $privateNpm }
+    if (Test-Path -LiteralPath (Join-Path $resolvedPluginRoot "release-manifest.json") -PathType Leaf) { return $null }
     $nodeCommand = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $nodeCommand) {
         $nodeCommand = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -266,7 +272,7 @@ if (-not (Test-Path -LiteralPath $packagePath -PathType Leaf)) {
 }
 $npmPath = Get-NpmExecutable
 if ($null -eq $npmPath) {
-    Write-Error "npm.cmd was not found beside Node.js or on PATH."
+    Write-Error "The packaged private npm.cmd is missing. Installed releases do not repair with machine-wide Node.js/npm."
     exit 1
 }
 

@@ -58,6 +58,12 @@ describe("exports", () => {
     expect(toCsv(build).split("\n")).toHaveLength(build.placements.length + 1);
   });
 
+  it("neutralizes spreadsheet formulas in user-controlled CSV cells", () => {
+    const build = compileBuild(input);
+    const csv = toCsv({ ...build, placements: [{ ...build.placements[0], phase: "=HYPERLINK(\"https://attacker.example\")" }] });
+    expect(csv).toContain(",\"'=HYPERLINK(\"\"https://attacker.example\"\")\"");
+  });
+
   it("keeps Java and Bedrock command files syntactically separated", () => {
     const build = compileBuild(input);
     expect(toMcfunction(build, "java")).toContain("setblock -8 64 20 minecraft:stone_bricks replace");

@@ -1,4 +1,4 @@
-import { gzipSync } from "node:zlib";
+import { gunzipSync, gzipSync } from "node:zlib";
 import { parse, simplify, writeUncompressed } from "prismarine-nbt";
 const tag = {
     byte: (value) => ({ type: "byte", value }),
@@ -82,9 +82,25 @@ function primitiveTag(value) {
         return tag.compound(Object.fromEntries(Object.entries(value).map(([key, item]) => [key, primitiveTag(item)])));
     return tag.string("");
 }
+function placementBounds(placements) {
+    const first = placements[0];
+    if (!first)
+        throw new Error("Cannot export an empty schematic.");
+    const min = { x: first.x, y: first.y, z: first.z };
+    const max = { x: first.x, y: first.y, z: first.z };
+    for (let index = 1; index < placements.length; index += 1) {
+        const placement = placements[index];
+        min.x = Math.min(min.x, placement.x);
+        min.y = Math.min(min.y, placement.y);
+        min.z = Math.min(min.z, placement.z);
+        max.x = Math.max(max.x, placement.x);
+        max.y = Math.max(max.y, placement.y);
+        max.z = Math.max(max.z, placement.z);
+    }
+    return { min, max };
+}
 function transformPlacements(placements, rotation, mirror) {
-    const minX = Math.min(...placements.map((p) => p.x));
-    const minZ = Math.min(...placements.map((p) => p.z));
+    const { min: { x: minX, z: minZ } } = placementBounds(placements);
     return placements.map((placement) => {
         let x = placement.x - minX;
         let z = placement.z - minZ;
@@ -100,8 +116,7 @@ export function createSchematicNbt(build, options = {}) {
     if (build.input.edition !== "java")
         throw new Error("Sponge .schem export is available for Java Edition builds only.");
     const transformed = transformPlacements(build.placements, options.rotation ?? 0, options.mirror ?? "none");
-    const min = { x: Math.min(...transformed.map((p) => p.x)), y: Math.min(...transformed.map((p) => p.y)), z: Math.min(...transformed.map((p) => p.z)) };
-    const max = { x: Math.max(...transformed.map((p) => p.x)), y: Math.max(...transformed.map((p) => p.y)), z: Math.max(...transformed.map((p) => p.z)) };
+    const { min, max } = placementBounds(transformed);
     const width = max.x - min.x + 1;
     const height = max.y - min.y + 1;
     const length = max.z - min.z + 1;
@@ -139,8 +154,23 @@ export function exportSchematic(build, options = {}) {
     const raw = writeUncompressed(created.root, "big");
     return { ...created, bytes: gzipSync(raw, { level: 9 }) };
 }
-export async function importSchematic(bytes, origin = { x: 0, y: 0, z: 0 }) {
-    const { parsed, type } = await parse(Buffer.from(bytes), "big");
+export async function importSchematic(bytes, origin = { x: 0, y: 0, z: 0 }, options = {}) {
+    const compressedLimit = options.maximumCompressedBytes ?? 16 * 1024 * 1024;
+    const expandedLimit = options.maximumExpandedBytes ?? 64 * 1024 * 1024;
+    const volumeLimit = options.maximumVolume ?? 2_000_000;
+    if (!Number.isSafeInteger(compressedLimit) || compressedLimit < 1 || bytes.byteLength > compressedLimit) {
+        throw new Error(`Schematic input exceeds the configured ${compressedLimit}-byte compressed limit.`);
+    }
+    if (!Number.isSafeInteger(expandedLimit) || expandedLimit < 1)
+        throw new Error("Schematic expanded-byte limit is invalid.");
+    if (!Number.isSafeInteger(volumeLimit) || volumeLimit < 1)
+        throw new Error("Schematic volume limit is invalid.");
+    if (bytes[0] !== 0x1f || bytes[1] !== 0x8b)
+        throw new Error("Sponge schematics must be gzip-compressed Java NBT.");
+    const expanded = options.expandedBytes ? Buffer.from(options.expandedBytes) : gunzipSync(Buffer.from(bytes), { maxOutputLength: expandedLimit });
+    if (expanded.byteLength > expandedLimit)
+        throw new Error(`Schematic input exceeds the configured ${expandedLimit}-byte expanded limit.`);
+    const { parsed, type } = await parse(expanded, "big");
     if (type !== "big")
         throw new Error("Sponge schematics must use Java big-endian NBT.");
     const value = simplify(parsed);
@@ -152,8 +182,12 @@ export async function importSchematic(bytes, origin = { x: 0, y: 0, z: 0 }) {
     const length = schematic.Length & 0xffff;
     if (![width, height, length].every((number) => Number.isInteger(number) && number > 0))
         throw new Error("Schematic dimensions are invalid.");
+    const declaredVolume = width * height * length;
+    if (!Number.isSafeInteger(declaredVolume) || declaredVolume > volumeLimit) {
+        throw new Error(`Schematic volume exceeds the configured ${volumeLimit.toLocaleString()}-block limit.`);
+    }
     const paletteByIndex = Object.fromEntries(Object.entries(schematic.Blocks?.Palette ?? {}).map(([state, index]) => [Number(index), state]));
-    const data = decodeVarints(Array.from(schematic.Blocks?.Data ?? []), width * height * length);
+    const data = decodeVarints(Array.from(schematic.Blocks?.Data ?? []), declaredVolume);
     const placements = [];
     const entitiesByPosition = new Map((schematic.Blocks?.BlockEntities ?? []).map((entity) => [entity.Pos.join(","), entity]));
     for (let y = 0; y < height; y += 1)

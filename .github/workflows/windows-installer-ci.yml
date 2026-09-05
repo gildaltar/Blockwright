@@ -1,0 +1,109 @@
+name: Windows installer lifecycle
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-installer-ci.yml"
+      - ".github/workflows/windows-release.yml"
+      - ".github/workflows/windows-publish-release.yml"
+      - "app/**"
+      - "assets/github/blockwright-icon-v060.png"
+      - "installer/windows/**"
+      - "mcp/**"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/package-plugin.mjs"
+      - "scripts/release/**"
+      - "scripts/windows/**"
+      - "src/**"
+      - "standalone/**"
+      - "vite.standalone.config.ts"
+
+permissions:
+  contents: read
+
+jobs:
+  clean-user-install:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.8.1
+          cache: npm
+      - name: Install locked source dependencies
+        run: npm ci
+      - name: Acquire byte-pinned Inno Setup compiler
+        id: inno
+        shell: powershell
+        run: |
+          $inno = & ".\scripts\release\Install-PinnedInnoSetup.ps1" -PassThru
+          "iscc_path=$($inno.CompilerPath)" >> $env:GITHUB_OUTPUT
+          "installer_path=$($inno.InstallerPath)" >> $env:GITHUB_OUTPUT
+      - name: Validate release and Windows scripts
+        shell: powershell
+        env:
+          BLOCKWRIGHT_PINNED_ISCC_PATH: ${{ steps.inno.outputs.iscc_path }}
+          BLOCKWRIGHT_PINNED_INNO_INSTALLER_PATH: ${{ steps.inno.outputs.installer_path }}
+        run: |
+          npm run benchmark:v060
+          if ($LASTEXITCODE -ne 0) { throw "The v0.6 benchmark failed with exit code $LASTEXITCODE." }
+          npm run test:release
+          if ($LASTEXITCODE -ne 0) { throw "Release tests failed with exit code $LASTEXITCODE." }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-WindowsDistribution.ps1"
+          if ($LASTEXITCODE -ne 0) { throw "Windows distribution tests failed with exit code $LASTEXITCODE." }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-ControlCenter.ps1"
+          if ($LASTEXITCODE -ne 0) { throw "Control Center tests failed with exit code $LASTEXITCODE." }
+      - name: Build unsigned portable package and per-user installer
+        shell: powershell
+        run: |
+          node scripts/release/build-windows-release.mjs --installer --keep-work --iscc "${{ steps.inno.outputs.iscc_path }}"
+          if ($LASTEXITCODE -ne 0) { throw "Unsigned Windows release assembly failed with exit code $LASTEXITCODE." }
+      - name: Verify explicit unsigned evidence
+        run: npm run release:verify
+      - name: Build prior-version fixture from the same staged payload
+        shell: powershell
+        run: |
+          $iscc = "${{ steps.inno.outputs.iscc_path }}"
+          $stage = (Resolve-Path ".\release\windows\.work\installer\Blockwright").Path
+          $output = (Resolve-Path ".\release\windows").Path
+          $manifestPath = Join-Path $stage "release-manifest.json"
+          $appManifestPath = Join-Path $stage "app\package.json"
+          $manifestOriginal = [IO.File]::ReadAllText($manifestPath)
+          $appManifestOriginal = [IO.File]::ReadAllText($appManifestPath)
+          try {
+            $manifest = $manifestOriginal | ConvertFrom-Json
+            $manifest.version = "0.0.1"
+            [IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 10) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+            $appManifest = $appManifestOriginal | ConvertFrom-Json
+            $appManifest.version = "0.0.1"
+            [IO.File]::WriteAllText($appManifestPath, (($appManifest | ConvertTo-Json -Depth 10) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\release\Invoke-PinnedInnoCompile.ps1" `
+              -CompilerPath $iscc -Version "0.0.1" -StageDir $stage -OutputDir $output
+            if ($LASTEXITCODE -ne 0) { throw "Prior-version installer fixture failed to compile through the pinned compiler boundary." }
+          } finally {
+            [IO.File]::WriteAllText($manifestPath, $manifestOriginal, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllText($appManifestPath, $appManifestOriginal, [Text.UTF8Encoding]::new($false))
+          }
+      - name: Exercise clean install, upgrade, repair, readiness, stop, and uninstall
+        shell: powershell
+        run: |
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-InstallerLifecycle.ps1" `
+            -PreviousInstaller ".\release\windows\Blockwright-0.0.1-windows-x64-setup.exe" `
+            -CurrentInstaller ".\release\windows\Blockwright-$version-windows-x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Installer lifecycle failed with exit code $LASTEXITCODE." }
+      - name: Upload unsigned CI evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: blockwright-windows-unsigned-ci
+          if-no-files-found: error
+          path: |
+            release/windows/*.exe
+            release/windows/*.zip
+            release/windows/*.json
+            release/windows/SHA256SUMS.txt

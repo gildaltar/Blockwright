@@ -1,4 +1,5 @@
-import type { BuildRecord, Placement, Vec3 } from "./types.js";
+import { auditBuildSemantics, validateBuildContract, type SemanticBuildAudit } from "./contract.js";
+import type { BuildCertificate, BuildContractResult, BuildRecord, Placement, Vec3 } from "./types.js";
 
 export type ReviewCategory = "change" | "fix" | "remove" | "liked";
 
@@ -62,6 +63,9 @@ export type BuildAudit = {
   findings: AuditFinding[];
   totals: { errors: number; warnings: number; info: number; affectedPlacements: number };
   checks: string[];
+  semantic: SemanticBuildAudit;
+  contract: BuildContractResult;
+  certificate: BuildCertificate;
 };
 
 const directions = {
@@ -74,7 +78,6 @@ const directions = {
 const coordinateKey = ({ x, y, z }: Vec3) => `${x},${y},${z}`;
 const offset = (value: Vec3, delta: Vec3): Vec3 => ({ x: value.x + delta.x, y: value.y + delta.y, z: value.z + delta.z });
 const isAir = (placement: Placement | undefined) => !placement || /(^|:)air$/.test(placement.block);
-const isDecorativeGround = (placement: Placement) => /landscap|garden|foliage|path|terrain/i.test(placement.phase) || /grass|flower|leaves|vine|moss|carpet|snow/.test(placement.block);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -297,6 +300,8 @@ function collect(findings: Map<string, AuditFinding>, code: string, severity: Au
 export function auditBuild(build: BuildRecord): BuildAudit {
   const byCoordinate = new Map(build.placements.map((placement) => [coordinateKey(placement), placement]));
   const findings = new Map<string, AuditFinding>();
+  const semantic = auditBuildSemantics(build);
+  const contract = validateBuildContract(build, undefined, semantic);
   let statefulPlacements = 0;
 
   for (const placement of build.placements) {
@@ -362,13 +367,6 @@ export function auditBuild(build: BuildRecord): BuildAudit {
       }
     }
 
-    if (!isDecorativeGround(placement)) {
-      const neighbors = [
-        { x: 1, y: 0, z: 0 }, { x: -1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 },
-        { x: 0, y: -1, z: 0 }, { x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 },
-      ].some((delta) => byCoordinate.has(coordinateKey(offset(placement, delta))));
-      if (!neighbors) collect(findings, "ISOLATED_PLACEMENT", "warning", "A non-landscape block has no face-adjacent support or connection.", placement);
-    }
   }
 
   if (build.validation.attemptedCollisions > 0) {
@@ -378,6 +376,46 @@ export function auditBuild(build: BuildRecord): BuildAudit {
       message: "The generator attempted to write more than one block at the same coordinate. The canonical record kept one placement; inspect phase boundaries for roof or trim overlap.",
       total: build.validation.attemptedCollisions,
       coordinates: [],
+    });
+  }
+
+  const semanticCodes: Record<string, string> = {
+    "hash-integrity": "BUILD_HASH_MISMATCH",
+    "canonical-grid": "NON_CANONICAL_GRID",
+    entrances: "NO_BOUNDARY_ENTRANCE",
+    "entrance-clearance": "BLOCKED_ENTRANCE_CLEARANCE",
+    "spawn-safety": "UNSAFE_CENTRAL_SPAWN",
+    "room-access": "ROOM_ACCESS_NOT_GEOMETRICALLY_EVALUATED",
+    lighting: "NO_EXPLICIT_INTERIOR_LIGHTING",
+    "functional-interior": "FUNCTIONAL_INTERIOR_NOT_CONSTRUCTED",
+    "support-contact": "ISOLATED_PLACEMENT",
+    "palette-legality": "PLACEMENT_OUTSIDE_ROLE_PALETTE",
+    "exact-version": "EXACT_VERSION_NOT_PROVEN",
+    dimensions: "REQUESTED_ENVELOPE_EXCEEDED",
+    "paste-origin": "PASTE_ORIGIN_MISMATCH",
+    "block-budget": "BLOCK_BUDGET_EXCEEDED",
+  };
+  for (const check of semantic.checks) {
+    if (check.status === "pass") continue;
+    const code = semanticCodes[check.id] ?? `SEMANTIC_${check.id.replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()}`;
+    const severity: AuditFinding["severity"] = check.status === "fail" ? "error" : "warning";
+    findings.set(code, {
+      code,
+      severity,
+      message: `${check.message} Expected ${check.expected}; observed ${check.actual}.`,
+      total: Math.max(1, check.total ?? check.coordinates.length),
+      coordinates: check.coordinates,
+    });
+  }
+
+  const failedContractClauses = contract.hardResults.filter(({ status }) => status !== "pass");
+  if (failedContractClauses.length) {
+    findings.set("BUILD_CONTRACT_INVALID", {
+      code: "BUILD_CONTRACT_INVALID",
+      severity: "error",
+      message: "At least one declared hard requirement failed, is unsupported, or remained unevaluated. The hash-bound semantic certificate is invalid.",
+      total: failedContractClauses.length,
+      coordinates: failedContractClauses.flatMap(({ coordinates }) => coordinates ?? []).slice(0, 250),
     });
   }
 
@@ -403,6 +441,17 @@ export function auditBuild(build: BuildRecord): BuildAudit {
       "pane, fence, bars, and wall connection arms",
       "isolated non-landscape placements",
       "overlapping generator writes across all phases",
+      "boundary entrances and immediate two-block clearance",
+      "central spawn support and headroom",
+      "room-graph reachability with explicit geometric-evidence limits",
+      "explicit lighting and constructed functional interiors",
+      "face-adjacent structural contact",
+      "role-palette legality and exact-version registry coverage",
+      "requested dimensions, paste origin, and block budget",
+      "canonical payload hash and every normalized hard contract clause",
     ],
+    semantic,
+    contract,
+    certificate: contract.certificate,
   };
 }

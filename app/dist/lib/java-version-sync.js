@@ -7,9 +7,9 @@ import { JAVA_MANIFEST_URL, javaDataRoot, listJavaRegistries } from "./java-regi
 const JSON_TIMEOUT_MS = 20_000;
 const CLIENT_TIMEOUT_MS = 120_000;
 const USER_AGENT = "Blockwright/version-synchronizer";
-async function fetchOfficial(url, timeoutMs) {
+async function fetchOfficial(url, timeoutMs, request = fetch) {
     try {
-        return await fetch(url, { headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(timeoutMs) });
+        return await request(url, { headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(timeoutMs) });
     }
     catch (error) {
         if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
@@ -18,26 +18,79 @@ async function fetchOfficial(url, timeoutMs) {
         throw error;
     }
 }
-async function fetchJson(url) {
-    const response = await fetchOfficial(url, JSON_TIMEOUT_MS);
+async function fetchJson(url, request = fetch) {
+    const response = await fetchOfficial(url, JSON_TIMEOUT_MS, request);
     if (!response.ok)
         throw new Error(`Mojang request failed (${response.status}) for ${url}`);
     return response.json();
 }
-export async function checkJavaUpdates(channel = "release") {
-    const manifest = await fetchJson(JAVA_MANIFEST_URL);
-    const latestVersion = manifest.latest[channel];
-    const installed = listJavaRegistries().map(({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }) => ({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }));
-    return {
-        channel,
-        latestVersion,
-        latestRelease: manifest.latest.release,
-        latestSnapshot: manifest.latest.snapshot,
-        installed,
-        updateAvailable: !installed.some(({ version }) => version === latestVersion),
-        checkedAt: new Date().toISOString(),
-        manifestUrl: JAVA_MANIFEST_URL,
-    };
+export class JavaUpdateChecker {
+    cached = new Map();
+    inFlight = new Map();
+    activeChecks = 0;
+    request;
+    cacheTtlMs;
+    maximumConcurrentChecks;
+    now;
+    constructor(options = {}) {
+        this.request = options.request ?? fetch;
+        this.cacheTtlMs = options.cacheTtlMs ?? 60_000;
+        this.maximumConcurrentChecks = options.maximumConcurrentChecks ?? 1;
+        this.now = options.now ?? Date.now;
+        if (!Number.isSafeInteger(this.cacheTtlMs) || this.cacheTtlMs < 1
+            || !Number.isSafeInteger(this.maximumConcurrentChecks) || this.maximumConcurrentChecks < 1) {
+            throw new Error("Java update-check cache and concurrency limits must be positive safe integers.");
+        }
+    }
+    async check(channel = "release") {
+        const now = this.now();
+        const cached = this.cached.get(channel);
+        if (cached && cached.expiresAt > now)
+            return cached.result;
+        if (cached)
+            this.cached.delete(channel);
+        const existing = this.inFlight.get(channel);
+        if (existing)
+            return existing;
+        if (this.activeChecks >= this.maximumConcurrentChecks) {
+            throw new Error("JAVA_UPDATE_CHECK_BUSY: the shared Mojang update check is already at capacity.");
+        }
+        const pending = (async () => {
+            this.activeChecks += 1;
+            try {
+                const manifest = await fetchJson(JAVA_MANIFEST_URL, this.request);
+                const latestVersion = manifest.latest[channel];
+                const installed = listJavaRegistries().map(({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }) => ({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }));
+                const result = {
+                    channel,
+                    latestVersion,
+                    latestRelease: manifest.latest.release,
+                    latestSnapshot: manifest.latest.snapshot,
+                    installed,
+                    updateAvailable: !installed.some(({ version }) => version === latestVersion),
+                    checkedAt: new Date(this.now()).toISOString(),
+                    manifestUrl: JAVA_MANIFEST_URL,
+                };
+                this.cached.set(channel, { result, expiresAt: this.now() + this.cacheTtlMs });
+                return result;
+            }
+            finally {
+                this.activeChecks -= 1;
+            }
+        })();
+        this.inFlight.set(channel, pending);
+        try {
+            return await pending;
+        }
+        finally {
+            if (this.inFlight.get(channel) === pending)
+                this.inFlight.delete(channel);
+        }
+    }
+}
+const javaUpdateChecker = new JavaUpdateChecker();
+export function checkJavaUpdates(channel = "release") {
+    return javaUpdateChecker.check(channel);
 }
 function displayName(id) {
     const path = id.split(":", 2)[1] ?? id;

@@ -1,0 +1,8 @@
+*.ico binary
+*.jpg binary
+*.png binary
+*.zip binary
+
+# Generated application bundles can contain vendor shader strings whose
+# whitespace is semantically owned by the bundler, not by source formatting.
+app/dist/** -whitespace

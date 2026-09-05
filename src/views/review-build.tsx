@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useDisplayMode, useDownload, useLayout, useViewState } from "skybridge/web";
 import { useToolInfo } from "../helpers.js";
+import { type BuildPlacementPage, type BuildSummary } from "../lib/build-view-paging.js";
 import { loadResourcePack, placementTextureKey, type FaceTextures, type LoadedResourcePack } from "../lib/resource-pack.js";
 import {
   countPlacementsWithin,
@@ -34,9 +35,10 @@ import {
   type ReviewCategory,
 } from "../lib/reviewer.js";
 import type { BuildRecord, Placement, Vec3 } from "../lib/types.js";
+import { usePagedBuild } from "../use-paged-build.js";
 
 type ToolOutput = { review?: { buildId: string; hash: string; name: string; blockCount: number; audit: BuildAudit["totals"] } };
-type ToolMetadata = { build?: BuildRecord; audit?: BuildAudit };
+type ToolMetadata = { buildSummary?: BuildSummary; buildPage?: BuildPlacementPage; build?: BuildRecord; audit?: BuildAudit };
 type ReviewMode = "orbit" | "select" | "region" | "measure";
 type CameraPreset = "iso" | "top" | "north" | "south" | "east" | "west";
 type Selection = ReviewBounds & { type: "block" | "region" | "measure"; blockCount: number; pickedBlock?: string; pickedState?: Placement["state"]; pickedPhase?: string };
@@ -125,16 +127,36 @@ function geometryParts(placement: Placement): ShapePart[] {
   return [{ size: [1, 1, 1], offset: [0, 0, 0] }];
 }
 
-function InstancePart({ placements, part, block, textures, dimmed, onPick }: { placements: Placement[]; part: ShapePart; block: string; textures?: FaceTextures; dimmed: boolean; onPick: (placement: Placement) => void }) {
+function useResourcePackTextures(texturePack: LoadedResourcePack | null) {
+  const textureMaps = useMemo(() => {
+    const maps = new Map<string, THREE.Texture>();
+    if (!texturePack) return maps;
+    const loader = new THREE.TextureLoader();
+    for (const faces of texturePack.textures.values()) {
+      for (const url of Object.values(faces)) {
+        if (maps.has(url)) continue;
+        const map = loader.load(url);
+        map.colorSpace = THREE.SRGBColorSpace;
+        map.magFilter = THREE.NearestFilter;
+        map.minFilter = THREE.NearestMipmapNearestFilter;
+        maps.set(url, map);
+      }
+    }
+    return maps;
+  }, [texturePack]);
+  useEffect(() => () => { for (const map of textureMaps.values()) map.dispose(); }, [textureMaps]);
+  return textureMaps;
+}
+
+function InstancePart({ placements, part, block, textures, textureMaps, dimmed, onPick }: { placements: Placement[]; part: ShapePart; block: string; textures?: FaceTextures; textureMaps: Map<string, THREE.Texture>; dimmed: boolean; onPick: (placement: Placement) => void }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const material = useMemo(() => {
     const url = textures?.top;
-    const map = url ? new THREE.TextureLoader().load(url) : undefined;
-    if (map) { map.colorSpace = THREE.SRGBColorSpace; map.magFilter = THREE.NearestFilter; map.minFilter = THREE.NearestMipmapNearestFilter; }
+    const map = url ? textureMaps.get(url) : undefined;
     const emissive = part.role === "lantern" ? new THREE.Color("#b86b22") : new THREE.Color("#000000");
     return new THREE.MeshStandardMaterial({ color: url ? "#ffffff" : part.role === "metal" ? "#242a2c" : colorFor(block), map, roughness: part.role === "metal" ? .45 : .88, metalness: part.role === "metal" ? .5 : 0, transparent: dimmed || /glass|pane|leaves/.test(block), opacity: dimmed ? .2 : 1, alphaTest: /glass|pane|leaves|door|trapdoor/.test(block) ? .08 : 0, emissive, emissiveIntensity: part.role === "lantern" ? 1.1 : 0 });
-  }, [block, dimmed, part.role, textures?.top]);
-  useEffect(() => () => { material.map?.dispose(); material.dispose(); }, [material]);
+  }, [block, dimmed, part.role, textureMaps, textures?.top]);
+  useEffect(() => () => { material.dispose(); }, [material]);
   useEffect(() => {
     if (!ref.current) return;
     const matrix = new THREE.Matrix4();
@@ -158,6 +180,7 @@ function SelectionBox({ selection, color = "#f2b661" }: { selection?: ReviewBoun
 }
 
 function ReviewScene({ build, maxLayer, hideRoof, cameraPreset, cameraTarget, cameraDistance, orthographic, selection, annotations, texturePack, onPick }: { build: BuildRecord; maxLayer: number; hideRoof: boolean; cameraPreset: CameraPreset; cameraTarget?: Vec3; cameraDistance?: number; orthographic: boolean; selection?: Selection; annotations: ReviewAnnotation[]; texturePack: LoadedResourcePack | null; onPick: (placement: Placement) => void }) {
+  const textureMaps = useResourcePackTextures(texturePack);
   const groups = useMemo(() => {
     const map = new Map<string, { placement: Placement; placements: Placement[]; parts: ShapePart[] }>();
     for (const placement of build.placements) {
@@ -189,7 +212,7 @@ function ReviewScene({ build, maxLayer, hideRoof, cameraPreset, cameraTarget, ca
       : <PerspectiveCamera key={`review-perspective-${cameraKey}`} makeDefault position={positions[cameraPreset]} fov={42} onUpdate={(camera) => camera.lookAt(...center)} />}
     <ambientLight intensity={1.05} color="#a8bfd0" />
     <directionalLight position={[center[0] + radius, center[1] + radius, center[2] - radius]} intensity={2.2} color="#f5e7cf" castShadow />
-    {groups.flatMap(([key, group]) => group.parts.map((part, index) => <InstancePart key={`${key}-${index}`} placements={group.placements} part={part} block={group.placement.block} textures={texturePack?.textures.get(key)} dimmed={false} onPick={onPick} />))}
+    {groups.flatMap(([key, group]) => group.parts.map((part, index) => <InstancePart key={`${key}-${index}`} placements={group.placements} part={part} block={group.placement.block} textures={texturePack?.textures.get(key)} textureMaps={textureMaps} dimmed={false} onPick={onPick} />))}
     <SelectionBox selection={selection} />
     {annotations.map((annotation) => <SelectionBox key={annotation.id} selection={annotation.bounds} color={annotation.resolved ? "#536b76" : COLORS[annotation.category]} />)}
     <Grid position={[buildCenter[0], build.bounds.min.y - .51, buildCenter[2]]} args={[Math.max(64, fullRadius * 2), Math.max(64, fullRadius * 2)]} cellSize={1} cellColor="#294554" sectionSize={5} sectionColor="#3f6170" fadeDistance={fullRadius * 1.8} infiniteGrid />
@@ -237,11 +260,13 @@ export default function ReviewBuildView() {
   const [displayMode, setDisplayMode] = useDisplayMode();
   const { maxHeight } = useLayout();
   const { download } = useDownload();
-  const build = (responseMetadata as ToolMetadata | undefined)?.build;
-  const audit = (responseMetadata as ToolMetadata | undefined)?.audit;
+  const metadata = responseMetadata as ToolMetadata | undefined;
+  const pagedBuild = usePagedBuild(metadata?.buildSummary, metadata?.buildPage, metadata?.build);
+  const build = pagedBuild.build;
+  const audit = metadata?.audit;
   const summary = (output as ToolOutput | undefined)?.review;
-  const maxBuildLayer = build?.bounds.max.y ?? 0;
-  const minBuildLayer = build?.bounds.min.y ?? 0;
+  const maxBuildLayer = (build ?? metadata?.buildSummary)?.bounds.max.y ?? 0;
+  const minBuildLayer = (build ?? metadata?.buildSummary)?.bounds.min.y ?? 0;
   const [persistedReviewState, setReviewState] = useViewState(reviewDefaults(build));
   const persistedBuildStatus = build ? getReviewStateBuildStatus(persistedReviewState, build) : "unbound";
   // Never render unverified or mismatched state, even for the single paint
@@ -392,7 +417,8 @@ export default function ReviewBuildView() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [displayMode, maxBuildLayer, minBuildLayer, showShortcuts]);
 
-  if (isPending || !build || !summary || !audit) return <div className="loading-view"><BoxIcon size={34} /><span>Preparing exact 3D review…</span></div>;
+  if (!isPending && metadata?.buildSummary && pagedBuild.error) return <div className="loading-view"><AlertTriangle size={34} /><span>Exact review blocks could not be loaded. {pagedBuild.error}</span></div>;
+  if (isPending || !build || !summary || !audit) return <div className="loading-view"><BoxIcon size={34} /><span>{metadata?.buildSummary ? `Loading exact review blocks… ${pagedBuild.loaded.toLocaleString()} / ${pagedBuild.total.toLocaleString()}` : "Preparing exact 3D review…"}</span></div>;
 
   const selectionForPlacement = (placement: Placement): Selection => {
     const point = { x: placement.x, y: placement.y, z: placement.z };

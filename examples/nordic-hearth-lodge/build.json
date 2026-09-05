@@ -1,7 +1,7 @@
 {
   "schemaVersion": 2,
-  "id": "bw_2ec20e2c5e18",
-  "hash": "2ec20e2c5e185a94cd51baf784c32afddb231ae641fb5d45a8ea89a63df591a5",
+  "id": "bw_368ad983035c",
+  "hash": "368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16",
   "input": {
     "name": "Nordic Hearth Lodge",
     "edition": "java",
@@ -7981,10 +7981,31 @@
     }
   ],
   "validation": {
-    "valid": true,
-    "blockingIssues": 0,
-    "warnings": 0,
-    "issues": [],
+    "valid": false,
+    "blockingIssues": 2,
+    "warnings": 2,
+    "issues": [
+      {
+        "code": "CONTRACT_HEARTH_FAILED",
+        "severity": "error",
+        "message": "constructed hearth: No canonical hearth phase or hearth block is present."
+      },
+      {
+        "code": "CONTRACT_STORAGE_LOFT_FAILED",
+        "severity": "error",
+        "message": "constructed storage loft: The plan label is not backed by constructed storage-loft placements."
+      },
+      {
+        "code": "CONTRACT_ROOM_ACCESS_WARNING",
+        "severity": "warning",
+        "message": "The plan graph reaches 4/4 rooms, but schema v2 has no room bounds or door-to-room associations for geometric access proof."
+      },
+      {
+        "code": "CONTRACT_FUNCTIONAL_INTERIOR_WARNING",
+        "severity": "warning",
+        "message": "No placement is associated with an interior-function phase; an empty shell is not certified as furnished or functional."
+      }
+    ],
     "attemptedCollisions": 67
   },
   "registry": {
@@ -8003,5 +8024,381 @@
       "minor": 0
     }
   },
-  "createdAt": "deterministic"
+  "createdAt": "deterministic",
+  "contract": {
+    "schemaVersion": 1,
+    "evaluatorVersion": "blockwright-contract/0.6.0",
+    "buildHash": "368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16",
+    "status": "invalid",
+    "normalizedClauses": [
+      {
+        "id": "implicit-hash",
+        "severity": "hard",
+        "requirement": "canonical payload matches the immutable build hash",
+        "source": "implicit",
+        "sourceText": "canonical payload matches the immutable build hash",
+        "evaluator": "hash-integrity",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "implicit-grid",
+        "severity": "hard",
+        "requirement": "placements use unique integer 1x1x1 coordinates",
+        "source": "implicit",
+        "sourceText": "placements use unique integer 1x1x1 coordinates",
+        "evaluator": "canonical-grid",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "implicit-edition",
+        "severity": "hard",
+        "requirement": "registry edition matches the requested edition",
+        "source": "implicit",
+        "sourceText": "registry edition matches the requested edition",
+        "evaluator": "edition",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "implicit-version",
+        "severity": "hard",
+        "requirement": "exact requested-version registry compatibility",
+        "source": "implicit",
+        "sourceText": "exact requested-version registry compatibility",
+        "evaluator": "exact-version",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "implicit-dimensions",
+        "severity": "hard",
+        "requirement": "all placements remain inside the requested dimensions",
+        "source": "implicit",
+        "sourceText": "all placements remain inside the requested dimensions",
+        "evaluator": "dimensions",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "implicit-origin",
+        "severity": "hard",
+        "requirement": "occupied minimum corner matches the requested paste origin",
+        "source": "implicit",
+        "sourceText": "occupied minimum corner matches the requested paste origin",
+        "evaluator": "paste-origin",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "implicit-palette",
+        "severity": "hard",
+        "requirement": "every placement uses a validated role-palette identifier",
+        "source": "implicit",
+        "sourceText": "every placement uses a validated role-palette identifier",
+        "evaluator": "palette-legality",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "implicit-budget",
+        "severity": "hard",
+        "requirement": "canonical placement count stays within the block budget",
+        "source": "implicit",
+        "sourceText": "canonical placement count stays within the block budget",
+        "evaluator": "block-budget",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "feature-1-covered-porch",
+        "severity": "hard",
+        "requirement": "covered porch",
+        "source": "feature",
+        "sourceText": "covered porch",
+        "evaluator": "covered-porch",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "feature-2-hearth",
+        "severity": "hard",
+        "requirement": "constructed hearth",
+        "source": "feature",
+        "sourceText": "hearth",
+        "evaluator": "hearth",
+        "supported": true,
+        "parameters": {}
+      },
+      {
+        "id": "feature-3-storage-loft",
+        "severity": "hard",
+        "requirement": "constructed storage loft",
+        "source": "feature",
+        "sourceText": "storage loft",
+        "evaluator": "storage-loft",
+        "supported": true,
+        "parameters": {}
+      }
+    ],
+    "hardResults": [
+      {
+        "clauseId": "implicit-hash",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "canonical payload matches the immutable build hash",
+        "evaluator": "hash-integrity",
+        "message": "The canonical payload reproduces the declared SHA-256 hash.",
+        "expected": "368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16",
+        "actual": "368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16"
+      },
+      {
+        "clauseId": "implicit-grid",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "placements use unique integer 1x1x1 coordinates",
+        "evaluator": "canonical-grid",
+        "message": "Every placement has one unique integer coordinate.",
+        "expected": "926 unique integer coordinates",
+        "actual": "926 unique coordinates; integer=true"
+      },
+      {
+        "clauseId": "implicit-edition",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "registry edition matches the requested edition",
+        "evaluator": "edition",
+        "message": "Registry and requested editions match.",
+        "expected": "java",
+        "actual": "java"
+      },
+      {
+        "clauseId": "implicit-version",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "exact requested-version registry compatibility",
+        "evaluator": "exact-version",
+        "message": "Registry metadata exactly covers the requested edition/version.",
+        "expected": "java 26.2",
+        "actual": "java requested=26.2 coverage=26.2"
+      },
+      {
+        "clauseId": "implicit-dimensions",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "all placements remain inside the requested dimensions",
+        "evaluator": "dimensions",
+        "message": "Every placement remains inside the requested inclusive envelope.",
+        "expected": "0,64,0 through 16,77,12",
+        "actual": "0,64,0 through 16,77,12"
+      },
+      {
+        "clauseId": "implicit-origin",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "occupied minimum corner matches the requested paste origin",
+        "evaluator": "paste-origin",
+        "message": "The occupied minimum corner equals the requested paste origin.",
+        "expected": "0,64,0",
+        "actual": "0,64,0"
+      },
+      {
+        "clauseId": "implicit-palette",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "every placement uses a validated role-palette identifier",
+        "evaluator": "palette-legality",
+        "message": "Every placement identifier belongs to the normalized role palette.",
+        "expected": "all placements drawn from normalized role palette",
+        "actual": "0 illegal placements"
+      },
+      {
+        "clauseId": "implicit-budget",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "canonical placement count stays within the block budget",
+        "evaluator": "block-budget",
+        "message": "The canonical placement count is within budget.",
+        "expected": "<= 12000 placements",
+        "actual": "926 placements"
+      },
+      {
+        "clauseId": "feature-1-covered-porch",
+        "severity": "hard",
+        "status": "pass",
+        "requirement": "covered porch",
+        "evaluator": "covered-porch",
+        "message": "A majority of porch placements have canonical cover above their columns.",
+        "expected": ">=50% covered porch columns",
+        "actual": "9/15",
+        "coordinates": [
+          {
+            "x": 1,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 2,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 3,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 4,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 5,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 6,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 7,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 8,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 9,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 10,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 11,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 12,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 13,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 14,
+            "y": 65,
+            "z": 0
+          },
+          {
+            "x": 15,
+            "y": 65,
+            "z": 0
+          }
+        ]
+      },
+      {
+        "clauseId": "feature-2-hearth",
+        "severity": "hard",
+        "status": "fail",
+        "requirement": "constructed hearth",
+        "evaluator": "hearth",
+        "message": "No canonical hearth phase or hearth block is present.",
+        "expected": "constructed hearth",
+        "actual": "0 placements"
+      },
+      {
+        "clauseId": "feature-3-storage-loft",
+        "severity": "hard",
+        "status": "fail",
+        "requirement": "constructed storage loft",
+        "evaluator": "storage-loft",
+        "message": "The plan label is not backed by constructed storage-loft placements.",
+        "expected": "storage/loft phase at y>=70",
+        "actual": "0 placements"
+      }
+    ],
+    "warnings": [
+      {
+        "clauseId": "audit-room-access",
+        "severity": "warning",
+        "status": "warning",
+        "requirement": "geometric path from an entrance to every room",
+        "evaluator": "room-access",
+        "message": "The plan graph reaches 4/4 rooms, but schema v2 has no room bounds or door-to-room associations for geometric access proof.",
+        "actual": "plan graph connected=true; geometric mapping unavailable"
+      },
+      {
+        "clauseId": "audit-functional-interior",
+        "severity": "warning",
+        "status": "warning",
+        "requirement": "at least one constructed interior-function placement",
+        "evaluator": "functional-interior",
+        "message": "No placement is associated with an interior-function phase; an empty shell is not certified as furnished or functional.",
+        "actual": "0 placements"
+      }
+    ],
+    "aestheticObservations": [
+      {
+        "clauseId": "aesthetic-style-profile",
+        "severity": "aesthetic",
+        "status": "observation",
+        "requirement": "nordic architectural expression",
+        "evaluator": "aesthetic-observation",
+        "message": "Style quality remains subjective and is intentionally excluded from hard contract validity.",
+        "actual": "rectangle footprint; gable roof; 0.328 asymmetry"
+      }
+    ],
+    "summary": {
+      "passed": 9,
+      "failed": 2,
+      "unsupported": 0,
+      "unevaluated": 0
+    },
+    "certificate": {
+      "schemaVersion": 1,
+      "evaluatorVersion": "blockwright-contract/0.6.0",
+      "buildId": "bw_368ad983035c",
+      "buildHash": "368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16",
+      "status": "invalid",
+      "hard": {
+        "passed": 9,
+        "failed": 2,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "warningCount": 2,
+      "aestheticObservationCount": 1,
+      "text": "Blockwright Semantic Certificate\nEvaluator: blockwright-contract/0.6.0\nBuild: bw_368ad983035c\nSHA-256: 368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16\nStatus: INVALID\nHard requirements: 9 passed, 2 failed, 0 unsupported, 0 unevaluated\nOperational warnings: 2\nAesthetic observations: 1\n[PASS] canonical payload matches the immutable build hash — 368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16\n[PASS] placements use unique integer 1x1x1 coordinates — 926 unique coordinates; integer=true\n[PASS] registry edition matches the requested edition — java\n[PASS] exact requested-version registry compatibility — java requested=26.2 coverage=26.2\n[PASS] all placements remain inside the requested dimensions — 0,64,0 through 16,77,12\n[PASS] occupied minimum corner matches the requested paste origin — 0,64,0\n[PASS] every placement uses a validated role-palette identifier — 0 illegal placements\n[PASS] canonical placement count stays within the block budget — 926 placements\n[PASS] covered porch — 9/15\n[FAIL] constructed hearth — 0 placements\n[FAIL] constructed storage loft — 0 placements"
+    }
+  },
+  "certificate": {
+    "schemaVersion": 1,
+    "evaluatorVersion": "blockwright-contract/0.6.0",
+    "buildId": "bw_368ad983035c",
+    "buildHash": "368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16",
+    "status": "invalid",
+    "hard": {
+      "passed": 9,
+      "failed": 2,
+      "unsupported": 0,
+      "unevaluated": 0
+    },
+    "warningCount": 2,
+    "aestheticObservationCount": 1,
+    "text": "Blockwright Semantic Certificate\nEvaluator: blockwright-contract/0.6.0\nBuild: bw_368ad983035c\nSHA-256: 368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16\nStatus: INVALID\nHard requirements: 9 passed, 2 failed, 0 unsupported, 0 unevaluated\nOperational warnings: 2\nAesthetic observations: 1\n[PASS] canonical payload matches the immutable build hash — 368ad983035c094cdbf9fff1c0024c5ee356a6f0859de2fa97ad46c041840a16\n[PASS] placements use unique integer 1x1x1 coordinates — 926 unique coordinates; integer=true\n[PASS] registry edition matches the requested edition — java\n[PASS] exact requested-version registry compatibility — java requested=26.2 coverage=26.2\n[PASS] all placements remain inside the requested dimensions — 0,64,0 through 16,77,12\n[PASS] occupied minimum corner matches the requested paste origin — 0,64,0\n[PASS] every placement uses a validated role-palette identifier — 0 illegal placements\n[PASS] canonical placement count stays within the block budget — 926 placements\n[PASS] covered porch — 9/15\n[FAIL] constructed hearth — 0 placements\n[FAIL] constructed storage loft — 0 placements"
+  }
 }

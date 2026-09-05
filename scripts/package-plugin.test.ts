@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { commitStagedPackage, createRuntimeLock, createRuntimePackage, root } from "./package-plugin.mjs";
+import { assertNoRedistributionRestrictedResourceArchives, commitStagedPackage, createRuntimeLock, createRuntimePackage, root } from "./package-plugin.mjs";
 
 describe("plugin runtime packaging", () => {
   it("derives a production-only package and aligned npm lock", () => {
@@ -18,6 +18,19 @@ describe("plugin runtime packaging", () => {
     expect(runtimeLock.packages[""].version).toBe(runtimePackage.version);
     expect(runtimeLock.packages[""].dependencies).toEqual(runtimePackage.dependencies);
     expect(runtimeLock.packages[""]).not.toHaveProperty("devDependencies");
+  });
+
+  it("refuses redistribution-restricted vanilla resources in plugin staging", () => {
+    const temporary = mkdtempSync(join(tmpdir(), "blockwright-package-commercial-boundary-"));
+    try {
+      const data = resolve(temporary, "data", "java");
+      mkdirSync(data, { recursive: true });
+      expect(() => assertNoRedistributionRestrictedResourceArchives(temporary)).not.toThrow();
+      writeFileSync(resolve(data, "26.2-vanilla-resources.zip"), "derived Mojang resources");
+      expect(() => assertNoRedistributionRestrictedResourceArchives(temporary)).toThrow(/refused redistribution-restricted.*26\.2-vanilla-resources\.zip/);
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
   });
 
   it("commits a staged package and removes the backup only after success", () => {

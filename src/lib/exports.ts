@@ -16,11 +16,15 @@ export function toJson(build: BuildRecord) {
   return JSON.stringify(build, null, 2);
 }
 
+function csvTextCell(value: string) {
+  const neutralized = /^[\t\r]|^\s*[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${neutralized.replaceAll('"', '""')}"`;
+}
+
 export function toCsv(build: BuildRecord) {
   const rows = ["x,y,z,block,state,phase"];
   for (const p of build.placements) {
-    const state = JSON.stringify(p.state ?? {}).replaceAll('"', '""');
-    rows.push(`${p.x},${p.y},${p.z},${p.block},"${state}","${p.phase.replaceAll('"', '""')}"`);
+    rows.push(`${p.x},${p.y},${p.z},${p.block},${csvTextCell(JSON.stringify(p.state ?? {}))},${csvTextCell(p.phase)}`);
   }
   return rows.join("\n");
 }

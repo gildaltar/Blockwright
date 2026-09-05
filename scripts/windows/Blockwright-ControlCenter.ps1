@@ -5,6 +5,8 @@ param(
     [switch]$Json,
     [switch]$ValidateUi,
     [switch]$SmokeTest,
+    [string]$CaptureUiPath,
+    [string]$OpenSchematic,
     [ValidateRange(1024, 65535)]
     [int]$Port = 32147,
     [ValidateRange(5, 180)]
@@ -21,12 +23,34 @@ if ([string]::IsNullOrWhiteSpace($PluginRoot)) {
     $ResolvedPluginRoot = [System.IO.Path]::GetFullPath($PluginRoot)
 }
 
+$pathsModule = Join-Path $PSScriptRoot "Blockwright-Paths.psm1"
+if (-not (Test-Path -LiteralPath $pathsModule -PathType Leaf)) { throw "The Windows path/runtime helper is missing: $pathsModule" }
+Import-Module $pathsModule -Force
+$script:StateRoot = Get-BlockwrightStateRoot -InstallRoot $ResolvedPluginRoot
+if (-not $PSBoundParameters.ContainsKey("Port")) {
+    $Port = [int](Get-BlockwrightConfiguration -InstallRoot $ResolvedPluginRoot -StateRoot $script:StateRoot).port
+}
+
 function Quote-NativeArgument {
     param([Parameter(Mandatory = $true)][string]$Value)
     return '"' + $Value.Replace('"', '\"') + '"'
 }
 
+function New-LocalMcpToken {
+    $bytes = New-Object byte[] 32
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    } finally {
+        $generator.Dispose()
+    }
+    return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
 function Get-NodeExecutable {
+    $privateNode = Get-BlockwrightPrivateNode -InstallRoot $ResolvedPluginRoot
+    if ($null -ne $privateNode) { return $privateNode }
+    if (Test-Path -LiteralPath (Join-Path $ResolvedPluginRoot "release-manifest.json") -PathType Leaf) { return $null }
     $command = Get-Command node.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -eq $command) {
         $command = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -48,6 +72,9 @@ function Get-ExpectedAppVersion {
 }
 
 function Get-NpmExecutable {
+    $privateNpm = Get-BlockwrightPrivateNpm -InstallRoot $ResolvedPluginRoot
+    if ($null -ne $privateNpm) { return $privateNpm }
+    if (Test-Path -LiteralPath (Join-Path $ResolvedPluginRoot "release-manifest.json") -PathType Leaf) { return $null }
     $nodePath = Get-NodeExecutable
     if ($null -ne $nodePath) {
         $siblingNpm = Join-Path (Split-Path -Parent $nodePath) "npm.cmd"
@@ -170,8 +197,8 @@ function New-FallbackDiagnosticResult {
         Status = if ($null -ne $nodePath) { "PASS" } else { "FAIL" }
         Area = "Runtime"
         Name = "Node.js executable"
-        Message = if ($null -ne $nodePath) { $nodePath } else { "Node.js was not found on PATH." }
-        Detail = "The local server and MCP bridge require Node.js."
+        Message = if ($null -ne $nodePath) { $nodePath } else { "The packaged private Node.js runtime is missing." }
+        Detail = "Installed and portable releases require runtime/node/node.exe and never fall back to machine-wide Node.js."
     }
     $checks += [pscustomobject]@{
         Status = if ($null -ne $entryPath) { "PASS" } else { "FAIL" }
@@ -421,6 +448,8 @@ public sealed class BlockwrightProcessLogPump
 
 $script:ServerHandle = $null
 $script:MaintenanceHandle = $null
+$script:UpdateHandle = $null
+$script:UpdateMode = $null
 $script:ServerStartedAt = $null
 $script:ServerBaseUrl = $null
 $script:ServerHttpStatus = $null
@@ -437,6 +466,56 @@ $script:CurrentDiagnostics = $null
 $script:UiReady = $false
 $script:StartAfterMaintenance = $false
 $script:AutomaticStartFailure = $null
+$script:ManagedToken = [guid]::NewGuid().ToString("N")
+$script:ExpectedServerStop = $false
+$script:LocalMcpToken = $null
+$script:ManagedRecordPath = Get-BlockwrightManagedRecordPath -InstallRoot $ResolvedPluginRoot -StateRoot $script:StateRoot
+$script:UpdateCheckPath = Join-Path $script:StateRoot "updates\last-check.json"
+$script:UpdateFailurePath = Join-Path $script:StateRoot "updates\last-failure.json"
+$script:UpdateSuccessPath = Join-Path $script:StateRoot "updates\last-success.json"
+
+function Write-ManagedServerRecord {
+    if (-not (Test-ProcessRunning $script:ServerHandle)) { return }
+    $recordRoot = Split-Path -Parent $script:ManagedRecordPath
+    $null = New-Item -ItemType Directory -Path $recordRoot -Force
+    $record = [ordered]@{
+        schemaVersion = 1
+        pid = [int]$script:ServerHandle.Process.Id
+        processStartUtc = $script:ServerHandle.Process.StartTime.ToUniversalTime().ToString("o")
+        executable = [System.IO.Path]::GetFullPath([string]$script:ServerHandle.Process.StartInfo.FileName)
+        entry = Get-ServerEntryPath
+        installRoot = $ResolvedPluginRoot
+        stateRoot = $script:StateRoot
+        port = $Port
+        controllerPid = $PID
+        ownerToken = $script:ManagedToken
+    }
+    [System.IO.File]::WriteAllText($script:ManagedRecordPath, (($record | ConvertTo-Json -Depth 5) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Remove-ManagedServerRecord {
+    if (-not (Test-Path -LiteralPath $script:ManagedRecordPath -PathType Leaf)) { return }
+    try {
+        $record = Get-Content -Raw -LiteralPath $script:ManagedRecordPath | ConvertFrom-Json
+        if ([string]$record.ownerToken -eq $script:ManagedToken) { Remove-Item -LiteralPath $script:ManagedRecordPath -Force }
+    } catch {}
+}
+
+function Write-CrashRecord {
+    param([object]$ExitCode)
+    $crashRoot = Join-Path $script:StateRoot "crashes"
+    $null = New-Item -ItemType Directory -Path $crashRoot -Force
+    $record = [ordered]@{
+        schemaVersion = 1
+        recordedAt = [datetimeoffset]::UtcNow.ToString("o")
+        version = Get-ExpectedAppVersion
+        exitCode = $ExitCode
+        port = $Port
+        recovery = @("Open the Control Center and choose Start again.", "Run dependency repair if diagnostics report missing packages.", "Create a redacted support bundle if the crash repeats.")
+    }
+    $path = Join-Path $crashRoot ("server-crash-{0}.json" -f (Get-Date -Format "yyyyMMdd-HHmmssfff"))
+    [System.IO.File]::WriteAllText($path, (($record | ConvertTo-Json -Depth 5) + [Environment]::NewLine), (New-Object System.Text.UTF8Encoding($false)))
+}
 
 function New-CapturedProcess {
     param(
@@ -543,7 +622,7 @@ function Start-BlockwrightServer {
     $script:AutomaticStartFailure = $null
 
     $nodePath = Get-NodeExecutable
-    if ($null -eq $nodePath) { throw "Node.js was not found on PATH." }
+    if ($null -eq $nodePath) { throw "The packaged private Node.js runtime is missing. Reinstall or repair Blockwright; installed releases do not use machine-wide Node.js." }
     $appRoot = Join-Path $ResolvedPluginRoot "app"
     $entryPath = Get-ServerEntryPath
     if ($null -eq $entryPath) {
@@ -582,13 +661,24 @@ function Start-BlockwrightServer {
     $script:LastExitCode = $null
     $script:ServerStartedAt = Get-Date
     $entryArguments = Quote-NativeArgument $entryPath
+    $script:LocalMcpToken = New-LocalMcpToken
     $serverEnvironment = @{
         NODE_ENV = "production"
         __PORT = [string]$Port
         PORT = [string]$Port
         BLOCKWRIGHT_DATA_DIR = $dataRoot
+        BLOCKWRIGHT_STATE_ROOT = $script:StateRoot
+        BLOCKWRIGHT_STATE_DIR = $script:StateRoot
+        BLOCKWRIGHT_LOCAL_MCP_TOKEN = $script:LocalMcpToken
     }
-    $script:ServerHandle = New-CapturedProcess -FileName $nodePath -Arguments $entryArguments -WorkingDirectory $appRoot -Label "server" -EnvironmentVariables $serverEnvironment
+    try {
+        $script:ServerHandle = New-CapturedProcess -FileName $nodePath -Arguments $entryArguments -WorkingDirectory $appRoot -Label "server" -EnvironmentVariables $serverEnvironment
+    } catch {
+        $script:LocalMcpToken = $null
+        throw
+    }
+    $script:ExpectedServerStop = $false
+    Write-ManagedServerRecord
     Add-ControllerLog "Production entry: $entryPath (NODE_ENV=production, __PORT=$Port, PORT=$Port)."
     Add-ControllerLog "Started the standalone Blockwright HTTP/MCP server on 127.0.0.1:$Port (PID $($script:ServerHandle.Process.Id)). Codex-managed session servers are separate."
 }
@@ -619,10 +709,12 @@ function Stop-CapturedProcessTree {
 
 function Stop-BlockwrightServer {
     if (-not (Test-ProcessRunning $script:ServerHandle)) {
+        $script:LocalMcpToken = $null
         Add-ControllerLog "The server is already stopped."
         return
     }
     $stoppedProcessId = $script:ServerHandle.Process.Id
+    $script:ExpectedServerStop = $true
     Add-ControllerLog "Stopping Blockwright PID $stoppedProcessId and its managed worker..."
     Stop-CapturedProcessTree -Handle $script:ServerHandle
     $null = Drain-ProcessLogs -Handle $script:ServerHandle
@@ -637,6 +729,8 @@ function Stop-BlockwrightServer {
     $script:ServerIdentityDetail = $null
     $script:ServerReadinessDetail = $null
     $script:ServerStartedAt = $null
+    $script:LocalMcpToken = $null
+    Remove-ManagedServerRecord
     Add-ControllerLog "Blockwright stopped."
 }
 
@@ -665,6 +759,41 @@ function Start-DependencyMaintenance {
     $script:StartAfterMaintenance = [bool]$StartServerAfter
     $script:MaintenanceHandle = New-CapturedProcess -FileName $windowsPowerShell -Arguments $repairArguments -WorkingDirectory $ResolvedPluginRoot -Label "dependencies"
     Add-ControllerLog "Installing and validating packaged runtime dependencies under the shared cross-process lock (PID $($script:MaintenanceHandle.Process.Id))..."
+}
+
+function Start-BlockwrightUpdateProcess {
+    param([ValidateSet("check", "install")][string]$Mode)
+    if (Test-ProcessRunning $script:UpdateHandle) { throw "An update operation is already running." }
+    if (Test-ProcessRunning $script:MaintenanceHandle) { throw "Wait for dependency maintenance to finish before checking for updates." }
+    $updater = Join-Path $ResolvedPluginRoot "scripts\windows\Update-Blockwright.ps1"
+    if (-not (Test-Path -LiteralPath $updater -PathType Leaf)) { throw "The fail-closed Blockwright updater is missing: $updater" }
+    $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) { throw "Windows PowerShell was not found: $windowsPowerShell" }
+    if ($Mode -eq "install" -and (Test-ProcessRunning $script:ServerHandle)) { Stop-BlockwrightServer }
+    if ($Mode -eq "check" -and (Test-Path -LiteralPath $script:UpdateCheckPath -PathType Leaf)) { Remove-Item -LiteralPath $script:UpdateCheckPath -Force }
+    $updateArguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $(Quote-NativeArgument $updater) -InstallRoot $(Quote-NativeArgument $ResolvedPluginRoot) -StateRoot $(Quote-NativeArgument $script:StateRoot) -PassThru"
+    if ($Mode -eq "check") {
+        $updateArguments += " -CheckOnly"
+    } else {
+        $updateArguments += " -NoRelaunch"
+    }
+    $script:UpdateMode = $Mode
+    $script:UpdateHandle = New-CapturedProcess -FileName $windowsPowerShell -Arguments $updateArguments -WorkingDirectory $ResolvedPluginRoot -Label "update-$Mode"
+    if ($Mode -eq "check") {
+        Add-ControllerLog "Checking for an update asynchronously. Any candidate must pass HTTPS, size, checksum, version, and trusted Authenticode verification; nothing will be installed without confirmation."
+    } else {
+        Add-ControllerLog "Installing the user-confirmed, re-downloaded, and independently re-verified Blockwright update."
+    }
+}
+
+function Get-UpdateReportMessage {
+    param([string]$Path, [string]$Fallback)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $Fallback }
+    try {
+        $report = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+        if (-not [string]::IsNullOrWhiteSpace([string]$report.message)) { return [string]$report.message }
+    } catch {}
+    return $Fallback
 }
 
 function Get-ManagedProcessIds {
@@ -761,6 +890,63 @@ function Test-HttpEndpoint {
         return [pscustomobject]@{ Responded = $false; Successful = $false; StatusCode = $null; Body = $null }
     } catch {
         return [pscustomobject]@{ Responded = $false; Successful = $false; StatusCode = $null; Body = $null }
+    }
+}
+
+function Test-LocalMcpEndpoint {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$ExpectedVersion
+    )
+    if ([string]::IsNullOrWhiteSpace($script:LocalMcpToken)) {
+        return [pscustomobject]@{ Responded = $false; Successful = $false; StatusCode = $null; Detail = "the per-launch MCP credential is unavailable" }
+    }
+    try {
+        $request = [System.Net.HttpWebRequest]::Create($Url)
+        $request.Method = "POST"
+        $request.Timeout = 1000
+        $request.ReadWriteTimeout = 1000
+        $request.AllowAutoRedirect = $false
+        $request.ContentType = "application/json"
+        $request.Accept = "application/json, text/event-stream"
+        $request.Headers["Authorization"] = "Bearer $($script:LocalMcpToken)"
+        $payload = [Text.Encoding]::UTF8.GetBytes((@{
+            jsonrpc = "2.0"
+            id = "blockwright-control-center-ready"
+            method = "initialize"
+            params = @{
+                protocolVersion = "2025-03-26"
+                capabilities = @{}
+                clientInfo = @{ name = "blockwright-control-center"; version = $ControllerVersion }
+            }
+        } | ConvertTo-Json -Depth 8 -Compress))
+        $request.ContentLength = $payload.Length
+        $requestStream = $request.GetRequestStream()
+        try { $requestStream.Write($payload, 0, $payload.Length) } finally { $requestStream.Dispose() }
+        $response = $request.GetResponse()
+        $statusCode = [int]$response.StatusCode
+        $body = Read-BoundedResponseBody -Stream $response.GetResponseStream()
+        $response.Close()
+        try {
+            $message = $body | ConvertFrom-Json
+            $serverInfo = Get-FirstPropertyValue -Object $message.result -Names @("serverInfo")
+            $name = [string](Get-FirstPropertyValue -Object $serverInfo -Names @("name"))
+            $version = [string](Get-FirstPropertyValue -Object $serverInfo -Names @("version"))
+            $verified = ($statusCode -ge 200 -and $statusCode -lt 300) -and ($name -ceq "blockwright") -and ($version -ceq $ExpectedVersion)
+            $detail = if ($verified) { "authenticated MCP initialize verified" } else { "MCP initialize identity mismatch (name '$name', version '$version')" }
+            return [pscustomobject]@{ Responded = $true; Successful = $verified; StatusCode = $statusCode; Detail = $detail }
+        } catch {
+            return [pscustomobject]@{ Responded = $true; Successful = $false; StatusCode = $statusCode; Detail = "MCP initialize did not return bounded JSON" }
+        }
+    } catch [System.Net.WebException] {
+        $statusCode = $null
+        if ($null -ne $_.Exception.Response) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+            $_.Exception.Response.Close()
+        }
+        return [pscustomobject]@{ Responded = ($null -ne $statusCode); Successful = $false; StatusCode = $statusCode; Detail = "authenticated MCP initialize failed" }
+    } catch {
+        return [pscustomobject]@{ Responded = $false; Successful = $false; StatusCode = $null; Detail = "authenticated MCP initialize was unreachable" }
     }
 }
 
@@ -909,14 +1095,18 @@ function Update-EndpointDiscovery {
                 $healthProbe = Test-HttpEndpoint -Url "$newEndpoint/health"
                 if ($healthProbe.Successful) {
                     $healthInfo = ConvertTo-HealthInfo $healthProbe.Body
-                    $script:ServerIdentityVerified = $healthInfo.Parsed -and ($healthInfo.Service -ceq "blockwright") -and
+                    $healthVerified = $healthInfo.Parsed -and ($healthInfo.Service -ceq "blockwright") -and
                         ($healthInfo.Status -ceq "ok") -and (-not [string]::IsNullOrWhiteSpace($expectedVersion)) -and
                         ($healthInfo.Version -ceq $expectedVersion)
-                    if ($script:ServerIdentityVerified) {
-                        $script:ServerIdentityDetail = $healthInfo.Summary
+                    if ($healthVerified) {
+                        $mcpProbe = Test-LocalMcpEndpoint -Url "$newEndpoint/mcp" -ExpectedVersion $expectedVersion
+                        $script:ServerIdentityVerified = [bool]$mcpProbe.Successful
+                        $script:ServerIdentityDetail = "$($healthInfo.Summary); $($mcpProbe.Detail)"
                     } elseif (-not $healthInfo.Parsed) {
+                        $script:ServerIdentityVerified = $false
                         $script:ServerIdentityDetail = "/health did not return valid bounded JSON"
                     } else {
+                        $script:ServerIdentityVerified = $false
                         $script:ServerIdentityDetail = "/health identity mismatch (service '$($healthInfo.Service)', status '$($healthInfo.Status)', version '$($healthInfo.Version)'; expected blockwright, ok, $expectedVersion)"
                     }
                 } else {
@@ -956,6 +1146,9 @@ function Complete-ExitedProcesses {
         if (-not (Test-ProcessRunning $script:ServerHandle)) {
             try { $script:LastExitCode = $script:ServerHandle.Process.ExitCode } catch {}
             Add-ControllerLog "The server process exited with code $script:LastExitCode."
+            if (-not $script:ExpectedServerStop) { Write-CrashRecord -ExitCode $script:LastExitCode }
+            Remove-ManagedServerRecord
+            $script:ExpectedServerStop = $false
             try { $script:ServerHandle.Process.Dispose() } catch {}
             $script:ServerHandle = $null
             $script:ServerBaseUrl = $null
@@ -966,6 +1159,7 @@ function Complete-ExitedProcesses {
             $script:ServerIdentityDetail = $null
             $script:ServerReadinessDetail = $null
             $script:ServerStartedAt = $null
+            $script:LocalMcpToken = $null
         }
     }
     if ($null -ne $script:MaintenanceHandle) {
@@ -988,6 +1182,51 @@ function Complete-ExitedProcesses {
                 }
             } elseif ($maintenanceExitCode -ne 0 -and $startAfterMaintenance) {
                 Add-ControllerLog "The server was not started because dependency maintenance failed."
+            }
+        }
+    }
+    if ($null -ne $script:UpdateHandle) {
+        $null = Drain-ProcessLogs -Handle $script:UpdateHandle
+        if (-not (Test-ProcessRunning $script:UpdateHandle)) {
+            $updateExitCode = 1
+            try { $updateExitCode = $script:UpdateHandle.Process.ExitCode } catch {}
+            try { $script:UpdateHandle.Process.Dispose() } catch {}
+            $completedMode = $script:UpdateMode
+            $script:UpdateHandle = $null
+            $script:UpdateMode = $null
+            if ($completedMode -eq "check" -and $updateExitCode -eq 0 -and (Test-Path -LiteralPath $script:UpdateCheckPath -PathType Leaf)) {
+                try {
+                    $check = Get-Content -Raw -LiteralPath $script:UpdateCheckPath | ConvertFrom-Json
+                    if ([bool]$check.updateAvailable) {
+                        Add-ControllerLog "A trusted Blockwright update is available: $($check.installedVersion) -> $($check.targetVersion)."
+                        if ($script:UiReady) {
+                            $choice = [System.Windows.MessageBox]::Show(
+                                "Blockwright $($check.targetVersion) is available and its installer passed checksum and trusted publisher verification.`n`nInstall it now? The installer will be downloaded and fully verified again. If the local server is running, it will be stopped first.",
+                                "Verified Blockwright update available", "YesNo", "Question")
+                            if ($choice -eq [System.Windows.MessageBoxResult]::Yes) {
+                                try { Start-BlockwrightUpdateProcess -Mode "install" } catch {
+                                    Add-ControllerLog "Update installation could not start: $($_.Exception.Message)"
+                                    [System.Windows.MessageBox]::Show($_.Exception.Message, "Blockwright update", "OK", "Error") | Out-Null
+                                }
+                            } else {
+                                Add-ControllerLog "Update installation was declined; no installed files were changed."
+                            }
+                        }
+                    } else {
+                        Add-ControllerLog "Blockwright $($check.installedVersion) is current; verified channel target is $($check.targetVersion)."
+                        if ($script:UiReady) { [System.Windows.MessageBox]::Show("Blockwright $($check.installedVersion) is up to date.", "Blockwright updates", "OK", "Information") | Out-Null }
+                    }
+                } catch {
+                    Add-ControllerLog "Update check completed, but its bounded result could not be read: $($_.Exception.Message)"
+                    if ($script:UiReady) { [System.Windows.MessageBox]::Show("The update check completed but its result could not be read. See Live logs for details.", "Blockwright updates", "OK", "Warning") | Out-Null }
+                }
+            } elseif ($completedMode -eq "install" -and $updateExitCode -eq 0) {
+                Add-ControllerLog "The verified Blockwright update installed successfully. Restart the Control Center to load the updated controller."
+                if ($script:UiReady) { [System.Windows.MessageBox]::Show("The verified Blockwright update installed successfully. Close and reopen the Control Center to load the new version.", "Blockwright update installed", "OK", "Information") | Out-Null }
+            } else {
+                $failure = Get-UpdateReportMessage -Path $script:UpdateFailurePath -Fallback "Update $completedMode exited with code $updateExitCode."
+                Add-ControllerLog "Update $completedMode failed: $failure"
+                if ($script:UiReady) { [System.Windows.MessageBox]::Show($failure, "Blockwright update failed", "OK", "Error") | Out-Null }
             }
         }
     }
@@ -1164,6 +1403,7 @@ $xaml = @'
       <Button x:Name="RestartButton" Content="Restart"/>
       <Button x:Name="InstallButton" Content="Install / repair runtime"/>
       <Button x:Name="RefreshButton" Content="Run checks"/>
+      <Button x:Name="UpdateButton" Content="Check for updates"/>
       <Button x:Name="OpenEndpointButton" Content="Open local app"/>
       <Button x:Name="OpenFolderButton" Content="Open plugin folder"/>
     </WrapPanel>
@@ -1234,9 +1474,20 @@ $xaml = @'
 
 $xmlReader = New-Object System.Xml.XmlNodeReader ([xml]$xaml)
 $window = [Windows.Markup.XamlReader]::Load($xmlReader)
+$windowIconPath = Join-Path $ResolvedPluginRoot "assets\blockwright-icon-v060.png"
+if (Test-Path -LiteralPath $windowIconPath -PathType Leaf) {
+    try {
+        $windowIcon = New-Object System.Windows.Media.Imaging.BitmapImage
+        $windowIcon.BeginInit()
+        $windowIcon.CacheOption = [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $windowIcon.UriSource = New-Object Uri($windowIconPath, [UriKind]::Absolute)
+        $windowIcon.EndInit()
+        $window.Icon = $windowIcon
+    } catch {}
+}
 $controlNames = @(
     "RootText", "StatusDot", "ServerStateText", "ServerStateDetailText", "StartButton", "StopButton", "RestartButton",
-    "InstallButton", "RefreshButton", "OpenEndpointButton", "OpenFolderButton", "PidText", "UptimeText", "EndpointText",
+    "InstallButton", "RefreshButton", "UpdateButton", "OpenEndpointButton", "OpenFolderButton", "PidText", "UptimeText", "EndpointText",
     "DiagnosticSummaryText", "ExitCodeText", "MainTabs", "DiagnosticTimestampText", "CopyDiagnosticsButton", "DiagnosticsGrid",
     "ClearLogsButton", "CopyLogsButton", "SaveLogsButton", "LogBox", "FooterText"
 )
@@ -1310,12 +1561,14 @@ function Update-UiState {
 
     $serverRunning = Test-ProcessRunning $script:ServerHandle
     $maintenanceRunning = Test-ProcessRunning $script:MaintenanceHandle
+    $updateRunning = Test-ProcessRunning $script:UpdateHandle
     $endpointHealthy = $serverRunning -and -not [string]::IsNullOrWhiteSpace($script:ServerBaseUrl) -and $script:ServerReady
 
     $script:StartButton.IsEnabled = (-not $serverRunning -and -not $maintenanceRunning)
     $script:StopButton.IsEnabled = $serverRunning
     $script:RestartButton.IsEnabled = ($serverRunning -and -not $maintenanceRunning)
-    $script:InstallButton.IsEnabled = (-not $serverRunning -and -not $maintenanceRunning)
+    $script:InstallButton.IsEnabled = (-not $serverRunning -and -not $maintenanceRunning -and -not $updateRunning)
+    $script:UpdateButton.IsEnabled = (-not $maintenanceRunning -and -not $updateRunning)
     $script:OpenEndpointButton.IsEnabled = $endpointHealthy
 
     if ($maintenanceRunning) {
@@ -1400,6 +1653,16 @@ $script:InstallButton.Add_Click({
     }
 })
 $script:RefreshButton.Add_Click({ Invoke-UiDiagnosticRefresh })
+$script:UpdateButton.Add_Click({
+    try {
+        Start-BlockwrightUpdateProcess -Mode "check"
+        $script:MainTabs.SelectedIndex = 1
+        Update-UiState
+    } catch {
+        Add-ControllerLog "Update check could not start: $($_.Exception.Message)"
+        [System.Windows.MessageBox]::Show($_.Exception.Message, "Blockwright updates", "OK", "Error") | Out-Null
+    }
+})
 $script:OpenEndpointButton.Add_Click({
     if (-not [string]::IsNullOrWhiteSpace($script:ServerBaseUrl)) {
         Start-Process $script:ServerBaseUrl
@@ -1434,17 +1697,61 @@ $script:SaveLogsButton.Add_Click({
     }
 })
 
+if (-not [string]::IsNullOrWhiteSpace($CaptureUiPath)) {
+    $capturePath = [System.IO.Path]::GetFullPath($CaptureUiPath)
+    if ([System.IO.Path]::GetExtension($capturePath) -ne ".png") { throw "Control Center UI capture output must be a .png file." }
+    $captureParent = Split-Path -Parent $capturePath
+    if (-not (Test-Path -LiteralPath $captureParent -PathType Container)) { $null = New-Item -ItemType Directory -Path $captureParent -Force }
+    $script:RootText.Text = "Render-only preview | stopped | no server or update operation started"
+    Invoke-UiDiagnosticRefresh
+    Update-UiState
+    $script:DiagnosticsGrid.Columns[3].Width = New-Object System.Windows.Controls.DataGridLength(440)
+    $script:DiagnosticsGrid.Columns[4].Width = New-Object System.Windows.Controls.DataGridLength(260)
+    $captureSize = New-Object System.Windows.Size(1180, 760)
+    $captureVisual = $window.Content
+    $captureVisual.Measure($captureSize)
+    $captureVisual.Arrange((New-Object System.Windows.Rect(0, 0, 1180, 760)))
+    $captureVisual.UpdateLayout()
+    $bitmap = New-Object System.Windows.Media.Imaging.RenderTargetBitmap(1180, 760, 96, 96, [System.Windows.Media.PixelFormats]::Pbgra32)
+    $bitmap.Render($captureVisual)
+    $encoder = New-Object System.Windows.Media.Imaging.PngBitmapEncoder
+    $encoder.Frames.Add([System.Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
+    $captureStream = [System.IO.File]::Open($capturePath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    try { $encoder.Save($captureStream) } finally { $captureStream.Dispose() }
+    Write-Output $capturePath
+    $window.Close()
+    exit 0
+}
+
 $timer = New-Object System.Windows.Threading.DispatcherTimer
 $timer.Interval = [TimeSpan]::FromMilliseconds(750)
 $timer.Add_Tick({ Update-UiState })
 
 $window.Add_ContentRendered({
     Add-ControllerLog "Control Center $ControllerVersion is ready."
+    if (-not [string]::IsNullOrWhiteSpace($OpenSchematic)) {
+        try {
+            $schematicPath = [System.IO.Path]::GetFullPath($OpenSchematic)
+            if (-not (Test-Path -LiteralPath $schematicPath -PathType Leaf) -or [System.IO.Path]::GetExtension($schematicPath) -ne ".schem") { throw "The associated .schem file is missing or invalid." }
+            [System.Windows.Clipboard]::SetText($schematicPath)
+            Add-ControllerLog "Schematic selected: $schematicPath. Its path was copied to the clipboard; use Import in the workbench to select it."
+        } catch { Add-ControllerLog "Associated schematic could not be prepared: $($_.Exception.Message)" }
+    }
     Invoke-UiDiagnosticRefresh
     Update-UiState
     $timer.Start()
 })
 $window.Add_Closing({
+    param($sender, $eventArgs)
+    if (Test-ProcessRunning $script:UpdateHandle) {
+        if ($script:UpdateMode -eq "install") {
+            $eventArgs.Cancel = $true
+            [System.Windows.MessageBox]::Show("Wait for the verified update installation to finish before closing the Control Center.", "Blockwright update in progress", "OK", "Information") | Out-Null
+            return
+        }
+        Add-ControllerLog "Stopping the in-progress update check before closing..."
+        Stop-CapturedProcessTree -Handle $script:UpdateHandle -GraceMilliseconds 1500
+    }
     $timer.Stop()
     if (Test-ProcessRunning $script:MaintenanceHandle) {
         Add-ControllerLog "Stopping dependency maintenance before closing..."

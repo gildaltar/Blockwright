@@ -1,7 +1,7 @@
 {
   "name": "blockwright",
-  "version": "0.5.0",
-  "description": "Version-aware Minecraft architect with adaptive palettes, unique seeded plans, state-aware 3D review, WorldEdit schematics, and safe local-world workflows.",
+  "version": "0.6.0",
+  "description": "Contract-driven Minecraft Java architect with deterministic plans, semantic verification, client review, and delivery-ready schematics.",
   "author": {
     "name": "Gildaltar",
     "url": "https://github.com/gildaltar"
@@ -13,8 +13,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Blockwright",
-    "shortDescription": "Plan and install exact Minecraft builds safely.",
-    "longDescription": "Blockwright interviews for exact palettes, checks build risk, generates distinct seeded architecture, audits and annotates state-aware 3D output, synchronizes Java registries, previews local textures, reads local world metadata, creates verified WorldEdit schematics, and includes native Windows controls and diagnostics for its local companion.",
+    "shortDescription": "Turn exact briefs into verified Java builds.",
+    "longDescription": "Blockwright turns measurable Minecraft Java briefs into deterministic build records, validates hard semantic requirements, supports region-scoped review and revision, exports Sponge and Litematica deliverables, and packages evidence that a client can inspect before installation.",
     "developerName": "Gildaltar",
     "category": "Developer Tools",
     "capabilities": [
@@ -23,21 +23,27 @@
       "Texture preview",
       "Adaptive palette studio",
       "Seeded architectural candidates",
+      "Fail-closed build contracts",
       "State-aware 3D build reviewer",
       "Whole-build structural audit",
-      "WorldEdit schematic import and export",
+      "Region-scoped revision history",
+      "Sponge and Litematica delivery exports",
       "Local world discovery",
-      "Native Windows server control and diagnostics"
+      "Private Windows runtime, updates, and diagnostics"
     ],
     "defaultPrompt": [
-      "Design a Java 26.2 survival base.",
-      "Review and annotate my latest build in 3D.",
-      "Find my worlds and install a WorldEdit schematic."
+      "Design a verified Java 26.2 survival base.",
+      "Audit my build contract and show every hard failure.",
+      "Revise one region and prepare a client delivery bundle."
     ],
     "brandColor": "#C87932",
+    "composerIcon": "./assets/github/blockwright-icon-v060.png",
+    "logo": "./assets/github/blockwright-icon-v060.png",
+    "logoDark": "./assets/github/blockwright-icon-v060.png",
     "screenshots": [
-      "./assets/workbench.png",
-      "./assets/mobile.png"
+      "./assets/github/landing-v060.png",
+      "./assets/github/reviewer-audit.png",
+      "./assets/github/windows-control-center.png"
     ]
   },
   "mcpServers": "./.mcp.json"

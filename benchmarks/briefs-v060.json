@@ -1,0 +1,2621 @@
+{
+  "schemaVersion": 1,
+  "classification": "synthetic internal acceptance corpus; not customer work",
+  "cases": [
+    {
+      "id": "BW060-001",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-001",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 15,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 0,
+          "y": 64,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-001",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-002",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-002",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 17,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 32,
+          "y": 65,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-002",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-003",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-003",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 19,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 64,
+          "y": 66,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-003",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-004",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-004",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 21,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 96,
+          "y": 64,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-004",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-005",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-005",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 23,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 128,
+          "y": 65,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-005",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-006",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-006",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 15,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 160,
+          "y": 66,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-006",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-007",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-007",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 17,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 192,
+          "y": 64,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-007",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-008",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-008",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 19,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 224,
+          "y": 65,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-008",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-009",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-009",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 21,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 256,
+          "y": 66,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-009",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-010",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-010",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 23,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 288,
+          "y": 64,
+          "z": 0
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-010",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-011",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-011",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 15,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 0,
+          "y": 65,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-011",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-012",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-012",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 17,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 32,
+          "y": 66,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-012",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-013",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-013",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 19,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 64,
+          "y": 64,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-013",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-014",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-014",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 21,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 96,
+          "y": 65,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-014",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-015",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-015",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 23,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 128,
+          "y": 66,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-015",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-016",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-016",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 15,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 160,
+          "y": 64,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-016",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-017",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-017",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 17,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 192,
+          "y": 65,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-017",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-018",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-018",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 19,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 224,
+          "y": 66,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-018",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-019",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-019",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 21,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 256,
+          "y": 64,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-019",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-020",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-020",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 23,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 288,
+          "y": 65,
+          "z": -32
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-020",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-021",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-021",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 15,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 0,
+          "y": 66,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-021",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-022",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-022",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 17,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 32,
+          "y": 64,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-022",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-023",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-023",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 19,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 64,
+          "y": 65,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-023",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-024",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-024",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 21,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 96,
+          "y": 66,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-024",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-025",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-025",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 23,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 128,
+          "y": 64,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-025",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-026",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-026",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 15,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 160,
+          "y": 65,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-026",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-027",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-027",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 17,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 192,
+          "y": 66,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-027",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-028",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-028",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 19,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 224,
+          "y": 64,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-028",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-029",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-029",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 21,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 256,
+          "y": 65,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-029",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-030",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-030",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 23,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 288,
+          "y": 66,
+          "z": -64
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-030",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-031",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-031",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 15,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 0,
+          "y": 64,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-031",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-032",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-032",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 17,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 32,
+          "y": 65,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-032",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-033",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-033",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 19,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 64,
+          "y": 66,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-033",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-034",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-034",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 21,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 96,
+          "y": 64,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-034",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-035",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-035",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 23,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 128,
+          "y": 65,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-035",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-036",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-036",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 15,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 160,
+          "y": 66,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-036",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-037",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-037",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 17,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 192,
+          "y": 64,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-037",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-038",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-038",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 19,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 224,
+          "y": 65,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-038",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-039",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-039",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 21,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 256,
+          "y": 66,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-039",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-040",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-040",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 23,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 288,
+          "y": 64,
+          "z": -96
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-040",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-041",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-041",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 15,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 0,
+          "y": 65,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-041",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-042",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-042",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 17,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 32,
+          "y": 66,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-042",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-043",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-043",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 19,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 64,
+          "y": 64,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-043",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-044",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-044",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 21,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 96,
+          "y": 65,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-044",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-045",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-045",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 23,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 128,
+          "y": 66,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-045",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-046",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-046",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 15,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 160,
+          "y": 64,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-046",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-047",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-047",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 17,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 192,
+          "y": 65,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-047",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-048",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-048",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 19,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 224,
+          "y": 66,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-048",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-049",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-049",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 21,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 256,
+          "y": 64,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-049",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-050",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-050",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 23,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 288,
+          "y": 65,
+          "z": -128
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-050",
+        "features": []
+      }
+    },
+    {
+      "id": "BW060-051",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-051",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 15,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 0,
+          "y": 66,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-051",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 1"
+        ]
+      }
+    },
+    {
+      "id": "BW060-052",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-052",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 17,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 32,
+          "y": 64,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-052",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 2"
+        ]
+      }
+    },
+    {
+      "id": "BW060-053",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-053",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 19,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 64,
+          "y": 65,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-053",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 3"
+        ]
+      }
+    },
+    {
+      "id": "BW060-054",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-054",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 21,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 96,
+          "y": 66,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-054",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 4"
+        ]
+      }
+    },
+    {
+      "id": "BW060-055",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-055",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 23,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 128,
+          "y": 64,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-055",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 5"
+        ]
+      }
+    },
+    {
+      "id": "BW060-056",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-056",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 15,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 160,
+          "y": 65,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-056",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 6"
+        ]
+      }
+    },
+    {
+      "id": "BW060-057",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-057",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 17,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 192,
+          "y": 66,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-057",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 7"
+        ]
+      }
+    },
+    {
+      "id": "BW060-058",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-058",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 19,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 224,
+          "y": 64,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-058",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 8"
+        ]
+      }
+    },
+    {
+      "id": "BW060-059",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-059",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 21,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 256,
+          "y": 65,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-059",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 9"
+        ]
+      }
+    },
+    {
+      "id": "BW060-060",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-060",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 23,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 288,
+          "y": 66,
+          "z": -160
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-060",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 10"
+        ]
+      }
+    },
+    {
+      "id": "BW060-061",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-061",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 15,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 0,
+          "y": 64,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-061",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 11"
+        ]
+      }
+    },
+    {
+      "id": "BW060-062",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-062",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 17,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 32,
+          "y": 65,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-062",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 12"
+        ]
+      }
+    },
+    {
+      "id": "BW060-063",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-063",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 19,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 64,
+          "y": 66,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-063",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 13"
+        ]
+      }
+    },
+    {
+      "id": "BW060-064",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-064",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 21,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 96,
+          "y": 64,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-064",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 14"
+        ]
+      }
+    },
+    {
+      "id": "BW060-065",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-065",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 23,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 128,
+          "y": 65,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-065",
+        "features": [
+          "warning: terrain context not supplied",
+          "aesthetic: deliberate silhouette study 15"
+        ]
+      }
+    },
+    {
+      "id": "BW060-066",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-066",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 15,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 160,
+          "y": 66,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-066",
+        "features": [
+          "hard: dragon statue variant 1"
+        ]
+      }
+    },
+    {
+      "id": "BW060-067",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-067",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 17,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 192,
+          "y": 64,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-067",
+        "features": [
+          "hard: dragon statue variant 2"
+        ]
+      }
+    },
+    {
+      "id": "BW060-068",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-068",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 19,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 224,
+          "y": 65,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-068",
+        "features": [
+          "hard: dragon statue variant 3"
+        ]
+      }
+    },
+    {
+      "id": "BW060-069",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-069",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 21,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 256,
+          "y": 66,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-069",
+        "features": [
+          "hard: dragon statue variant 4"
+        ]
+      }
+    },
+    {
+      "id": "BW060-070",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-070",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 23,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 288,
+          "y": 64,
+          "z": -192
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-070",
+        "features": [
+          "hard: dragon statue variant 5"
+        ]
+      }
+    },
+    {
+      "id": "BW060-071",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-071",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 15,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 0,
+          "y": 65,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-071",
+        "features": [
+          "hard: dragon statue variant 6"
+        ]
+      }
+    },
+    {
+      "id": "BW060-072",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-072",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 17,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 32,
+          "y": 66,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-072",
+        "features": [
+          "hard: dragon statue variant 7"
+        ]
+      }
+    },
+    {
+      "id": "BW060-073",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-073",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 19,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 64,
+          "y": 64,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-073",
+        "features": [
+          "hard: dragon statue variant 8"
+        ]
+      }
+    },
+    {
+      "id": "BW060-074",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-074",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 21,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 96,
+          "y": 65,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-074",
+        "features": [
+          "hard: dragon statue variant 9"
+        ]
+      }
+    },
+    {
+      "id": "BW060-075",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-075",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 23,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 128,
+          "y": 66,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-075",
+        "features": [
+          "hard: dragon statue variant 10"
+        ]
+      }
+    },
+    {
+      "id": "BW060-076",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-076",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 15,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 160,
+          "y": 64,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-076",
+        "features": [
+          "hard: dragon statue variant 11"
+        ]
+      }
+    },
+    {
+      "id": "BW060-077",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-077",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 17,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 192,
+          "y": 65,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-077",
+        "features": [
+          "hard: dragon statue variant 12"
+        ]
+      }
+    },
+    {
+      "id": "BW060-078",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-078",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 19,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 224,
+          "y": 66,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-078",
+        "features": [
+          "hard: dragon statue variant 13"
+        ]
+      }
+    },
+    {
+      "id": "BW060-079",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-079",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 21,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 256,
+          "y": 64,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-079",
+        "features": [
+          "hard: dragon statue variant 14"
+        ]
+      }
+    },
+    {
+      "id": "BW060-080",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-080",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 23,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 288,
+          "y": 65,
+          "z": -224
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-080",
+        "features": [
+          "hard: dragon statue variant 15"
+        ]
+      }
+    },
+    {
+      "id": "BW060-081",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-081",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 15,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 0,
+          "y": 66,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-081",
+        "features": [
+          "90 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-082",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-082",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 17,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 32,
+          "y": 64,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-082",
+        "features": [
+          "91 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-083",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-083",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 19,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 64,
+          "y": 65,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-083",
+        "features": [
+          "92 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-084",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-084",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 21,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 96,
+          "y": 66,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-084",
+        "features": [
+          "93 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-085",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-085",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 23,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 128,
+          "y": 64,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-085",
+        "features": [
+          "94 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-086",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-086",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 15,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 160,
+          "y": 65,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-086",
+        "features": [
+          "95 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-087",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-087",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 17,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 192,
+          "y": 66,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-087",
+        "features": [
+          "96 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-088",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-088",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 19,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 224,
+          "y": 64,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-088",
+        "features": [
+          "97 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-089",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-089",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 21,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 256,
+          "y": 65,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-089",
+        "features": [
+          "98 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-090",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-090",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 23,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 288,
+          "y": 66,
+          "z": -256
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-090",
+        "features": [
+          "99 lights"
+        ]
+      }
+    },
+    {
+      "id": "BW060-091",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-091",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 15,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 0,
+          "y": 64,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-091",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-092",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-092",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 17,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 32,
+          "y": 65,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-092",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-093",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-093",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 19,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 64,
+          "y": 66,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-093",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-094",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-094",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "tower",
+        "dimensions": {
+          "width": 21,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 96,
+          "y": 64,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-094",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-095",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-095",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "workshop",
+        "dimensions": {
+          "width": 23,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 128,
+          "y": 65,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-095",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-096",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-096",
+        "edition": "java",
+        "version": "26.2",
+        "style": "nordic",
+        "buildingType": "hall",
+        "dimensions": {
+          "width": 15,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 160,
+          "y": 66,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-096",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-097",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-097",
+        "edition": "java",
+        "version": "26.2",
+        "style": "japanese",
+        "buildingType": "courtyard",
+        "dimensions": {
+          "width": 17,
+          "depth": 13,
+          "height": 12
+        },
+        "origin": {
+          "x": 192,
+          "y": 64,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-097",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-098",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-098",
+        "edition": "java",
+        "version": "26.2",
+        "style": "modern",
+        "buildingType": "megabase",
+        "dimensions": {
+          "width": 19,
+          "depth": 15,
+          "height": 13
+        },
+        "origin": {
+          "x": 224,
+          "y": 65,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-098",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-099",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-099",
+        "edition": "java",
+        "version": "26.2",
+        "style": "medieval",
+        "buildingType": "house",
+        "dimensions": {
+          "width": 21,
+          "depth": 17,
+          "height": 14
+        },
+        "origin": {
+          "x": 256,
+          "y": 66,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-099",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    },
+    {
+      "id": "BW060-100",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "brief": {
+        "name": "Synthetic acceptance brief BW060-100",
+        "edition": "java",
+        "version": "26.2",
+        "style": "fantasy",
+        "buildingType": "temple",
+        "dimensions": {
+          "width": 23,
+          "depth": 19,
+          "height": 15
+        },
+        "origin": {
+          "x": 288,
+          "y": 64,
+          "z": -288
+        },
+        "blockBudget": 100000,
+        "seed": "benchmark-v060-100",
+        "features": [
+          "four cardinal 9-wide entrances"
+        ]
+      }
+    }
+  ]
+}

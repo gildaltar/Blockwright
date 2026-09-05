@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +20,22 @@ function assertSafeOutput(output) {
 
 function requirePath(path, message) {
   if (!existsSync(path)) throw new Error(message);
+}
+
+export function assertNoRedistributionRestrictedResourceArchives(packageRoot) {
+  const pending = [resolve(packageRoot)];
+  const forbidden = [];
+  while (pending.length) {
+    const directory = pending.pop();
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = resolve(directory, entry.name);
+      if (entry.name.toLowerCase().endsWith("-vanilla-resources.zip")) forbidden.push(relative(packageRoot, path));
+      if (entry.isDirectory()) pending.push(path);
+    }
+  }
+  if (forbidden.length) {
+    throw new Error(`Plugin package staging refused redistribution-restricted Minecraft resource archives: ${forbidden.sort().join(", ")}`);
+  }
 }
 
 export function createRuntimePackage(sourcePackage) {
@@ -56,11 +72,23 @@ function operatorFiles() {
   return [
     resolve(root, "scripts", "diagnose.mjs"),
     resolve(root, "scripts", "windows", "Blockwright-ControlCenter.ps1"),
+    resolve(root, "scripts", "windows", "Blockwright-Paths.psm1"),
+    resolve(root, "scripts", "windows", "Initialize-Blockwright.ps1"),
     resolve(root, "scripts", "windows", "Install-BlockwrightShortcut.ps1"),
     resolve(root, "scripts", "windows", "Invoke-BlockwrightRuntimeRepair.ps1"),
+    resolve(root, "scripts", "windows", "Launch-Blockwright-Mcp.cmd"),
     resolve(root, "scripts", "windows", "Launch-Blockwright-ControlCenter.cmd"),
     resolve(root, "scripts", "windows", "Launch-Blockwright-ControlCenter.vbs"),
+    resolve(root, "scripts", "windows", "New-BlockwrightSupportBundle.ps1"),
+    resolve(root, "scripts", "windows", "Open-BlockwrightSchematic.ps1"),
+    resolve(root, "scripts", "windows", "Register-BlockwrightCodex.ps1"),
+    resolve(root, "scripts", "windows", "Remove-BlockwrightOwnedState.ps1"),
+    resolve(root, "scripts", "windows", "Set-BlockwrightSchematicAssociation.ps1"),
+    resolve(root, "scripts", "windows", "Start-Blockwright-Portable.cmd"),
     resolve(root, "scripts", "windows", "Test-ControlCenter.ps1"),
+    resolve(root, "scripts", "windows", "Test-WindowsDistribution.ps1"),
+    resolve(root, "scripts", "windows", "Update-Blockwright.ps1"),
+    resolve(root, "scripts", "release", "windows-release.json"),
     resolve(root, "scripts", "windows", "README.md"),
   ];
 }
@@ -127,11 +155,10 @@ export function packagePlugin(output = defaultApp) {
   try {
     cpSync(dist, resolve(staging, "dist"), { recursive: true });
     cpSync(resolve(registryRoot, "26.2.registry.json"), resolve(staging, "data", "java", "26.2.registry.json"));
-    const resources = resolve(registryRoot, "26.2-vanilla-resources.zip");
-    if (existsSync(resources)) cpSync(resources, resolve(staging, "data", "java", "26.2-vanilla-resources.zip"));
     cpSync(resolve(root, "alpic.json"), resolve(staging, "alpic.json"));
     writeFileSync(resolve(staging, "package.json"), `${JSON.stringify(runtimePackage, null, 2)}\n`);
     writeFileSync(resolve(staging, "package-lock.json"), `${JSON.stringify(runtimeLock, null, 2)}\n`);
+    assertNoRedistributionRestrictedResourceArchives(staging);
 
     commitStagedPackage({ destination, staging, backup });
   } finally {

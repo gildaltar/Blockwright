@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, dirname, resolve } from "node:path";
@@ -449,10 +449,22 @@ export async function readPayload(response, {
   }
 }
 
-async function probeMcp(baseUrl, expectedVersion) {
+export function createLocalMcpToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+export function createAuthenticatedFetch(token, fetchImplementation = fetch) {
+  return (input, init = {}) => {
+    const headers = new Headers(init.headers);
+    headers.set("authorization", `Bearer ${token}`);
+    return fetchImplementation(input, { ...init, headers });
+  };
+}
+
+async function probeMcp(baseUrl, expectedVersion, token) {
   const response = await fetch(`${baseUrl}/mcp`, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
     body: JSON.stringify({ jsonrpc: "2.0", id: "blockwright-ready", method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "blockwright-bridge", version: expectedVersion } } }),
     signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
   });
@@ -466,23 +478,25 @@ async function probeMcp(baseUrl, expectedVersion) {
   }
 }
 
-async function probeReady(baseUrl, expectedVersion) {
+async function probeReady(baseUrl, expectedVersion, token) {
   try {
     const response = await fetch(`${baseUrl}/ready`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
     if (response.ok) {
       const body = await response.json();
-      return body.service === "blockwright" && body.version === expectedVersion && body.status === "ready";
+      if (body.service !== "blockwright" || body.version !== expectedVersion || body.status !== "ready") return false;
+      return probeMcp(baseUrl, expectedVersion, token);
     }
     if (response.status !== 404) return false;
   } catch {
     return false;
   }
-  return probeMcp(baseUrl, expectedVersion);
+  return probeMcp(baseUrl, expectedVersion, token);
 }
 
 async function startServer() {
   const manifest = await prepareRuntime();
   const port = await openPort();
+  const token = createLocalMcpToken();
   const entryPath = resolveRuntimeEntry();
   if (!entryPath) throw new Error("Blockwright runtime has no built entry point. Reinstall the plugin package.");
   let startupError;
@@ -495,6 +509,7 @@ async function startServer() {
       __PORT: String(port),
       PORT: String(port),
       BLOCKWRIGHT_DATA_DIR: resolve(appRoot, "data", "java"),
+      BLOCKWRIGHT_LOCAL_MCP_TOKEN: token,
     },
     detached: process.platform !== "win32",
     windowsHide: true,
@@ -522,9 +537,9 @@ async function startServer() {
     while (Date.now() < deadline) {
       if (startupError) throw startupError;
       if (exitCode !== undefined) throw new Error(`Blockwright local server exited during startup with code ${exitCode}.`);
-      if (await probeReady(baseUrl, String(manifest.version))) {
+      if (await probeReady(baseUrl, String(manifest.version), token)) {
         process.stderr.write(`Blockwright ${manifest.version} ready on isolated loopback port ${port}.\n`);
-        return `${baseUrl}/mcp`;
+        return { endpoint: `${baseUrl}/mcp`, token };
       }
       await new Promise((resolveWait) => setTimeout(resolveWait, 250));
     }
@@ -669,11 +684,15 @@ const boundedFetch = createBoundedFetch();
 let transportGeneration = 0;
 async function startHttpTransport() {
   const generation = transportGeneration;
-  const endpoint = await getEndpoint();
+  const { endpoint, token } = await getEndpoint();
   const transportPath = resolve(appRoot, "node_modules", "@modelcontextprotocol", "sdk", "dist", "esm", "client", "streamableHttp.js");
   if (!existsSync(transportPath)) throw new Error(`Blockwright MCP transport dependency is missing: ${transportPath}`);
   const { StreamableHTTPClientTransport } = await import(pathToFileURL(transportPath).href);
-  const transport = new StreamableHTTPClientTransport(new URL(endpoint), { fetch: boundedFetch });
+  const authorization = `Bearer ${token}`;
+  const transport = new StreamableHTTPClientTransport(new URL(endpoint), {
+    requestInit: { headers: { authorization } },
+    fetch: createAuthenticatedFetch(token, boundedFetch),
+  });
   await transport.start();
   if (shuttingDown || generation !== transportGeneration) {
     await transport.close();

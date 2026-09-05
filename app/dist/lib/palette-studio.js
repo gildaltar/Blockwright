@@ -1,8 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { MinecraftBlockTypes } from "@minecraft/vanilla-data";
 import { readJavaRegistry } from "./java-registry.js";
 export const PALETTE_ROLES = ["foundation", "wall", "frame", "roof", "trim", "glazing", "lighting", "doors", "railings", "accents", "landscaping"];
+const BEDROCK_BLOCK_IDS = new Set(Object.values(MinecraftBlockTypes));
+const MINECRAFT_BLOCK_ID = /^[a-z0-9_.-]+:[a-z0-9_./-]+$/;
 function statePath() {
     const appData = process.env.APPDATA || process.cwd();
     return resolve(process.env.BLOCKWRIGHT_STATE_DIR || resolve(appData, "Blockwright"), "palettes.json");
@@ -48,7 +51,7 @@ export function validatePaletteIdentifiers(edition, version, roles) {
         throw new Error(`Java ${version} is not synchronized. Run sync_java_version first.`);
     const allowed = new Set(registry?.blocks.map(({ id }) => id));
     const normalized = Object.fromEntries(Object.entries(roles).map(([role, block]) => [role, normalizeBlock(block)]));
-    const invalid = Object.entries(normalized).filter(([, block]) => edition === "java" ? !allowed.has(block) : !block.startsWith("minecraft:"));
+    const invalid = Object.entries(normalized).filter(([, block]) => !MINECRAFT_BLOCK_ID.test(block) || (edition === "java" ? !allowed.has(block) : !BEDROCK_BLOCK_IDS.has(block)));
     return { valid: invalid.length === 0, normalized, invalid: invalid.map(([role, block]) => ({ role: role, block: block })) };
 }
 export function defaultRolePalette(style, edition, version, overrides = {}) {

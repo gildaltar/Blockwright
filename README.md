@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/github/blockwright-hero.png" alt="A voxel pavilion emerging from precise Blockwright blueprint layers" width="100%" />
+  <img src="assets/github/blockwright-hero-v060.png" alt="A copper-and-teal Blockwright blueprint resolving into a Japanese Minecraft pavilion" width="100%" />
 </p>
 
 <h1 align="center">Blockwright</h1>
 
 <p align="center">
-  <strong>From build brief to exact <code>.schem</code> — with seeded planning, version-aware palettes, 3D review, and guarded WorldEdit installation.</strong>
+  <strong>Turn a measurable Minecraft brief into a deterministic Java build, fail-closed certificate, client review, and delivery-ready schematic.</strong>
 </p>
 
 <p align="center">
@@ -22,20 +22,26 @@
   <a href="https://github.com/gildaltar/Blockwright/releases/latest">Latest release</a>
 </p>
 
-<p align="center"><sub>Original Blockwright artwork. The product captures below come from a live local v0.5.0 build.</sub></p>
+<p align="center"><sub>Original v0.6.0 Blockwright artwork. Illustrative art is labeled separately from live product captures.</sub></p>
 
 > [!NOTE]
 > Blockwright is an independent project. It is not an official Minecraft product and is not approved by or associated with Mojang or Microsoft.
 
 ## Design with intent. Ship with evidence.
 
-Blockwright is a local-first Minecraft build architect delivered as a Skybridge MCP/ChatGPT App, Codex plugin, and responsive React + Three.js workbench. It turns a constrained brief into one deterministic block record, then uses that same record for the model, counts, layers, audit, hash, and every export.
+Blockwright is a local-first Minecraft build architect delivered as a self-contained Windows app, portable package, Skybridge MCP/ChatGPT App, Codex plugin, and responsive React + Three.js workbench. It turns a constrained brief into one deterministic block record, then uses that same record for the model, counts, layers, semantic contract, version history, audit, hash, and every export.
 
 | Plan architecture | Inspect precisely |
 | --- | --- |
 | Seeded plans vary structure, circulation, rooms, roof language, and palette—not just surface blocks. | Select exact blocks or regions, inspect state and phase data, measure spans, search coordinates, and navigate audit findings. |
 | **Export real artifacts** | **Operate locally** |
-| Produce JSON, CSV, Java or Bedrock functions, Sponge v3 `.schem`, layer blueprints, and checksummed bundles. | Keep texture packs on-device, discover Java worlds read-only, and preview every WorldEdit install before confirmation. |
+| Produce JSON, CSV, functions, Sponge v3 `.schem`, experimental `.litematic`, material plans, certificates, and checksummed client bundles. | Keep texture packs on-device, autosave private projects, discover Java worlds read-only, and preview every WorldEdit install before confirmation. |
+
+<p align="center">
+  <img src="assets/github/landing-v060.png" alt="Live Blockwright v0.6 landing page with direct Windows download, portable release, and the verified-build product promise" width="100%" />
+</p>
+
+<p align="center"><sub>Live v0.6.0 product capture. Hosted account and checkout controls remain disabled unless their provider configuration is actually present.</sub></p>
 
 <p align="center">
   <img src="assets/github/workbench-v050.png" alt="Blockwright v0.5.0 workbench showing the Shinrinyoku Pavilion build, Java 26.2, design plan, safety preflight, layer controls, and role palette" width="100%" />
@@ -51,13 +57,14 @@ flowchart LR
     B --> C[Seeded architectural plan]
     C --> D[(Immutable placements + hash)]
     D --> E[3D workbench]
-    D --> F[Reviewer + structural audit]
-    D --> G[Commands, JSON, schem, ZIP]
-    G --> H[WorldEdit preview]
-    H --> I[Confirmed install]
+    D --> F[Semantic contract + certificate]
+    D --> G[Private project versions]
+    G --> H[Region revision + client review]
+    F --> I[schem, litematic, materials, ZIP]
+    I --> J[Guarded placement workflow]
 ```
 
-There is no decorative count and no second, looser export model. If a coordinate, material, layer, or hash appears in the interface, it comes from the canonical compiled record.
+There is no decorative count and no second, looser export model. If a coordinate, material, layer, contract result, version diff, or hash appears in the interface, it comes from the canonical compiled record. Unsupported hard requirements fail closed instead of being silently treated as complete.
 
 ## Review what was actually built
 
@@ -80,19 +87,24 @@ The dedicated reviewer is for decisions, not just orbiting a model. It understan
 Running Blockwright from a Windows PC does not require babysitting a terminal. The native WPF control center owns the local process it starts and exposes the information that matters while it is running.
 
 <p align="center">
-  <img src="assets/github/windows-control-center.png" alt="Native Blockwright Windows Control Center showing a running v0.5.0 server, local endpoint, uptime, lifecycle controls, and passing environment checks" width="100%" />
+  <img src="assets/github/windows-control-center.png" alt="Render-only Blockwright v0.6 Control Center preview in a truthful stopped state, showing environment checks and the confirmed Check for updates action" width="100%" />
 </p>
 
-<p align="center"><sub>Native UI during a real local v0.5.0 run. The repository-root label was generalized for this public capture.</sub></p>
+<p align="center"><sub>Real render-only v0.6.0 UI capture in a stopped disposable fixture. Rendering starts no server or update operation; the one warning records the intentionally absent production dependency tree in that fixture.</sub></p>
 
 - Start, stop, and restart the server without leaving orphaned child processes.
 - Verify Node.js/npm requirements, manifest alignment, packaged files, runtime dependencies, registries, MCP launch configuration, and generated-build synchronization.
 - Show health, readiness, PID, uptime, endpoint, exit state, timestamped live logs, and copy/save actions.
 - Repair the production-only runtime from the lockfile under a shared, ownership-checked maintenance lock.
+- Check the protected release channel asynchronously, verify transport, size, version, checksum, and the configured Authenticode publisher, then ask before downloading and verifying again for installation.
 
 Launch [`scripts/windows/Launch-Blockwright-ControlCenter.vbs`](scripts/windows/Launch-Blockwright-ControlCenter.vbs), or use the optional [shortcut installer](scripts/windows/README.md).
 
 ## Quick start
+
+For ordinary Windows use, install the latest [per-user Windows package](https://github.com/gildaltar/Blockwright/releases/latest/download/Blockwright-0.6.0-windows-x64-setup.exe) or extract the [portable package](https://github.com/gildaltar/Blockwright/releases/latest/download/Blockwright-0.6.0-windows-x64-portable.zip). Both carry a private pinned Node.js runtime and do not modify a machine-wide Node installation. These links become live when the signed v0.6.0 GitHub release is published.
+
+For source development:
 
 Requirements: Node.js 22.23.1 or newer and npm.
 
@@ -112,8 +124,8 @@ Open `http://localhost:3000`, run `compile_build`, then choose **Open workbench*
 | Local workbench + MCP | `npm run dev` |
 | ChatGPT App development | `npm run dev:tunnel`, then connect `{forwarding-url}/mcp` in ChatGPT Developer Mode |
 | Codex plugin | Use the checked-in `.codex-plugin/plugin.json`, bundled skill, local stdio bridge, and production workbench |
-| Native Windows app | Open `scripts/windows/Launch-Blockwright-ControlCenter.vbs` |
-| Container or hosted MCP | Build the included `Dockerfile`, or deploy the Skybridge server with your preferred compatible host |
+| Self-contained Windows app | Install the per-user package or run `scripts/windows/Start-Blockwright-Portable.cmd` from the extracted portable package |
+| Container or hosted MCP | Build the included `Dockerfile` and run the bounded Node listener with a persistent private volume; production serverless adapters deliberately refuse hosted mode |
 
 <p align="center">
   <img src="assets/mobile.png" alt="Blockwright responsive workbench at a compact viewport" width="360" />
@@ -129,24 +141,33 @@ Blockwright makes its compatibility boundary visible instead of treating “Mine
 | --- | --- |
 | Java registry | Included Java 26.2 registry: 1,198 namespaced block identifiers derived from the SHA-1-verified official client JAR |
 | Bedrock registry | Separate identifiers sourced from Microsoft's `@minecraft/vanilla-data`; Java and Bedrock identifiers are never mixed |
-| Textures | Resource-pack ZIPs and client JARs stay in the browser; Blockwright does not bundle or upload Mojang texture artwork |
+| Textures | Blockwright does not ship Mojang texture artwork. User-selected resource packs remain client-side; optional exact-version synchronization may derive a local ignored resource archive from a SHA-1-verified client JAR, but release packaging rejects that archive |
 | Schematic export | GZip-compressed Sponge Schematic v3, verified with WorldEdit CLI 7.4.4 against Java 26.2 data |
+| Litematica export | Single-region Litematic v7 import/export is implemented with bounded NBT parsing; compatibility stays explicitly `unverified` until a real Litematica open/place/re-save round trip is recorded |
 | World access | Java-world discovery is read-only; installation writes a reversible WorldEdit schematic only after preview and confirmation |
 | Direct save editing | Java Anvil editing, Bedrock LevelDB, and `.mcworld` writers are explicitly unavailable |
+| Hosted service | Accounts, tenant-isolated projects, expiring review links, deletion, quotas, and Stripe handoff are configuration-gated; production hosted mode fails readiness when billing, the trusted ingress-hop count, or a 32+ character registration access key is omitted. Registration is additionally bounded by global daily and total-tenant caps. An unbilled hosted development deployment requires the explicit `BLOCKWRIGHT_ALLOW_UNBILLED_HOSTED_DEVELOPMENT=1` escape hatch |
 
 See the [fidelity ledger](FIDELITY.md) for the visual/technical boundary and the [specification](SPEC.md) for acceptance criteria.
 
 <details>
-<summary><strong>What ships in v0.5.0</strong></summary>
+<summary><strong>What ships in v0.6.0</strong></summary>
 
-- 27 MCP tools with human-readable titles, parameter guidance, structured outputs, and invocation states.
+- A professional MCP workflow with human-readable titles, parameter guidance, structured outputs, invocation states, and private app-only payload helpers.
+- Compile and review views receive an immutable build shell plus at most 500 initial placements, then load remaining exact blocks sequentially through private pages of at most 5,000. Hosted pages come only from a 15-minute tenant-and-user-scoped cache; an expired or evicted view fails closed and asks for a fresh compile or review.
+- Hash-bound semantic contracts that audit entrances, clearance, spawn safety, requested spaces, explicit lighting, interiors, support, palette, version, origin, and budget; unsupported hard clauses block delivery.
+- Durable private projects with autosave, immutable version history, diffs, restore-as-new-version, selected-region revision, and exact-snapshot client review links.
 - Adaptive palette interviews, durable named palettes, exact-version validation, and role locking/replacement.
 - Seeded architectural candidates and modular courtyard, interlocking-volume, tower, and framed-hall generators.
 - Green/amber/red sizing preflight with volume, placements, chunks, regions, commands, and export-size estimates.
 - Live Java release checking and SHA-1-verified registry synchronization.
-- Real Sponge v3 import/export, Java and Bedrock functions, blueprints, CSV, JSON, and checksummed bundles.
+- Real Sponge v3 import/export, bounded Litematic v7 support, exact material lists, Java and Bedrock functions, blueprints, CSV, JSON, and checksummed delivery bundles.
 - Local Java-world discovery and atomic, re-verified WorldEdit installation.
+- A per-user Windows installer and portable ZIP with a pinned private runtime, SBOMs, SHA-256 manifests, updater verification, support bundles, optional Codex registration, and reversible `.schem` association.
+- Hosted browser foundations for identity, tenant-scoped storage, project creation and bounded inspection, immutable history comparison and restore, expiring review-link creation, account deletion, rate limits, telemetry controls, billing checkout/portal/invoice handoff, and refund requests—enabled only when operator configuration is complete.
+- A labeled 100-brief synthetic acceptance corpus. Real customer case studies remain an external launch requirement and are never fabricated.
 - Liveness at `/health`, readiness at `/ready`, and the Streamable HTTP MCP endpoint at `/mcp`.
+- PC-local production binds only to `127.0.0.1`; its bridge or Control Center creates a fresh in-memory 256-bit bearer token for every launch, and Host, Origin, token, declared body size, and ingress concurrency are checked before MCP JSON parsing. Hosted v0.6 runs only through the bounded production Node listener with a persistent volume and performs hosted MCP authentication/rate checks at the same pre-body boundary. Production Vercel and Cloudflare adapters fail closed until Blockwright has a durable hosted data adapter that can guarantee tenant isolation and deletion across requests.
 - A reusable Blockwright skill and a compiled Nordic Hearth Lodge example.
 
 </details>
@@ -155,6 +176,12 @@ See the [fidelity ledger](FIDELITY.md) for the visual/technical boundary and the
 <summary><strong>Project map</strong></summary>
 
 - `src/lib/compiler.ts` — deterministic voxel compiler.
+- `src/lib/contract.ts` — normalized fail-closed requirements, semantic evaluation, and hash-bound certificates.
+- `src/lib/projects.ts` — private projects, autosave, immutable versions, diffs, restore, and review tokens.
+- `src/lib/revision.ts` — selected-region replacement with outside-region preservation and contract revalidation.
+- `src/lib/litematic.ts` — bounded single-region Litematic v7 import/export.
+- `src/lib/delivery.ts` — exact material counts and checksummed professional delivery bundles.
+- `src/lib/hosted-service.ts` — hosted identity, tenant persistence, sessions, usage, deletion, and support records.
 - `src/lib/preflight.ts` — configurable size/resource risk estimation and confirmation tokens.
 - `src/lib/palette-studio.ts` — adaptive palette state and durable named palettes.
 - `src/lib/reviewer.ts` — whole-build state/contact/support/connection audit and portable review types.
@@ -175,12 +202,15 @@ See the [fidelity ledger](FIDELITY.md) for the visual/technical boundary and the
 
 ```bash
 npm test
+npm run benchmark:v060
 npm run sample
 npm run build
 npm run diagnose
 ```
 
-`npm run verify` runs the test suite, production build, plugin packaging, runtime-lock check, production dependency installation, and read-only diagnostics. CI also rejects packaged output that has drifted from source.
+`npm run verify` runs the test suite, production build, plugin packaging, runtime-lock check, production dependency installation, and read-only diagnostics. Windows release verification additionally checks the private runtime, SBOMs, hashes, signed-installer policy, install/upgrade/repair/uninstall lifecycle, and cleanup ownership boundaries. CI rejects packaged output that has drifted from source.
+
+Unsigned local packages are development artifacts. A public paid release still requires a real publisher certificate, protected signing configuration, final installer testing, and approval of the separate exact-ID publication workflow; direct UI publication is outside the verified release boundary. Protected/immutable release tags, GitHub immutable releases, custom-domain DNS, live Stripe credentials, WinGet submission, real Litematica interoperability, and consented customer case studies are separate external gates.
 
 ## Documentation
 

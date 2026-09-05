@@ -37,6 +37,57 @@ export type ValidationIssue = {
   coordinates?: Vec3[];
 };
 
+export type ContractClauseSeverity = "hard" | "warning" | "aesthetic";
+export type ContractClauseStatus = "pass" | "fail" | "unsupported" | "unevaluated" | "warning" | "observation";
+
+export type ContractClause = {
+  id: string;
+  severity: ContractClauseSeverity;
+  requirement: string;
+  source: "implicit" | "feature" | "override";
+  sourceText: string;
+  evaluator?: string;
+  supported: boolean;
+  parameters: Record<string, string | number | boolean | string[]>;
+};
+
+export type ContractCheckResult = {
+  clauseId: string;
+  severity: ContractClauseSeverity;
+  status: ContractClauseStatus;
+  requirement: string;
+  evaluator?: string;
+  message: string;
+  expected?: string;
+  actual?: string;
+  coordinates?: Vec3[];
+};
+
+export type BuildCertificate = {
+  schemaVersion: 1;
+  evaluatorVersion: string;
+  buildId: string;
+  buildHash: string;
+  status: "valid" | "invalid";
+  hard: { passed: number; failed: number; unsupported: number; unevaluated: number };
+  warningCount: number;
+  aestheticObservationCount: number;
+  text: string;
+};
+
+export type BuildContractResult = {
+  schemaVersion: 1;
+  evaluatorVersion: string;
+  buildHash: string;
+  status: "valid" | "invalid";
+  normalizedClauses: ContractClause[];
+  hardResults: ContractCheckResult[];
+  warnings: ContractCheckResult[];
+  aestheticObservations: ContractCheckResult[];
+  summary: { passed: number; failed: number; unsupported: number; unevaluated: number };
+  certificate: BuildCertificate;
+};
+
 export type RiskLevel = "green" | "amber" | "red";
 
 export type BuildPreflight = {
@@ -118,6 +169,8 @@ export type BuildRecord = {
     worldVersion?: number;
     note?: string;
   };
+  contract: BuildContractResult;
+  certificate: BuildCertificate;
   createdAt: string;
 };
 

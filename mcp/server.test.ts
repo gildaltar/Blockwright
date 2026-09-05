@@ -1,15 +1,18 @@
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { tmpdir } from "node:os";
+import { connect as connectSocket, createServer } from "node:net";
+import { networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { describe, expect, it } from "vitest";
+import { isStrongLocalMcpToken, mcpRequestTargetDisposition, trustedClientAddress } from "../src/lib/runtime-listener.js";
 import {
   appRoot,
   compareVersions,
+  createAuthenticatedFetch,
   createBoundedFetch,
   createBridgeForwarder,
+  createLocalMcpToken,
   createRestartable,
   minimumNodeVersion,
   readPayload,
@@ -21,6 +24,8 @@ import {
   runtimeEntryCandidates,
   withRuntimeRepairLock,
 } from "./server.mjs";
+
+const LOCAL_TEST_TOKEN = "bw_test_local_mcp_token_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
 function unusedPort() {
   return new Promise<number>((resolvePort, reject) => {
@@ -40,6 +45,55 @@ async function waitForExit(processHandle: ReturnType<typeof spawn>, timeoutMs = 
     new Promise<void>((resolveExit) => processHandle.once("exit", () => resolveExit())),
     new Promise((_, reject) => setTimeout(() => reject(new Error("Child process did not exit in time.")), timeoutMs)),
   ]);
+}
+
+function canConnect(host: string, port: number, timeoutMs = 750) {
+  return new Promise<boolean>((resolveConnection) => {
+    const socket = connectSocket({ host, port });
+    let settled = false;
+    const settle = (connected: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolveConnection(connected);
+    };
+    socket.setTimeout(timeoutMs, () => settle(false));
+    socket.once("connect", () => settle(true));
+    socket.once("error", () => settle(false));
+  });
+}
+
+function nonLoopbackIpv4Addresses() {
+  return [...new Set(Object.values(networkInterfaces()).flatMap((entries) => entries ?? [])
+    .filter(({ family, internal, address }) => (family === "IPv4" || family === 4) && !internal && address !== "0.0.0.0")
+    .map(({ address }) => address))];
+}
+
+function rawHttpExchange(port: number, request: string, timeoutMs = 1_000) {
+  return new Promise<string>((resolveResponse, reject) => {
+    const socket = connectSocket({ host: "127.0.0.1", port });
+    let response = "";
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error("Raw local HTTP request timed out."));
+    }, timeoutMs);
+    const finish = () => {
+      clearTimeout(timeout);
+      socket.destroy();
+      resolveResponse(response);
+    };
+    socket.setEncoding("utf8");
+    socket.once("connect", () => socket.write(request));
+    socket.on("data", (chunk) => {
+      response += chunk;
+      if (response.includes("\r\n\r\n")) finish();
+    });
+    socket.once("end", finish);
+    socket.once("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+  });
 }
 
 function waitForMessage(messages: any[], predicate: (message: any) => boolean, timeoutMs = 12_000) {
@@ -62,6 +116,45 @@ function waitForMessage(messages: any[], predicate: (message: any) => boolean, t
 }
 
 describe("Blockwright stdio bridge helpers", () => {
+  it("creates strong per-launch tokens and overwrites caller-supplied authorization", async () => {
+    const first = createLocalMcpToken();
+    const second = createLocalMcpToken();
+    expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(second).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(second).not.toBe(first);
+    let authorization: string | null = null;
+    const authenticated = createAuthenticatedFetch(first, async (_input: RequestInfo | URL, init?: RequestInit) => {
+      authorization = new Headers(init?.headers).get("authorization");
+      return new Response("ok");
+    });
+    await authenticated("http://127.0.0.1/mcp", { headers: { authorization: "Bearer attacker-value" } });
+    expect(authorization).toBe(`Bearer ${first}`);
+    expect(isStrongLocalMcpToken(first)).toBe(true);
+    expect(isStrongLocalMcpToken("short-or-predictable")).toBe(false);
+  });
+
+  it("derives hosted ingress identity only through the configured valid proxy chain", () => {
+    const request = {
+      socket: { remoteAddress: "10.0.0.9" },
+      headers: { "x-forwarded-for": "203.0.113.41, 10.0.0.8" },
+    } as any;
+    expect(trustedClientAddress(request, 0)).toBe("10.0.0.9");
+    expect(trustedClientAddress(request, 1)).toBe("10.0.0.8");
+    expect(trustedClientAddress(request, 2)).toBe("203.0.113.41");
+    expect(trustedClientAddress({ ...request, headers: { "x-forwarded-for": "not-an-ip, 10.0.0.8" } } as any, 2)).toBe("10.0.0.9");
+    expect(trustedClientAddress({ ...request, headers: { "x-forwarded-for": "203.0.113.41" } } as any, 2)).toBe("10.0.0.9");
+  });
+
+  it("accepts only canonical MCP targets and fails closed on mount aliases", () => {
+    expect(mcpRequestTargetDisposition("/mcp")).toBe("canonical");
+    expect(mcpRequestTargetDisposition("/mcp/?transport=streamable-http")).toBe("trailing-slash");
+    for (const target of ["/MCP", "/mcp/session", "/mcp//", "/%6dcp", "/mcp%2Fsession", "/mcp%252Fsession", "/safe/%2e%2e/mcp", "/mcp\\session"]) {
+      expect(mcpRequestTargetDisposition(target), target).toBe("invalid");
+    }
+    expect(mcpRequestTargetDisposition("/api/mcp")).toBe("other");
+    expect(mcpRequestTargetDisposition("/mcp.example")).toBe("other");
+  });
+
   it("compares runtime versions numerically", () => {
     expect(compareVersions("22.23.1", "22.23.1")).toBe(0);
     expect(compareVersions("24.0.0", "22.23.1")).toBe(1);
@@ -453,6 +546,7 @@ describe("Blockwright stdio bridge helpers", () => {
           __PORT: String(port),
           PORT: String(port),
           BLOCKWRIGHT_DATA_DIR: resolve(bridgeRoot, "data", "java"),
+          BLOCKWRIGHT_LOCAL_MCP_TOKEN: LOCAL_TEST_TOKEN,
         },
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
@@ -476,12 +570,183 @@ describe("Blockwright stdio bridge helpers", () => {
       const readyResponse = await fetch(`http://127.0.0.1:${port}/ready`, { signal: AbortSignal.timeout(2_000) });
       expect(readyResponse.status).toBe(200);
       expect(await readyResponse.json()).toMatchObject({ service: "blockwright", status: "ready", checks: { registry: { ok: true }, assets: { ok: true } } });
+
+      const unauthorizedBeforeBody = await rawHttpExchange(port, [
+        "POST /mcp HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        "Content-Type: application/json",
+        "Content-Length: 1048576",
+        "Connection: close",
+        "",
+        "",
+      ].join("\r\n"));
+      expect(unauthorizedBeforeBody).toMatch(/^HTTP\/1\.1 401 /);
+
+      const absoluteFormTarget = await rawHttpExchange(port, [
+        `POST http://localhost:${port}/mcp HTTP/1.1`,
+        `Host: 127.0.0.1:${port}`,
+        "Content-Type: application/json",
+        "Content-Length: 1048576",
+        "Connection: close",
+        "",
+        "",
+      ].join("\r\n"));
+      expect(absoluteFormTarget).toMatch(/^HTTP\/1\.1 400 /);
+
+      const unauthorizedTrailingSlashBeforeBody = await rawHttpExchange(port, [
+        "POST /mcp/ HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        "Content-Type: application/json",
+        "Content-Length: 1048576",
+        "Connection: close",
+        "",
+        "",
+      ].join("\r\n")).catch((error) => { throw new Error(`unauthenticated /mcp/: ${error instanceof Error ? error.message : String(error)}`); });
+      expect(unauthorizedTrailingSlashBeforeBody).toMatch(/^HTTP\/1\.1 401 /);
+
+      const unexpectedMcpSubpath = await rawHttpExchange(port, [
+        "POST /mcp/session HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        "Content-Type: application/json",
+        "Content-Length: 1048576",
+        "Connection: close",
+        "",
+        "",
+      ].join("\r\n")).catch((error) => { throw new Error(`unexpected /mcp subpath: ${error instanceof Error ? error.message : String(error)}`); });
+      expect(unexpectedMcpSubpath).toMatch(/^HTTP\/1\.1 404 /);
+
+      const hostileHost = await rawHttpExchange(port, [
+        "POST /mcp HTTP/1.1",
+        "Host: attacker.example",
+        `Authorization: Bearer ${LOCAL_TEST_TOKEN}`,
+        "Content-Type: application/json",
+        "Content-Length: 2",
+        "Connection: close",
+        "",
+        "{}",
+      ].join("\r\n"));
+      expect(hostileHost).toMatch(/^HTTP\/1\.1 403 /);
+
+      const hostileOrigin = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${LOCAL_TEST_TOKEN}`, origin: "https://attacker.example" },
+        body: "{}",
+      });
+      expect(hostileOrigin.status).toBe(403);
+
+      const authenticatedMcp = await fetch(`http://127.0.0.1:${port}/mcp/`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${LOCAL_TEST_TOKEN}` },
+        body: JSON.stringify({ jsonrpc: "2.0", id: "loopback-runtime-test", method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "loopback-runtime-test", version: "1" } } }),
+      });
+      expect(authenticatedMcp.status).toBe(200);
+      expect(await authenticatedMcp.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.6.0" } } });
+
+      for (let attempt = 0; attempt < 70; attempt += 1) {
+        const unguarded = await fetch(`http://127.0.0.1:${port}/not-an-ingress-route`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        expect(unguarded.status).not.toBe(429);
+        await unguarded.arrayBuffer();
+      }
+      for (let attempt = 0; attempt < 59; attempt += 1) {
+        const guarded = await fetch(`http://127.0.0.1:${port}/api/not-a-route`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+        });
+        expect(guarded.status).not.toBe(429);
+        await guarded.arrayBuffer();
+      }
+      const perClientLimited = await fetch(`http://127.0.0.1:${port}/api/not-a-route`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(perClientLimited.status).toBe(429);
+      expect(await perClientLimited.json()).toMatchObject({ error: expect.stringMatching(/this client/i) });
+
+      for (const address of nonLoopbackIpv4Addresses()) {
+        expect(await canConnect(address, port), `local production listener must not accept ${address}:${port}`).toBe(false);
+      }
     } finally {
       if (processHandle?.exitCode === null) processHandle.kill("SIGTERM");
       if (processHandle) await waitForExit(processHandle).catch(() => processHandle?.kill("SIGKILL"));
       rmSync(temporary, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, 20_000);
+
+  it("fails closed before listening when local production has no per-launch MCP token", async () => {
+    const port = await unusedPort();
+    let processHandle: ReturnType<typeof spawn> | undefined;
+    let stderr = "";
+    try {
+      processHandle = spawn(process.execPath, [resolve(appRoot, "dist", "__entry.js")], {
+        cwd: appRoot,
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          __PORT: String(port),
+          PORT: String(port),
+          BLOCKWRIGHT_HOSTED_MODE: "0",
+          BLOCKWRIGHT_LOCAL_MCP_TOKEN: "",
+          BLOCKWRIGHT_DATA_DIR: resolve(bridgeRoot, "data", "java"),
+        },
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      processHandle.stderr?.on("data", (chunk) => { stderr += chunk; });
+      await waitForExit(processHandle, 5_000);
+      expect(processHandle.exitCode).not.toBe(0);
+      expect(stderr).toMatch(/requires a private .* per-launch token/i);
+      expect(await canConnect("127.0.0.1", port)).toBe(false);
+    } finally {
+      if (processHandle?.exitCode === null) processHandle.kill("SIGKILL");
+      if (processHandle) await waitForExit(processHandle).catch(() => undefined);
+    }
+  }, 10_000);
+
+  it("rejects production serverless adapters until durable hosted storage exists", () => {
+    const temporary = mkdtempSync(join(tmpdir(), "Blockwright serverless durability "));
+    const runServerless = (overrides: NodeJS.ProcessEnv) => spawnSync(process.execPath, [resolve(appRoot, "dist", "server.js")], {
+      cwd: appRoot,
+      env: {
+        ...process.env,
+        NODE_ENV: "production",
+        VERCEL: "1",
+        BLOCKWRIGHT_LOCAL_MCP_TOKEN: "",
+        ...overrides,
+      },
+      encoding: "utf8",
+      windowsHide: true,
+      timeout: 5_000,
+    });
+    try {
+      const disabled = runServerless({ BLOCKWRIGHT_HOSTED_MODE: "0" });
+      expect(disabled.status).not.toBe(0);
+      expect(disabled.stderr).toMatch(/requires a durable hosted data adapter.*persistent volume/i);
+      const fullyConfigured = runServerless({
+        BLOCKWRIGHT_HOSTED_MODE: "1",
+        BLOCKWRIGHT_DATABASE_PATH: resolve(temporary, "hosted.sqlite"),
+        BLOCKWRIGHT_PROJECT_ROOT: resolve(temporary, "projects"),
+        BLOCKWRIGHT_PUBLIC_URL: "https://blockwright.example",
+        BLOCKWRIGHT_SESSION_SECRET: "serverless-session-secret-used-only-by-tests-1234567890",
+        BLOCKWRIGHT_REVIEW_TOKEN_PEPPER: "serverless-review-pepper-used-only-by-tests-1234567890",
+        BLOCKWRIGHT_OPERATOR_TOKEN: "serverless-operator-token-used-only-by-tests-1234567890",
+        BLOCKWRIGHT_REGISTRATION_ACCESS_KEY: "serverless-registration-key-used-only-by-tests-1234567890",
+        BLOCKWRIGHT_TRUST_PROXY_HOPS: "0",
+        BLOCKWRIGHT_ALLOW_UNBILLED_HOSTED_DEVELOPMENT: "1",
+        STRIPE_SECRET_KEY: "",
+        STRIPE_STUDIO_PRICE_ID: "",
+      });
+      expect(fullyConfigured.status).not.toBe(0);
+      expect(fullyConfigured.stderr).toMatch(/requires a durable hosted data adapter.*persistent volume/i);
+    } finally {
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  });
 
   it("reports not-ready for a structurally truncated Java registry", async () => {
     const temporary = mkdtempSync(join(tmpdir(), "Blockwright invalid registry "));
@@ -496,7 +761,7 @@ describe("Blockwright stdio bridge helpers", () => {
       writeFileSync(resolve(dataRoot, "26.2.registry.json"), JSON.stringify({ schemaVersion: 1, edition: "java", version: "26.2" }));
       processHandle = spawn(process.execPath, [resolve(temporary, "dist", "__entry.js")], {
         cwd: temporary,
-        env: { ...process.env, NODE_ENV: "production", __PORT: String(port), PORT: String(port), BLOCKWRIGHT_DATA_DIR: dataRoot },
+        env: { ...process.env, NODE_ENV: "production", __PORT: String(port), PORT: String(port), BLOCKWRIGHT_DATA_DIR: dataRoot, BLOCKWRIGHT_LOCAL_MCP_TOKEN: LOCAL_TEST_TOKEN },
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -520,6 +785,572 @@ describe("Blockwright stdio bridge helpers", () => {
     }
   }, 15_000);
 
+  it("does not expose readiness exception details to unauthenticated callers", async () => {
+    const temporary = mkdtempSync(join(tmpdir(), "Blockwright readiness disclosure "));
+    const dataRoot = resolve(temporary, "private-registry-path-do-not-expose");
+    const port = await unusedPort();
+    let processHandle: ReturnType<typeof spawn> | undefined;
+    let stderr = "";
+    try {
+      cpSync(resolve(appRoot, "dist"), resolve(temporary, "dist"), { recursive: true });
+      symlinkSync(resolve(bridgeRoot, "node_modules"), resolve(temporary, "node_modules"), "junction");
+      writeFileSync(dataRoot, "this path is intentionally a file, not a registry directory");
+      processHandle = spawn(process.execPath, [resolve(temporary, "dist", "__entry.js")], {
+        cwd: temporary,
+        env: { ...process.env, NODE_ENV: "production", __PORT: String(port), PORT: String(port), BLOCKWRIGHT_DATA_DIR: dataRoot, BLOCKWRIGHT_LOCAL_MCP_TOKEN: LOCAL_TEST_TOKEN },
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      processHandle.stderr?.on("data", (chunk) => { stderr += chunk; });
+      let response: Response | undefined;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (processHandle.exitCode !== null) throw new Error(`Built entry exited early (${processHandle.exitCode}): ${stderr}`);
+        try {
+          response = await fetch(`http://127.0.0.1:${port}/ready`, { signal: AbortSignal.timeout(250) });
+          break;
+        } catch {
+          await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+        }
+      }
+      expect(response?.status).toBe(503);
+      const responseText = await response?.text();
+      expect(responseText).toBeTruthy();
+      expect(JSON.parse(responseText ?? "{}")).toMatchObject({
+        status: "not_ready",
+        checks: { registry: { ok: false, code: "registry_unavailable" } },
+      });
+      expect(responseText).not.toMatch(/private-registry-path-do-not-expose|ENOTDIR|scandir|\"detail\"/i);
+      expect(stderr).toMatch(/readiness diagnostic \(registry_unavailable\)/i);
+    } finally {
+      if (processHandle?.exitCode === null) processHandle.kill("SIGTERM");
+      if (processHandle) await waitForExit(processHandle).catch(() => processHandle?.kill("SIGKILL"));
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("requires Studio before parsing hosted MCP JSON when billing is configured", async () => {
+    const temporary = mkdtempSync(join(tmpdir(), "Blockwright paid MCP gate "));
+    const port = await unusedPort();
+    let processHandle: ReturnType<typeof spawn> | undefined;
+    let stderr = "";
+    try {
+      cpSync(resolve(bridgeRoot, "dist"), resolve(temporary, "dist"), { recursive: true });
+      symlinkSync(resolve(bridgeRoot, "node_modules"), resolve(temporary, "node_modules"), "junction");
+      processHandle = spawn(process.execPath, [resolve(temporary, "dist", "__entry.js")], {
+        cwd: temporary,
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          BLOCKWRIGHT_TRUST_PROXY_HOPS: "0",
+          __PORT: String(port),
+          PORT: String(port),
+          BLOCKWRIGHT_HOSTED_MODE: "1",
+          BLOCKWRIGHT_DATABASE_PATH: resolve(temporary, "hosted", "blockwright.sqlite"),
+          BLOCKWRIGHT_PROJECT_ROOT: resolve(temporary, "hosted", "projects"),
+          BLOCKWRIGHT_PUBLIC_URL: "https://blockwright.example",
+          BLOCKWRIGHT_SESSION_SECRET: "paid-session-secret-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_REVIEW_TOKEN_PEPPER: "paid-review-pepper-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_OPERATOR_TOKEN: "paid-operator-token-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_REGISTRATION_ACCESS_KEY: "paid-registration-key-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_SUPPORT_EMAIL: "support@blockwright.example",
+          STRIPE_SECRET_KEY: "sk_test_blockwright_mcp_gate",
+          STRIPE_STUDIO_PRICE_ID: "price_blockwright_studio_test",
+          BLOCKWRIGHT_DATA_DIR: resolve(bridgeRoot, "data", "java"),
+        },
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      processHandle.stderr?.on("data", (chunk) => { stderr += chunk; });
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (processHandle.exitCode !== null) throw new Error(`Paid hosted entry exited early (${processHandle.exitCode}): ${stderr}`);
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(250) });
+          if (response.ok) break;
+        } catch { /* listener not ready */ }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+      const registration = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "free-mcp@example.test", password: "long-test-password-123", tenantName: "Free MCP", accessKey: "paid-registration-key-used-only-by-tests-1234567890" }),
+      });
+      expect(registration.status, `paid registration: ${await registration.clone().text()}`).toBe(201);
+      const cookie = registration.headers.get("set-cookie")?.split(";", 1)[0];
+      const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json, text/event-stream", cookie: cookie! },
+        body: "{",
+      });
+      expect(response.status).toBe(402);
+      expect(await response.json()).toMatchObject({ ok: false, error: expect.stringMatching(/Studio subscription/i) });
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\nPaid hosted stderr:\n${stderr}`);
+    } finally {
+      if (processHandle?.exitCode === null) processHandle.kill("SIGTERM");
+      if (processHandle) await waitForExit(processHandle).catch(() => processHandle?.kill("SIGKILL"));
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("caps hosted build work per workspace before one tenant can exhaust the global budget", async () => {
+    const temporary = mkdtempSync(join(tmpdir(), "Blockwright global build budget "));
+    const port = await unusedPort();
+    let processHandle: ReturnType<typeof spawn> | undefined;
+    let stderr = "";
+    try {
+      cpSync(resolve(bridgeRoot, "dist"), resolve(temporary, "dist"), { recursive: true });
+      symlinkSync(resolve(bridgeRoot, "node_modules"), resolve(temporary, "node_modules"), "junction");
+      processHandle = spawn(process.execPath, [resolve(temporary, "dist", "__entry.js")], {
+        cwd: temporary,
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          BLOCKWRIGHT_TRUST_PROXY_HOPS: "0",
+          __PORT: String(port),
+          PORT: String(port),
+          BLOCKWRIGHT_HOSTED_MODE: "1",
+          BLOCKWRIGHT_ALLOW_UNBILLED_HOSTED_DEVELOPMENT: "1",
+          BLOCKWRIGHT_DATABASE_PATH: resolve(temporary, "hosted", "blockwright.sqlite"),
+          BLOCKWRIGHT_PROJECT_ROOT: resolve(temporary, "hosted", "projects"),
+          BLOCKWRIGHT_PUBLIC_URL: "https://blockwright.example",
+          BLOCKWRIGHT_SESSION_SECRET: "work-session-secret-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_REVIEW_TOKEN_PEPPER: "work-review-pepper-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_OPERATOR_TOKEN: "work-operator-token-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_REGISTRATION_ACCESS_KEY: "work-registration-key-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_SUPPORT_EMAIL: "support@blockwright.example",
+          BLOCKWRIGHT_RATE_REQUESTS: "100",
+          BLOCKWRIGHT_AUTH_RATE_REQUESTS: "10",
+          BLOCKWRIGHT_DATA_DIR: resolve(bridgeRoot, "data", "java"),
+        },
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      processHandle.stderr?.on("data", (chunk) => { stderr += chunk; });
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (processHandle.exitCode !== null) throw new Error(`Build-budget entry exited early (${processHandle.exitCode}): ${stderr}`);
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(250) });
+          if (response.ok) break;
+        } catch { /* listener not ready */ }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+      const registration = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "build-budget@example.test", password: "long-test-password-123", tenantName: "Build Budget", accessKey: "work-registration-key-used-only-by-tests-1234567890" }),
+      });
+      expect(registration.status, `build-budget registration: ${await registration.clone().text()}`).toBe(201);
+      const cookie = registration.headers.get("set-cookie")?.split(";", 1)[0];
+      const headers = { "content-type": "application/json", accept: "application/json, text/event-stream", cookie: cookie! };
+      const initialize = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ jsonrpc: "2.0", id: "global-build-init", method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "global-build-budget-test", version: "1.0.0" } } }),
+      });
+      expect(initialize.status).toBe(200);
+      const callTool = async (id: string, name: string, arguments_: Record<string, unknown>) => {
+        const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: arguments_ } }),
+        });
+        expect(response.status).toBe(200);
+        return response.json() as Promise<any>;
+      };
+      const firstCompile = await callTool("global-build-0", "compile_build", {
+        name: "Global 0",
+        edition: "java",
+        version: "26.2",
+        style: "nordic",
+        dimensions: { width: 5, depth: 5, height: 5 },
+        seed: "global-0",
+      });
+      expect(firstCompile.result?.isError, JSON.stringify(firstCompile)).not.toBe(true);
+      const firstSummary = firstCompile.result?.structuredContent?.build;
+      for (const [index, build] of [firstSummary, firstSummary.id, firstSummary].entries()) {
+        const cachedValidation = await callTool(`global-build-cache-${index}`, "validate_build", { build });
+        expect(cachedValidation.result?.isError, JSON.stringify(cachedValidation)).not.toBe(true);
+        expect(cachedValidation.result?.structuredContent).toMatchObject({ buildId: firstSummary.id, hash: firstSummary.hash });
+      }
+      for (let index = 1; index <= 10; index += 1) {
+        const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: `global-build-${index}`,
+            method: "tools/call",
+            params: { name: "compile_build", arguments: { name: `Global ${index}`, edition: "java", version: "26.2", style: "nordic", dimensions: { width: 5, depth: 5, height: 5 }, seed: `global-${index}` } },
+          }),
+        });
+        expect(response.status).toBe(200);
+        const payload = await response.json() as any;
+        if (index < 10) expect(payload.result?.isError).not.toBe(true);
+        else {
+          expect(payload.result?.isError).toBe(true);
+          expect(JSON.stringify(payload)).toMatch(/HOSTED_TENANT_BUILD_WORK_RATE_LIMITED/);
+        }
+      }
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\nBuild-budget stderr:\n${stderr}`);
+    } finally {
+      if (processHandle?.exitCode === null) processHandle.kill("SIGTERM");
+      if (processHandle) await waitForExit(processHandle).catch(() => processHandle?.kill("SIGKILL"));
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  }, 25_000);
+
+  it("authenticates, rate-limits, and bounds work before hosted MCP dispatch", async () => {
+    const temporary = mkdtempSync(join(tmpdir(), "Blockwright hosted MCP guard "));
+    const port = await unusedPort();
+    let processHandle: ReturnType<typeof spawn> | undefined;
+    let stderr = "";
+    try {
+      cpSync(resolve(bridgeRoot, "dist"), resolve(temporary, "dist"), { recursive: true });
+      symlinkSync(resolve(bridgeRoot, "node_modules"), resolve(temporary, "node_modules"), "junction");
+      processHandle = spawn(process.execPath, [resolve(temporary, "dist", "__entry.js")], {
+        cwd: temporary,
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          BLOCKWRIGHT_TRUST_PROXY_HOPS: "0",
+          __PORT: String(port),
+          PORT: String(port),
+          BLOCKWRIGHT_HOSTED_MODE: "1",
+          BLOCKWRIGHT_ALLOW_UNBILLED_HOSTED_DEVELOPMENT: "1",
+          BLOCKWRIGHT_DATABASE_PATH: resolve(temporary, "hosted", "blockwright.sqlite"),
+          BLOCKWRIGHT_PROJECT_ROOT: resolve(temporary, "hosted", "projects"),
+          BLOCKWRIGHT_PUBLIC_URL: "https://blockwright.example",
+          BLOCKWRIGHT_SESSION_SECRET: "hosted-session-secret-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_REVIEW_TOKEN_PEPPER: "hosted-review-pepper-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_OPERATOR_TOKEN: "hosted-operator-token-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_REGISTRATION_ACCESS_KEY: "hosted-registration-key-used-only-by-tests-1234567890",
+          BLOCKWRIGHT_SUPPORT_EMAIL: "support@blockwright.example",
+          // Leave room for bounded paging/cache assertions, then exhaust this
+          // budget explicitly at the end of the test.
+          BLOCKWRIGHT_RATE_REQUESTS: "50",
+          BLOCKWRIGHT_AUTH_RATE_REQUESTS: "2",
+          BLOCKWRIGHT_RATE_WINDOW_MS: "60000",
+          BLOCKWRIGHT_DATA_DIR: resolve(bridgeRoot, "data", "java"),
+        },
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      processHandle.stderr?.on("data", (chunk) => { stderr += chunk; });
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (processHandle.exitCode !== null) throw new Error(`Hosted entry exited early (${processHandle.exitCode}): ${stderr}`);
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(250) });
+          if (response.ok) break;
+        } catch {
+          // Startup probing is expected to fail until the listener binds.
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+
+      const mcpHeaders = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+      const initializeBody = {
+        jsonrpc: "2.0",
+        id: "hosted-init",
+        method: "initialize",
+        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "hosted-guard-test", version: "1.0.0" } },
+      };
+      const unauthorized = await fetch(`http://127.0.0.1:${port}/mcp`, { method: "POST", headers: mcpHeaders, body: JSON.stringify(initializeBody) });
+      expect(unauthorized.status).toBe(401);
+      expect(await unauthorized.json()).toMatchObject({ ok: false, error: expect.stringMatching(/sign in/i) });
+      const unauthorizedTrailingSlash = await rawHttpExchange(port, [
+        "POST /mcp/ HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        "Content-Type: application/json",
+        "Content-Length: 1048576",
+        "Connection: close",
+        "",
+        "",
+      ].join("\r\n"));
+      expect(unauthorizedTrailingSlash).toMatch(/^HTTP\/1\.1 401 /);
+      const unauthorizedRateLimited = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: mcpHeaders,
+        body: JSON.stringify({ ...initializeBody, id: "hosted-unauthorized-rate-limit" }),
+      });
+      expect(unauthorizedRateLimited.status).toBe(429);
+      expect(await unauthorizedRateLimited.json()).toMatchObject({ ok: false, error: expect.stringMatching(/too many/i), resetAt: expect.any(String) });
+
+      const registration = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "hosted-mcp@example.test", password: "long-test-password-123", tenantName: "Hosted MCP Test", accessKey: "hosted-registration-key-used-only-by-tests-1234567890" }),
+      });
+      expect(registration.status, `hosted guard registration: ${await registration.clone().text()}`).toBe(201);
+      const cookie = registration.headers.get("set-cookie")?.split(";", 1)[0];
+      expect(cookie).toMatch(/^bw_session=/);
+      const primaryAuthenticatedHeaders = { ...mcpHeaders, cookie: cookie! };
+      let authenticatedHeaders = primaryAuthenticatedHeaders;
+      const postMcp = (body: unknown) => fetch(`http://127.0.0.1:${port}/mcp`, { method: "POST", headers: authenticatedHeaders, body: JSON.stringify(body) });
+      const callHostedTool = async (id: string, name: string, arguments_: Record<string, unknown>) => {
+        const response = await postMcp({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: arguments_ } });
+        expect(response.status, `${id}: ${await response.clone().text()}`).toBe(200);
+        return response.json() as Promise<any>;
+      };
+
+      const oversizedTrailingSlash = await rawHttpExchange(port, [
+        "POST /mcp/ HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        `Cookie: ${cookie}`,
+        "Content-Type: application/json",
+        "Content-Length: 999999999",
+        "Connection: close",
+        "",
+        "",
+      ].join("\r\n"), 2_000);
+      expect(oversizedTrailingSlash).toMatch(/^HTTP\/1\.1 413 /);
+
+      const incompleteTrailingSlash = await rawHttpExchange(port, [
+        "POST /mcp/ HTTP/1.1",
+        `Host: 127.0.0.1:${port}`,
+        `Cookie: ${cookie}`,
+        "Content-Type: application/json",
+        "Content-Length: 64",
+        "Connection: close",
+        "",
+        "{",
+      ].join("\r\n"), 12_000);
+      expect(incompleteTrailingSlash).toMatch(/^HTTP\/1\.1 408 /);
+
+      const initialized = await postMcp(initializeBody);
+      expect(initialized.status).toBe(200);
+      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.6.0" } } });
+
+      const excessiveCandidates = await postMcp({
+        jsonrpc: "2.0",
+        id: "hosted-candidates",
+        method: "tools/call",
+        params: { name: "generate_build_candidates", arguments: { name: "Candidates", edition: "java", version: "26.2", style: "nordic", dimensions: { width: 9, depth: 9, height: 9 }, candidateCount: 3 } },
+      });
+      expect(excessiveCandidates.status).toBe(200);
+      expect(JSON.stringify(await excessiveCandidates.json())).toMatch(/HOSTED_CANDIDATE_LIMIT_EXCEEDED/);
+
+      const boundedCandidatesResponse = await postMcp({
+        jsonrpc: "2.0",
+        id: "hosted-bounded-candidate",
+        method: "tools/call",
+        params: { name: "generate_build_candidates", arguments: { name: "Bounded Candidate", edition: "java", version: "26.2", style: "nordic", dimensions: { width: 9, depth: 9, height: 9 }, candidateCount: 1 } },
+      });
+      expect(boundedCandidatesResponse.status).toBe(200);
+      const boundedCandidates = await boundedCandidatesResponse.json() as any;
+      expect(boundedCandidates.result?.isError, JSON.stringify(boundedCandidates)).not.toBe(true);
+      const candidateSummary = boundedCandidates.result?.structuredContent?.candidates?.[0]?.build;
+      expect(candidateSummary?.placements).toBeUndefined();
+      expect(boundedCandidates.result?._meta?.builds).toBeUndefined();
+      expect(boundedCandidates.result?._meta?.candidates?.[0]?.buildSummary).toMatchObject({ id: candidateSummary.id, hash: candidateSummary.hash });
+      expect(boundedCandidates.result?._meta?.candidates?.[0]?.buildPage?.returned).toBeLessThanOrEqual(500);
+      expect(boundedCandidates.result?._meta?.candidates?.[0]?.buildPage?.placements).toHaveLength(boundedCandidates.result?._meta?.candidates?.[0]?.buildPage?.returned);
+      const cachedCandidate = await callHostedTool("hosted-candidate-cache", "validate_build", { build: candidateSummary.id });
+      expect(cachedCandidate.result?.isError, JSON.stringify(cachedCandidate)).not.toBe(true);
+      expect(cachedCandidate.result?.structuredContent).toMatchObject({ buildId: candidateSummary.id, hash: candidateSummary.hash });
+
+      const excessiveBuild = await postMcp({
+        jsonrpc: "2.0",
+        id: "hosted-build-cap",
+        method: "tools/call",
+        params: { name: "compile_build", arguments: { name: "Excessive Hosted Build", edition: "java", version: "26.2", style: "nordic", dimensions: { width: 100, depth: 100, height: 30 } } },
+      });
+      expect(excessiveBuild.status).toBe(200);
+      expect(JSON.stringify(await excessiveBuild.json())).toMatch(/HOSTED_BUILD_LIMIT_EXCEEDED/);
+
+      const localPalette = await postMcp({ jsonrpc: "2.0", id: "hosted-local-palette", method: "tools/call", params: { name: "list_palettes", arguments: {} } });
+      expect(localPalette.status).toBe(200);
+      expect(JSON.stringify(await localPalette.json())).toMatch(/LOCAL_OPERATION_UNAVAILABLE/);
+      const localProjectMutation = await postMcp({ jsonrpc: "2.0", id: "hosted-local-project", method: "tools/call", params: { name: "create_project", arguments: { name: "Must not use process-local tenant storage" } } });
+      expect(localProjectMutation.status).toBe(200);
+      expect(JSON.stringify(await localProjectMutation.json())).toMatch(/LOCAL_OPERATION_UNAVAILABLE/);
+
+      const compileHostedBuild = async (id: string, name: string, dimensions: { width: number; depth: number; height: number }) => {
+        const response = await postMcp({
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: { name: "compile_build", arguments: { name, edition: "java", version: "26.2", style: "nordic", dimensions, seed: id } },
+        });
+        expect(response.status, `${id}: ${await response.clone().text()}`).toBe(200);
+        return response.json() as Promise<any>;
+      };
+      const largeCompiled = await compileHostedBuild("hosted-large-import-compile", "Hosted Import Envelope", { width: 100, depth: 100, height: 25 });
+      expect(largeCompiled.result?.isError, JSON.stringify(largeCompiled)).not.toBe(true);
+      const largeBuildSummary = largeCompiled.result?.structuredContent?.build;
+      expect(largeCompiled.result?._meta?.build).toBeUndefined();
+      expect(largeCompiled.result?._meta?.buildSummary).toMatchObject({ id: largeBuildSummary.id, hash: largeBuildSummary.hash, blockCount: largeBuildSummary.blockCount });
+      expect(largeCompiled.result?._meta?.buildPage).toMatchObject({ buildId: largeBuildSummary.id, offset: 0, total: largeBuildSummary.blockCount, returned: expect.any(Number) });
+      expect(largeCompiled.result?._meta?.buildPage?.returned).toBeLessThanOrEqual(500);
+      const hostedBuildPage = await callHostedTool("hosted-build-page", "get_build_chunk", { build: largeBuildSummary.id, offset: 0, limit: 5_000 });
+      expect(hostedBuildPage.result?.isError, JSON.stringify(hostedBuildPage)).not.toBe(true);
+      expect(hostedBuildPage.result?.structuredContent).toMatchObject({ buildId: largeBuildSummary.id, offset: 0, total: largeBuildSummary.blockCount });
+      expect(hostedBuildPage.result?._meta?.placements).toHaveLength(hostedBuildPage.result?.structuredContent?.returned);
+      const cachedIdAccepted = await callHostedTool("hosted-build-id-accept", "validate_build", { build: largeBuildSummary.id });
+      expect(cachedIdAccepted.result?.isError, JSON.stringify(cachedIdAccepted)).not.toBe(true);
+      expect(cachedIdAccepted.result?.structuredContent).toMatchObject({ buildId: largeBuildSummary.id, hash: largeBuildSummary.hash });
+      const hostedRenderPage = await callHostedTool("hosted-render-page", "render_build", { build: largeBuildSummary.id, offset: 3, limit: 17 });
+      expect(hostedRenderPage.result?.isError, JSON.stringify(hostedRenderPage)).not.toBe(true);
+      expect(hostedRenderPage.result?.structuredContent).toMatchObject({ buildId: largeBuildSummary.id, offset: 3, returned: 17, total: largeBuildSummary.blockCount, count: 17 });
+      expect(hostedRenderPage.result?._meta?.placements).toHaveLength(17);
+      const oversizedHostedArtifact = await callHostedTool("hosted-artifact-output-cap", "export_build", { build: largeBuildSummary.id, format: "json" });
+      expect(oversizedHostedArtifact.result?.isError).toBe(true);
+      expect(JSON.stringify(oversizedHostedArtifact)).toMatch(/HOSTED_ARTIFACT_OUTPUT_LIMIT_EXCEEDED/);
+      const largeExport = await callHostedTool("hosted-large-import-export", "export_build", { build: largeBuildSummary, format: "litematic" });
+      expect(largeExport.result?.isError, JSON.stringify(largeExport)).not.toBe(true);
+      const largeImport = await callHostedTool("hosted-large-import-reject", "import_schematic", { base64: largeExport.result?._meta?.base64, format: "litematic" });
+      expect(largeImport.result?.isError, JSON.stringify(largeImport)).toBe(true);
+      expect(JSON.stringify(largeImport)).toMatch(/HOSTED_IMPORT_LIMIT_EXCEEDED|100,000-block/i);
+
+      const secondaryRegistration = await fetch(`http://127.0.0.1:${port}/api/auth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "hosted-mcp-secondary@example.test", password: "long-test-password-456", tenantName: "Hosted MCP Secondary", accessKey: "hosted-registration-key-used-only-by-tests-1234567890" }),
+      });
+      expect(secondaryRegistration.status, `secondary registration: ${await secondaryRegistration.clone().text()}`).toBe(201);
+      const secondaryCookie = secondaryRegistration.headers.get("set-cookie")?.split(";", 1)[0];
+      expect(secondaryCookie).toMatch(/^bw_session=/);
+      authenticatedHeaders = { ...mcpHeaders, cookie: secondaryCookie! };
+
+      const crossTenantBuildPage = await callHostedTool("hosted-cross-tenant-build-page", "get_build_chunk", { build: largeBuildSummary.id, offset: 0, limit: 1 });
+      expect(crossTenantBuildPage.result?.isError).toBe(true);
+      expect(JSON.stringify(crossTenantBuildPage)).toMatch(/VIEW_BUILD_CACHE_MISS|reopen/i);
+      const crossTenantBuildId = await callHostedTool("hosted-cross-tenant-build-id", "validate_build", { build: largeBuildSummary.id });
+      expect(crossTenantBuildId.result?.isError).toBe(true);
+      expect(JSON.stringify(crossTenantBuildId)).toMatch(/VIEW_BUILD_CACHE_MISS|reopen/i);
+      const invalidHostedImport = await callHostedTool("hosted-invalid-import", "import_schematic", {
+        base64: Buffer.from("attacker-private-region-name").toString("base64"),
+        format: "litematic",
+      });
+      expect(invalidHostedImport.result?.isError).toBe(true);
+      expect(JSON.stringify(invalidHostedImport)).toMatch(/HOSTED_IMPORT_INVALID/);
+      expect(JSON.stringify(invalidHostedImport)).not.toMatch(/attacker-private-region-name|NBT|gzip/i);
+      const secondaryReview = await callHostedTool("hosted-secondary-review", "review_build", { build: largeBuildSummary });
+      expect(secondaryReview.result?.isError, JSON.stringify(secondaryReview)).not.toBe(true);
+      expect(secondaryReview.result?._meta?.build).toBeUndefined();
+      expect(secondaryReview.result?._meta?.buildSummary).toMatchObject({ id: largeBuildSummary.id, hash: largeBuildSummary.hash });
+      const secondaryReviewPage = await callHostedTool("hosted-secondary-review-page", "get_build_chunk", { build: largeBuildSummary.id, offset: 0, limit: 1 });
+      expect(secondaryReviewPage.result?.isError, JSON.stringify(secondaryReviewPage)).not.toBe(true);
+      expect(secondaryReviewPage.result?._meta?.placements).toHaveLength(1);
+
+      authenticatedHeaders = primaryAuthenticatedHeaders;
+      const smallCompiled = await compileHostedBuild("hosted-small-import-compile", "Hosted Summary Import", { width: 9, depth: 9, height: 9 });
+      expect(smallCompiled.result?.isError, JSON.stringify(smallCompiled)).not.toBe(true);
+      expect(smallCompiled.result?._meta?.build).toBeUndefined();
+      const smallBuildSummary = smallCompiled.result?.structuredContent?.build;
+      const smallBuildPlacements = [...smallCompiled.result?._meta?.buildPage?.placements ?? []];
+      while (smallBuildPlacements.length < smallBuildSummary.blockCount) {
+        const offset = smallBuildPlacements.length;
+        const page = await callHostedTool(`hosted-small-build-page-${offset}`, "get_build_chunk", { build: smallBuildSummary.id, offset, limit: 5_000 });
+        expect(page.result?.isError, JSON.stringify(page)).not.toBe(true);
+        expect(page.result?.structuredContent).toMatchObject({ buildId: smallBuildSummary.id, offset, total: smallBuildSummary.blockCount });
+        smallBuildPlacements.push(...page.result?._meta?.placements ?? []);
+      }
+      const smallBuild = { ...smallBuildSummary, placements: smallBuildPlacements };
+      expect(smallBuild.placements).toHaveLength(smallBuild.blockCount);
+      const revisionTarget = smallBuild.placements.find((placement: any) => !placement.blockEntity);
+      const oversizedPlacementMetadata = await callHostedTool("hosted-region-metadata-reject", "revise_build", {
+        build: smallBuildSummary.id,
+        region: { min: { x: revisionTarget.x, y: revisionTarget.y, z: revisionTarget.z }, max: { x: revisionTarget.x, y: revisionTarget.y, z: revisionTarget.z } },
+        replacementPlacements: [{ ...revisionTarget, phase: "x".repeat(129) }],
+      });
+      expect(oversizedPlacementMetadata.result?.isError).toBe(true);
+      const oversizedRegionRevision = await callHostedTool("hosted-region-envelope-reject", "revise_build", {
+        build: smallBuildSummary.id,
+        region: { min: { x: 0, y: 0, z: 0 }, max: { x: 50, y: 50, z: 50 } },
+        replacementPlacements: [{ ...revisionTarget }],
+      });
+      expect(oversizedRegionRevision.result?.isError).toBe(true);
+      expect(JSON.stringify(oversizedRegionRevision)).toMatch(/HOSTED_REVISION_LIMIT_EXCEEDED/);
+      const hostedRegionalRevision = await callHostedTool("hosted-region-revise", "revise_build", {
+        build: smallBuildSummary.id,
+        region: { min: { x: revisionTarget.x, y: revisionTarget.y, z: revisionTarget.z }, max: { x: revisionTarget.x, y: revisionTarget.y, z: revisionTarget.z } },
+        replacementPlacements: [{ ...revisionTarget, phase: `${revisionTarget.phase}-hosted-test` }],
+      });
+      expect(hostedRegionalRevision.result?.isError, JSON.stringify(hostedRegionalRevision)).not.toBe(true);
+      const hostedRegionalBuild = hostedRegionalRevision.result?.structuredContent?.build;
+      expect(hostedRegionalBuild?.placements).toBeUndefined();
+      expect(hostedRegionalRevision.result?._meta?.build).toBeUndefined();
+      expect(hostedRegionalRevision.result?._meta?.buildSummary).toMatchObject({ id: hostedRegionalBuild.id, hash: hostedRegionalBuild.hash });
+      expect(hostedRegionalRevision.result?._meta?.buildPage?.returned).toBeLessThanOrEqual(500);
+      expect(hostedRegionalRevision.result?._meta?.diff).toMatchObject({ addedCount: 0, removedCount: 0, changedCount: 1 });
+      expect(hostedRegionalRevision.result?._meta?.diff?.added).toBeUndefined();
+      expect(hostedRegionalRevision.result?._meta?.diff?.removed).toBeUndefined();
+      expect(hostedRegionalRevision.result?._meta?.diff?.changed).toBeUndefined();
+      const hostedRegionalMaterials = await callHostedTool("hosted-region-materials", "get_material_list", { build: hostedRegionalBuild.id });
+      expect(hostedRegionalMaterials.result?.isError, JSON.stringify(hostedRegionalMaterials)).not.toBe(true);
+      expect(hostedRegionalMaterials.result?.structuredContent).toMatchObject({ buildHash: hostedRegionalBuild.hash });
+
+      const hostedOrigin = "https://blockwright.example";
+      const hostedProjectResponse = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: cookie!, origin: hostedOrigin },
+        body: JSON.stringify({ name: "Verified delivery project", build: hostedRegionalBuild }),
+      });
+      expect(hostedProjectResponse.status, `hosted project: ${await hostedProjectResponse.clone().text()}`).toBe(201);
+      const hostedProject = await hostedProjectResponse.json() as any;
+      const hostedProjectId = hostedProject.project?.project?.id;
+      const hostedVersionId = hostedProject.project?.head?.id;
+      const reviewLinkResponse = await fetch(`http://127.0.0.1:${port}/api/projects/${hostedProjectId}/review-links`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie: cookie!, origin: hostedOrigin },
+        body: JSON.stringify({ versionId: hostedVersionId, expiresInSeconds: 3600 }),
+      });
+      expect(reviewLinkResponse.status, `review link: ${await reviewLinkResponse.clone().text()}`).toBe(201);
+      const reviewLink = await reviewLinkResponse.json() as any;
+      const reviewToken = new URL(reviewLink.link.url).hash.slice("#review=".length);
+      const reviewDecisionResponse = await fetch(`http://127.0.0.1:${port}/api/review/${reviewToken}/decision`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: hostedOrigin },
+        body: JSON.stringify({ actorId: "Client reviewer", decision: "approved", comment: "Approved exact hash" }),
+      });
+      expect(reviewDecisionResponse.status, `review decision: ${await reviewDecisionResponse.clone().text()}`).toBe(201);
+      const verifiedDelivery = await callHostedTool("hosted-verified-delivery", "create_delivery_bundle", { build: hostedRegionalBuild, format: "schem", reviewToken });
+      expect(verifiedDelivery.result?.isError, JSON.stringify(verifiedDelivery)).not.toBe(true);
+      expect(verifiedDelivery.result?._meta?.manifest?.files).toEqual(expect.arrayContaining([expect.objectContaining({ name: "review-approval.json" })]));
+
+      const smallExport = await callHostedTool("hosted-small-import-export", "export_build", { build: hostedRegionalBuild, format: "litematic" });
+      expect(smallExport.result?.isError, JSON.stringify(smallExport)).not.toBe(true);
+      const smallImport = await callHostedTool("hosted-small-import-summary", "import_schematic", { base64: smallExport.result?._meta?.base64, format: "litematic" });
+      expect(smallImport.result?.isError, JSON.stringify(smallImport)).not.toBe(true);
+      expect(smallImport.result?.structuredContent).toMatchObject({ format: "litematic", placementsIncluded: false, blockCount: hostedRegionalBuild.blockCount });
+      expect(smallImport.result?._meta).toMatchObject({ placementsOmitted: true, placementCount: hostedRegionalBuild.blockCount });
+      expect(smallImport.result?._meta?.placements).toBeUndefined();
+      expect(smallImport.result?._meta?.metadata).toBeUndefined();
+      expect(smallImport.result?._meta?.regions).toBeUndefined();
+
+      const hostedWholeRevision = await callHostedTool("hosted-whole-revise", "revise_build", {
+        build: hostedRegionalBuild.id,
+        changes: { seed: "hosted-whole-revision" },
+      });
+      expect(hostedWholeRevision.result?.isError, JSON.stringify(hostedWholeRevision)).not.toBe(true);
+      expect(hostedWholeRevision.result?.structuredContent).toMatchObject({ mode: "whole_build", previousHash: hostedRegionalBuild.hash, build: { id: expect.any(String), hash: expect.any(String) } });
+      expect(hostedWholeRevision.result?.structuredContent?.build?.placements).toBeUndefined();
+      expect(hostedWholeRevision.result?._meta?.build).toBeUndefined();
+      expect(hostedWholeRevision.result?._meta?.buildSummary).toMatchObject({ id: hostedWholeRevision.result?.structuredContent?.build?.id });
+      expect(hostedWholeRevision.result?._meta?.buildPage?.returned).toBeLessThanOrEqual(500);
+
+      let rateLimited: Response | undefined;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const response = await postMcp({ ...initializeBody, id: `hosted-rate-limit-${attempt}` });
+        if (response.status === 429) {
+          rateLimited = response;
+          break;
+        }
+        expect(response.status).toBe(200);
+        await response.arrayBuffer();
+      }
+      expect(rateLimited?.status).toBe(429);
+      expect(await rateLimited?.json()).toMatchObject({ ok: false, error: expect.stringMatching(/too many/i), resetAt: expect.any(String) });
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\nHosted stderr:\n${stderr}`);
+    } finally {
+      if (processHandle?.exitCode === null) processHandle.kill("SIGTERM");
+      if (processHandle) await waitForExit(processHandle).catch(() => processHandle?.kill("SIGKILL"));
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("bridges a real initialize and tools/list exchange over the SDK transport", async () => {
     const temporary = mkdtempSync(join(tmpdir(), "Blockwright bridge path with spaces "));
     const app = resolve(temporary, "app");
@@ -530,9 +1361,9 @@ describe("Blockwright stdio bridge helpers", () => {
       mkdirSync(app, { recursive: true });
       mkdirSync(mcp, { recursive: true });
       mkdirSync(resolve(app, "data"), { recursive: true });
-      cpSync(resolve(appRoot, "dist"), resolve(app, "dist"), { recursive: true });
+      cpSync(resolve(bridgeRoot, "dist"), resolve(app, "dist"), { recursive: true });
       const runtimePackage = JSON.parse(readFileSync(resolve(bridgeRoot, "app", "package.json"), "utf8"));
-      const builtServer = readFileSync(resolve(appRoot, "dist", "server.js"), "utf8");
+      const builtServer = readFileSync(resolve(bridgeRoot, "dist", "server.js"), "utf8");
       const runtimeVersion = /const APP_VERSION = "([^"]+)"/.exec(builtServer)?.[1];
       if (!runtimeVersion) throw new Error("Could not read the built Blockwright version for the bridge fixture.");
       runtimePackage.version = runtimeVersion;
@@ -543,6 +1374,11 @@ describe("Blockwright stdio bridge helpers", () => {
 
       processHandle = spawn(process.execPath, [resolve(mcp, "server.mjs")], {
         cwd: temporary,
+        env: {
+          ...process.env,
+          BLOCKWRIGHT_HOSTED_MODE: "0",
+          BLOCKWRIGHT_PROJECT_ROOT: resolve(temporary, "project-state"),
+        },
         windowsHide: true,
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -567,7 +1403,80 @@ describe("Blockwright stdio bridge helpers", () => {
       processHandle.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
       processHandle.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: "tools-test", method: "tools/list", params: {} })}\n`);
       const tools = await waitForMessage(messages, ({ id }) => id === "tools-test");
-      expect(tools.result?.tools).toHaveLength(27);
+      expect(tools.result?.tools).toHaveLength(37);
+      expect(tools.result?.tools).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          name: "validate_build_contract",
+          title: "Validate Build Contract",
+          inputSchema: expect.objectContaining({ properties: expect.objectContaining({ build: expect.any(Object), contract: expect.any(Object) }) }),
+          outputSchema: expect.objectContaining({ properties: expect.objectContaining({ contract: expect.any(Object) }) }),
+        }),
+      ]));
+      const assertInputPropertyDescriptions = (schema: any, toolName: string, path = "inputSchema") => {
+        if (!schema || typeof schema !== "object") return;
+        if (schema.properties && typeof schema.properties === "object") {
+          for (const [propertyName, propertySchema] of Object.entries(schema.properties) as [string, any][]) {
+            const propertyPath = `${path}.${propertyName}`;
+            expect(
+              typeof propertySchema.description === "string" && propertySchema.description.trim().length > 0,
+              `${toolName} ${propertyPath} should have a useful description`,
+            ).toBe(true);
+            assertInputPropertyDescriptions(propertySchema, toolName, propertyPath);
+          }
+        }
+        if (schema.items) assertInputPropertyDescriptions(schema.items, toolName, `${path}[]`);
+        for (const unionKey of ["anyOf", "oneOf", "allOf"] as const) {
+          if (Array.isArray(schema[unionKey])) {
+            schema[unionKey].forEach((branch: any, index: number) => assertInputPropertyDescriptions(branch, toolName, `${path}<${unionKey}:${index}>`));
+          }
+        }
+        if (schema.$defs && typeof schema.$defs === "object") {
+          for (const [definitionName, definition] of Object.entries(schema.$defs)) {
+            assertInputPropertyDescriptions(definition, toolName, `${path}<$defs:${definitionName}>`);
+          }
+        }
+      };
+
+      for (const tool of tools.result?.tools ?? []) {
+        expect(tool, `${tool.name} should expose the complete MCP presentation contract`).toMatchObject({
+          name: expect.any(String),
+          title: expect.any(String),
+          description: expect.any(String),
+          inputSchema: expect.objectContaining({ type: "object" }),
+          annotations: expect.objectContaining({
+            title: tool.title,
+            readOnlyHint: expect.any(Boolean),
+            openWorldHint: expect.any(Boolean),
+            destructiveHint: expect.any(Boolean),
+          }),
+          _meta: expect.objectContaining({
+            "openai/toolInvocation/invoking": expect.any(String),
+            "openai/toolInvocation/invoked": expect.any(String),
+          }),
+        });
+        assertInputPropertyDescriptions(tool.inputSchema, tool.name);
+      }
+      const professionalToolNames = [
+        "create_project",
+        "list_projects",
+        "get_project",
+        "save_project_version",
+        "diff_project_versions",
+        "restore_project_version",
+        "delete_project",
+        "get_material_list",
+        "create_delivery_bundle",
+      ];
+      for (const name of professionalToolNames) {
+        const tool = tools.result?.tools.find((candidate: any) => candidate.name === name);
+        expect(tool, `${name} should be advertised`).toBeDefined();
+      }
+      expect(tools.result?.tools.find((candidate: any) => candidate.name === "revise_build")?.inputSchema?.properties).toEqual(expect.objectContaining({ changes: expect.any(Object), region: expect.any(Object), replacementPlacements: expect.any(Object) }));
+      expect(tools.result?.tools.find((candidate: any) => candidate.name === "export_build")?.inputSchema?.properties?.format?.enum).toContain("litematic");
+      expect(tools.result?.tools.find((candidate: any) => candidate.name === "import_schematic")?.inputSchema?.properties?.format?.enum).toEqual(["auto", "schem", "litematic"]);
+      const deliveryInputProperties = tools.result?.tools.find((candidate: any) => candidate.name === "create_delivery_bundle")?.inputSchema?.properties;
+      expect(deliveryInputProperties).toEqual(expect.objectContaining({ reviewToken: expect.any(Object) }));
+      expect(deliveryInputProperties?.reviewApproval).toBeUndefined();
       const callTool = async (id: string, name: string, arguments_: Record<string, unknown>) => {
         processHandle?.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: arguments_ } })}\n`);
         return waitForMessage(messages, (message) => message.id === id);
@@ -593,6 +1502,183 @@ describe("Blockwright stdio bridge helpers", () => {
       const build = compiled.result?.structuredContent?.build;
       expect(compiled.result?.isError).not.toBe(true);
       expect(build?.input?.style).toBe("japanese");
+      expect(compiled.result?._meta?.build).toBeUndefined();
+      expect(compiled.result?._meta?.buildSummary).toMatchObject({ id: build.id, hash: build.hash, blockCount: build.blockCount });
+      const initialBuildPage = compiled.result?._meta?.buildPage;
+      expect(initialBuildPage).toMatchObject({ buildId: build.id, offset: 0, total: build.blockCount, returned: expect.any(Number) });
+      expect(initialBuildPage.placements).toHaveLength(initialBuildPage.returned);
+      expect(initialBuildPage.returned).toBeLessThanOrEqual(500);
+
+      const chunkProbe = await callTool("build-chunk-probe", "get_build_chunk", { build: build.id, offset: 0, limit: 7 });
+      expect(chunkProbe.result?.isError).not.toBe(true);
+      expect(chunkProbe.result?.structuredContent).toMatchObject({ buildId: build.id, offset: 0, total: build.blockCount, returned: Math.min(7, build.blockCount) });
+      expect(chunkProbe.result?._meta?.placements).toHaveLength(Math.min(7, build.blockCount));
+
+      const canonicalPlacements = [...initialBuildPage.placements];
+      while (canonicalPlacements.length < build.blockCount) {
+        const offset = canonicalPlacements.length;
+        const page = await callTool(`build-chunk-${offset}`, "get_build_chunk", { build: build.id, offset, limit: 5_000 });
+        expect(page.result?.isError, JSON.stringify(page)).not.toBe(true);
+        expect(page.result?.structuredContent).toMatchObject({ buildId: build.id, offset, total: build.blockCount });
+        expect(page.result?._meta?.placements).toHaveLength(page.result?.structuredContent?.returned);
+        canonicalPlacements.push(...page.result._meta.placements);
+      }
+      const canonicalBuild = { ...build, placements: canonicalPlacements };
+      expect(canonicalBuild.placements).toHaveLength(build.blockCount);
+
+      const reviewed = await callTool("review-build-page-metadata", "review_build", { build: build.id });
+      expect(reviewed.result?.isError).not.toBe(true);
+      expect(reviewed.result?._meta?.build).toBeUndefined();
+      expect(reviewed.result?._meta?.buildSummary).toMatchObject({ id: build.id, hash: build.hash, blockCount: build.blockCount });
+      expect(reviewed.result?._meta?.buildPage).toMatchObject({ buildId: build.id, offset: 0, total: build.blockCount });
+      expect(reviewed.result?._meta?.audit).toMatchObject({ buildId: build.id, hash: build.hash });
+
+      const createdProject = await callTool("project-create-test", "create_project", {
+        name: "Professional Workflow Project",
+        description: "Bridge integration fixture",
+        build: build.id,
+      });
+      expect(createdProject.result?.isError).not.toBe(true);
+      const project = createdProject.result?.structuredContent?.project;
+      const initialVersion = createdProject.result?.structuredContent?.head;
+      expect(project).toMatchObject({ private: true, versionCount: 1, headVersionId: initialVersion.id });
+      expect(createdProject.result?._meta?.build).toMatchObject({ id: build.id, hash: build.hash });
+
+      const target = canonicalBuild.placements.find((placement: any) => !placement.blockEntity);
+      expect(target).toBeTruthy();
+      const invalidBlockRevision = await callTool("regional-invalid-block-test", "revise_build", {
+        build: build.id,
+        region: { min: { x: target.x, y: target.y, z: target.z }, max: { x: target.x, y: target.y, z: target.z } },
+        replacementPlacements: [{ ...target, block: "Stone Bricks" }],
+      });
+      expect(invalidBlockRevision.result?.isError).toBe(true);
+      expect(JSON.stringify(invalidBlockRevision)).toMatch(/block|namespaced|invalid/i);
+
+      const invalidStateRevision = await callTool("regional-invalid-state-test", "revise_build", {
+        build: build.id,
+        region: { min: { x: target.x, y: target.y, z: target.z }, max: { x: target.x, y: target.y, z: target.z } },
+        replacementPlacements: [{ ...target, state: { "Invalid Key": "north" } }],
+      });
+      expect(invalidStateRevision.result?.isError).toBe(true);
+      expect(JSON.stringify(invalidStateRevision)).toMatch(/state|invalid|key/i);
+
+      const unverifiedStateRevision = await callTool("regional-unverified-state-test", "revise_build", {
+        build: build.id,
+        region: { min: { x: target.x, y: target.y, z: target.z }, max: { x: target.x, y: target.y, z: target.z } },
+        replacementPlacements: [{ ...target, state: { facing: "banana" } }],
+      });
+      expect(unverifiedStateRevision.result?.isError).toBe(true);
+      expect(JSON.stringify(unverifiedStateRevision)).toMatch(/UNVERIFIED_BLOCK_STATE/);
+
+      const regionalRevision = await callTool("regional-revise-test", "revise_build", {
+        build: build.id,
+        region: { min: { x: target.x, y: target.y, z: target.z }, max: { x: target.x, y: target.y, z: target.z } },
+        replacementPlacements: [{ ...target, phase: `${target.phase}-bridge-test` }],
+      });
+      expect(regionalRevision.result?.isError).not.toBe(true);
+      expect(regionalRevision.result?.structuredContent).toMatchObject({
+        mode: "selected_region",
+        previousHash: build.hash,
+        diff: { addedCount: 0, removedCount: 0, changedCount: 1 },
+        build: { contract: { status: "valid" } },
+      });
+      const regionalBuild = regionalRevision.result?.structuredContent?.build;
+      expect(regionalRevision.result?._meta?.build).toBeUndefined();
+      expect(regionalRevision.result?._meta?.buildSummary).toMatchObject({ id: regionalBuild.id, hash: regionalBuild.hash });
+      expect(regionalRevision.result?._meta?.diff).toMatchObject({ addedCount: 0, removedCount: 0, changedCount: 1 });
+      expect(regionalRevision.result?._meta?.diff?.changed).toBeUndefined();
+      const regionalPlacements = [...regionalRevision.result?._meta?.buildPage?.placements ?? []];
+      while (regionalPlacements.length < regionalBuild.blockCount) {
+        const offset = regionalPlacements.length;
+        const page = await callTool(`regional-build-page-${offset}`, "get_build_chunk", { build: regionalBuild.id, offset, limit: 5_000 });
+        expect(page.result?.isError, JSON.stringify(page)).not.toBe(true);
+        regionalPlacements.push(...page.result?._meta?.placements ?? []);
+      }
+      expect(regionalPlacements.filter((placement: any) => placement.x !== target.x || placement.y !== target.y || placement.z !== target.z)).toEqual(
+        canonicalBuild.placements.filter((placement: any) => placement.x !== target.x || placement.y !== target.y || placement.z !== target.z),
+      );
+
+      const savedVersion = await callTool("project-save-test", "save_project_version", {
+        projectId: project.id,
+        build: regionalBuild.id,
+        reason: "region_revision",
+        expectedHeadVersionId: initialVersion.id,
+      });
+      expect(savedVersion.result?.isError).not.toBe(true);
+      const regionalVersion = savedVersion.result?.structuredContent?.version;
+      expect(regionalVersion).toMatchObject({ projectId: project.id, parentVersionId: initialVersion.id, reason: "region_revision", buildHash: regionalBuild.hash });
+
+      const versionDiff = await callTool("project-diff-test", "diff_project_versions", {
+        projectId: project.id,
+        beforeVersionId: initialVersion.id,
+        afterVersionId: regionalVersion.id,
+      });
+      expect(versionDiff.result?.structuredContent?.diff).toMatchObject({
+        projectId: project.id,
+        beforeVersionId: initialVersion.id,
+        afterVersionId: regionalVersion.id,
+        addedCount: 0,
+        removedCount: 0,
+        changedCount: 1,
+      });
+      expect(versionDiff.result?._meta?.diff?.changed).toHaveLength(1);
+
+      const restoredVersion = await callTool("project-restore-test", "restore_project_version", {
+        projectId: project.id,
+        versionId: initialVersion.id,
+        expectedHeadVersionId: regionalVersion.id,
+      });
+      expect(restoredVersion.result?.structuredContent?.version).toMatchObject({
+        projectId: project.id,
+        parentVersionId: regionalVersion.id,
+        restoredFromVersionId: initialVersion.id,
+        reason: "restore",
+        buildHash: build.hash,
+      });
+      const restoredHead = restoredVersion.result?.structuredContent?.version;
+
+      const loadedProject = await callTool("project-get-test", "get_project", { projectId: project.id });
+      expect(loadedProject.result?.structuredContent).toMatchObject({
+        project: { id: project.id, versionCount: 3, headVersionId: restoredHead.id },
+        head: { id: restoredHead.id, buildHash: build.hash },
+      });
+      expect(loadedProject.result?.structuredContent?.versions).toHaveLength(3);
+
+      const listedProjects = await callTool("project-list-test", "list_projects", {});
+      expect(listedProjects.result?.structuredContent?.projects).toEqual([expect.objectContaining({ id: project.id, private: true, versionCount: 3 })]);
+
+      const materialList = await callTool("material-list-test", "get_material_list", { build: regionalBuild.id });
+      expect(materialList.result?.structuredContent).toMatchObject({ buildId: regionalBuild.id, buildHash: regionalBuild.hash, exact: true, planningAid: true });
+      expect(materialList.result?.structuredContent?.totalBlocks).toBe(regionalBuild.blockCount);
+      expect(materialList.result?._meta?.materialList?.lines?.length).toBeGreaterThan(0);
+
+      const litematicExport = await callTool("litematic-export-test", "export_build", { build: build.id, format: "litematic" });
+      expect(litematicExport.result?.structuredContent).toMatchObject({ buildId: build.id, format: "litematic", litematicVersion: 7, compatibilityStatus: "unverified" });
+      expect(litematicExport.result?._meta?.base64).toEqual(expect.any(String));
+      const litematicImport = await callTool("litematic-import-test", "import_schematic", { base64: litematicExport.result._meta.base64, format: "litematic" });
+      expect(litematicImport.result?.structuredContent).toMatchObject({ format: "litematic", version: 7, blockCount: build.blockCount, regionCount: 1, compatibilityStatus: "unverified", placementsIncluded: true });
+      expect(litematicImport.result?._meta?.placements).toHaveLength(build.blockCount);
+
+      const deliveryBundle = await callTool("delivery-bundle-test", "create_delivery_bundle", { build: build.id, format: "schem" });
+      expect(deliveryBundle.result?.isError).not.toBe(true);
+      expect(deliveryBundle.result?.structuredContent).toMatchObject({ buildId: build.id, buildHash: build.hash, artifactFormat: "schem", compatibilityStatus: "unverified" });
+      expect(deliveryBundle.result?.structuredContent?.fileCount).toBeGreaterThanOrEqual(8);
+      expect(deliveryBundle.result?._meta?.base64).toEqual(expect.any(String));
+      expect(deliveryBundle.result?._meta?.manifest?.files).toEqual(expect.arrayContaining([expect.objectContaining({ name: "build.schem", sha256: expect.any(String) })]));
+
+      const semanticContract = await callTool("contract-test", "validate_build_contract", {
+        build: build.id,
+        contract: { clauses: ["four cardinal 9-wide entrances"] },
+      });
+      expect(semanticContract.result?.isError).not.toBe(true);
+      expect(semanticContract.result?.structuredContent?.contract).toMatchObject({
+        status: "invalid",
+        buildHash: build.hash,
+        certificate: { status: "invalid", buildHash: build.hash },
+      });
+      expect(semanticContract.result?.structuredContent?.contract?.hardResults).toEqual(expect.arrayContaining([
+        expect.objectContaining({ evaluator: "entrances", status: "fail" }),
+      ]));
 
       processHandle.stdin?.write(`${JSON.stringify({
         jsonrpc: "2.0",
@@ -641,6 +1727,10 @@ describe("Blockwright stdio bridge helpers", () => {
 
       const vanillaCompatibility = await callTool("vanilla-compatibility-test", "get_worldedit_compatibility", { minecraftVersion: "26.2", platform: "vanilla" });
       expect(vanillaCompatibility.result?.structuredContent).toMatchObject({ minecraftVersion: "26.2", platform: "vanilla", compatible: false });
+      const deletedProject = await callTool("project-delete-test", "delete_project", { projectId: project.id });
+      expect(deletedProject.result?.structuredContent).toMatchObject({ deleted: true, projectId: project.id, deletedVersionCount: 3, deletedDependentRecords: 0 });
+      const projectsAfterDelete = await callTool("project-list-after-delete-test", "list_projects", {});
+      expect(projectsAfterDelete.result?.structuredContent?.projects).toEqual([]);
       expect(messages.every(({ jsonrpc }) => jsonrpc === "2.0")).toBe(true);
       processHandle.stdin?.end();
       await waitForExit(processHandle, 5_000);

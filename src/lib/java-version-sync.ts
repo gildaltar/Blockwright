@@ -24,14 +24,26 @@ type ClientVersion = {
     data_minor: number;
   };
 };
+type FetchLike = typeof fetch;
+
+export type JavaUpdateCheckResult = {
+  channel: "release" | "snapshot";
+  latestVersion: string;
+  latestRelease: string;
+  latestSnapshot: string;
+  installed: Pick<JavaRegistrySnapshot, "version" | "type" | "releaseTime" | "syncedAt" | "blockCount" | "resourcePackVersion">[];
+  updateAvailable: boolean;
+  checkedAt: string;
+  manifestUrl: string;
+};
 
 const JSON_TIMEOUT_MS = 20_000;
 const CLIENT_TIMEOUT_MS = 120_000;
 const USER_AGENT = "Blockwright/version-synchronizer";
 
-async function fetchOfficial(url: string, timeoutMs: number) {
+async function fetchOfficial(url: string, timeoutMs: number, request: FetchLike = fetch) {
   try {
-    return await fetch(url, { headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(timeoutMs) });
+    return await request(url, { headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(timeoutMs) });
   } catch (error) {
     if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
       throw new Error(`Mojang request timed out after ${Math.round(timeoutMs / 1000)} seconds for ${url}.`);
@@ -40,25 +52,77 @@ async function fetchOfficial(url: string, timeoutMs: number) {
   }
 }
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetchOfficial(url, JSON_TIMEOUT_MS);
+async function fetchJson<T>(url: string, request: FetchLike = fetch): Promise<T> {
+  const response = await fetchOfficial(url, JSON_TIMEOUT_MS, request);
   if (!response.ok) throw new Error(`Mojang request failed (${response.status}) for ${url}`);
   return response.json() as Promise<T>;
 }
-export async function checkJavaUpdates(channel: "release" | "snapshot" = "release") {
-  const manifest = await fetchJson<MojangManifest>(JAVA_MANIFEST_URL);
-  const latestVersion = manifest.latest[channel];
-  const installed = listJavaRegistries().map(({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }) => ({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }));
-  return {
-    channel,
-    latestVersion,
-    latestRelease: manifest.latest.release,
-    latestSnapshot: manifest.latest.snapshot,
-    installed,
-    updateAvailable: !installed.some(({ version }) => version === latestVersion),
-    checkedAt: new Date().toISOString(),
-    manifestUrl: JAVA_MANIFEST_URL,
-  };
+
+export class JavaUpdateChecker {
+  private readonly cached = new Map<"release" | "snapshot", { result: JavaUpdateCheckResult; expiresAt: number }>();
+  private readonly inFlight = new Map<"release" | "snapshot", Promise<JavaUpdateCheckResult>>();
+  private activeChecks = 0;
+  private readonly request: FetchLike;
+  private readonly cacheTtlMs: number;
+  private readonly maximumConcurrentChecks: number;
+  private readonly now: () => number;
+
+  constructor(options: { request?: FetchLike; cacheTtlMs?: number; maximumConcurrentChecks?: number; now?: () => number } = {}) {
+    this.request = options.request ?? fetch;
+    this.cacheTtlMs = options.cacheTtlMs ?? 60_000;
+    this.maximumConcurrentChecks = options.maximumConcurrentChecks ?? 1;
+    this.now = options.now ?? Date.now;
+    if (!Number.isSafeInteger(this.cacheTtlMs) || this.cacheTtlMs < 1
+      || !Number.isSafeInteger(this.maximumConcurrentChecks) || this.maximumConcurrentChecks < 1) {
+      throw new Error("Java update-check cache and concurrency limits must be positive safe integers.");
+    }
+  }
+
+  async check(channel: "release" | "snapshot" = "release") {
+    const now = this.now();
+    const cached = this.cached.get(channel);
+    if (cached && cached.expiresAt > now) return cached.result;
+    if (cached) this.cached.delete(channel);
+    const existing = this.inFlight.get(channel);
+    if (existing) return existing;
+    if (this.activeChecks >= this.maximumConcurrentChecks) {
+      throw new Error("JAVA_UPDATE_CHECK_BUSY: the shared Mojang update check is already at capacity.");
+    }
+    const pending = (async () => {
+      this.activeChecks += 1;
+      try {
+        const manifest = await fetchJson<MojangManifest>(JAVA_MANIFEST_URL, this.request);
+        const latestVersion = manifest.latest[channel];
+        const installed = listJavaRegistries().map(({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }) => ({ version, type, releaseTime, syncedAt, blockCount, resourcePackVersion }));
+        const result: JavaUpdateCheckResult = {
+          channel,
+          latestVersion,
+          latestRelease: manifest.latest.release,
+          latestSnapshot: manifest.latest.snapshot,
+          installed,
+          updateAvailable: !installed.some(({ version }) => version === latestVersion),
+          checkedAt: new Date(this.now()).toISOString(),
+          manifestUrl: JAVA_MANIFEST_URL,
+        };
+        this.cached.set(channel, { result, expiresAt: this.now() + this.cacheTtlMs });
+        return result;
+      } finally {
+        this.activeChecks -= 1;
+      }
+    })();
+    this.inFlight.set(channel, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.inFlight.get(channel) === pending) this.inFlight.delete(channel);
+    }
+  }
+}
+
+const javaUpdateChecker = new JavaUpdateChecker();
+
+export function checkJavaUpdates(channel: "release" | "snapshot" = "release") {
+  return javaUpdateChecker.check(channel);
 }
 
 function displayName(id: string) {

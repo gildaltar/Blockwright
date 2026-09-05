@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "platform": "windows",
+  "architecture": "x64",
+  "defaultPort": 32147,
+  "runtime": {
+    "name": "node",
+    "version": "26.8.1",
+    "archive": "node-v26.8.1-win-x64.zip",
+    "url": "https://nodejs.org/dist/v26.8.1/node-v26.8.1-win-x64.zip",
+    "sha256": "57693d8e93d1b04e7b7de46aca53ecd63e97564e73de36a68428d7ff08d83587",
+    "sizeBytes": 41368195,
+    "maxSizeBytes": 67108864,
+    "timeoutSeconds": 300
+  },
+  "innoSetup": {
+    "version": "6.7.1",
+    "installer": "innosetup-6.7.1.exe",
+    "url": "https://github.com/jrsoftware/issrc/releases/download/is-6_7_1/innosetup-6.7.1.exe",
+    "sha256": "4d11e8050b6185e0d49bd9e8cc661a7a59f44959a621d31d11033124c4e8a7b0",
+    "sizeBytes": 10619024,
+    "maxSizeBytes": 16777216,
+    "timeoutSeconds": 180,
+    "productVersion": "6.7.1",
+    "publisherSubject": "CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL",
+    "publisherThumbprint": "E0AB19C8D38CBF9C44709925122A7A02F8C70CB7",
+    "requireTimestamp": true,
+    "compilerRelativePath": "compiler\\ISCC.exe",
+    "compilerSha256": "eb6f4410c8db367a5f74127e8025ad2ccacc0afabbe783959d237df3050f97fb",
+    "compilerSizeBytes": 1455248
+  },
+  "installer": {
+    "appId": "{2D75D5A7-BC78-4BBE-B0BC-5B8D0366C4B4}",
+    "publisher": "Blockwright",
+    "upgradeCode": "2D75D5A7-BC78-4BBE-B0BC-5B8D0366C4B4"
+  },
+  "update": {
+    "metadataSchemaVersion": 1,
+    "metadataUrl": "https://github.com/gildaltar/Blockwright/releases/latest/download/latest.json",
+    "trustedPublisherThumbprintConfigKey": "trustedPublisherThumbprint"
+  }
+}

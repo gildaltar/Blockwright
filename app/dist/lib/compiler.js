@@ -4,6 +4,7 @@ import { getStyleProfile } from "../data/styles.js";
 import { registryMetadata } from "./java-registry.js";
 import { defaultRolePalette, PALETTE_ROLES, validatePaletteIdentifiers } from "./palette-studio.js";
 import { assertPreflightConfirmed, estimateBuild } from "./preflight.js";
+import { calculateBuildHash, validateBuildContract } from "./contract.js";
 const DEFAULT_ORIGIN = { x: 0, y: 0, z: 0 };
 function clampDimension(value, min) {
     return Math.max(min, Math.min(65_535, Math.round(value)));
@@ -26,7 +27,9 @@ export function normalizeInput(input) {
         palette: input.palette?.length ? [...input.palette] : [...new Set(Object.values(rolePalette))],
         rolePalette,
         origin: input.origin ? { ...input.origin } : { ...DEFAULT_ORIGIN },
-        features: input.features ? [...input.features].sort() : ["covered porch", "hearth", "storage loft"],
+        // Omitted features mean no feature promise. Inventing attractive defaults here
+        // would turn unrequested, unbuilt amenities into a misleading hard contract.
+        features: input.features ? [...input.features].sort() : [],
         blockBudget: Math.max(100, Math.round(input.blockBudget ?? 2_000_000)),
         seed: input.seed?.trim() || createHash("sha256").update(JSON.stringify({ name: input.name.trim(), edition: input.edition, version, style: style.id, dimensions: input.dimensions, buildingType: input.buildingType ?? "auto" })).digest("hex").slice(0, 12),
         buildingType: input.buildingType ?? (style.id === "japanese" ? "temple" : style.id === "medieval" ? "hall" : style.id === "megabase" ? "megabase" : "house"),
@@ -284,30 +287,30 @@ function groupRegions(placements, size) {
         groups.set(key, group);
     }
     return [...groups.entries()].map(([id, group]) => {
-        const xs = group.map((p) => p.x);
-        const ys = group.map((p) => p.y);
-        const zs = group.map((p) => p.z);
-        return { id: `region-${id}`, chunkMin: { x: Math.floor(Math.min(...xs) / 16), z: Math.floor(Math.min(...zs) / 16) }, chunkMax: { x: Math.floor(Math.max(...xs) / 16), z: Math.floor(Math.max(...zs) / 16) }, bounds: { min: { x: Math.min(...xs), y: Math.min(...ys), z: Math.min(...zs) }, max: { x: Math.max(...xs), y: Math.max(...ys), z: Math.max(...zs) } }, placementCount: group.length };
+        const bounds = calculateBounds(group);
+        return { id: `region-${id}`, chunkMin: { x: Math.floor(bounds.min.x / 16), z: Math.floor(bounds.min.z / 16) }, chunkMax: { x: Math.floor(bounds.max.x / 16), z: Math.floor(bounds.max.z / 16) }, bounds: { min: bounds.min, max: bounds.max }, placementCount: group.length };
     }).sort((a, b) => a.id.localeCompare(b.id));
 }
 function calculateBounds(placements) {
-    const xs = placements.map((p) => p.x);
-    const ys = placements.map((p) => p.y);
-    const zs = placements.map((p) => p.z);
-    const min = { x: Math.min(...xs), y: Math.min(...ys), z: Math.min(...zs) };
-    const max = { x: Math.max(...xs), y: Math.max(...ys), z: Math.max(...zs) };
+    const first = placements[0];
+    if (!first)
+        throw new Error("Cannot calculate bounds for an empty placement set.");
+    const min = { x: first.x, y: first.y, z: first.z };
+    const max = { x: first.x, y: first.y, z: first.z };
+    for (let index = 1; index < placements.length; index += 1) {
+        const placement = placements[index];
+        min.x = Math.min(min.x, placement.x);
+        min.y = Math.min(min.y, placement.y);
+        min.z = Math.min(min.z, placement.z);
+        max.x = Math.max(max.x, placement.x);
+        max.y = Math.max(max.y, placement.y);
+        max.z = Math.max(max.z, placement.z);
+    }
     return {
         min,
         max,
         dimensions: { width: max.x - min.x + 1, depth: max.z - min.z + 1, height: max.y - min.y + 1 },
     };
-}
-function stableBuildPayload(input, placements) {
-    const { confirmationToken: _confirmationToken, ...designInput } = input;
-    return JSON.stringify({
-        input: designInput,
-        placements: placements.map(({ x, y, z, block, phase, state }) => ({ x, y, z, block, phase, ...(state ? { state } : {}) })),
-    });
 }
 function completePlacementStates(placements) {
     const keyOf = ({ x, y, z }) => `${x},${y},${z}`;
@@ -352,11 +355,8 @@ export function compileBuild(rawInput) {
         layerCounts[String(placement.y)] = (layerCounts[String(placement.y)] ?? 0) + 1;
         phaseCounts[placement.phase] = (phaseCounts[placement.phase] ?? 0) + 1;
     }
-    const hash = createHash("sha256").update(stableBuildPayload(input, placements)).digest("hex");
+    const hash = calculateBuildHash(input, placements);
     const overBudget = placements.length > input.blockBudget;
-    const issues = overBudget
-        ? [{ code: "BLOCK_BUDGET_EXCEEDED", severity: "error", message: `${placements.length.toLocaleString()} placements exceed the ${input.blockBudget.toLocaleString()} block budget.` }]
-        : [];
     const staticRegistry = REGISTRY_META[input.edition];
     const exactJavaRegistry = input.edition === "java" ? registryMetadata(input.version) : undefined;
     const coverageGap = input.edition === "java" && !exactJavaRegistry
@@ -365,7 +365,7 @@ export function compileBuild(rawInput) {
             ? `Requested ${input.edition} ${input.version}; packaged coverage is ${staticRegistry.coverageVersion}.`
             : undefined;
     const registry = exactJavaRegistry ?? { ...staticRegistry, ...(coverageGap ? { note: coverageGap } : {}) };
-    return {
+    const draft = {
         schemaVersion: 2,
         id: `bw_${hash.slice(0, 12)}`,
         hash,
@@ -383,11 +383,44 @@ export function compileBuild(rawInput) {
             valid: !overBudget,
             blockingIssues: overBudget ? 1 : 0,
             warnings: coverageGap ? 1 : 0,
-            issues: coverageGap ? [...issues, { code: "REGISTRY_COVERAGE_GAP", severity: "warning", message: coverageGap }] : issues,
+            issues: coverageGap ? [{ code: "REGISTRY_COVERAGE_GAP", severity: "warning", message: coverageGap }] : [],
             attemptedCollisions: acc.attemptedCollisions,
         },
         registry: { edition: input.edition, ...registry },
         createdAt: "deterministic",
+    };
+    const contract = validateBuildContract(draft);
+    const hardIssues = contract.hardResults
+        .filter(({ status }) => status !== "pass")
+        .map((result) => ({
+        code: result.evaluator === "block-budget"
+            ? "BLOCK_BUDGET_EXCEEDED"
+            : result.status === "unsupported"
+                ? "UNSUPPORTED_HARD_REQUIREMENT"
+                : result.status === "unevaluated"
+                    ? "UNEVALUATED_HARD_REQUIREMENT"
+                    : `CONTRACT_${(result.evaluator ?? result.clauseId).replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()}_FAILED`,
+        severity: "error",
+        message: `${result.requirement}: ${result.message}`,
+        ...(result.coordinates?.length ? { coordinates: result.coordinates } : {}),
+    }));
+    const warningIssues = contract.warnings.filter(({ clauseId }) => clauseId !== "audit-registry-note").map((result) => ({
+        code: `CONTRACT_${(result.evaluator ?? result.clauseId).replace(/[^A-Za-z0-9]+/g, "_").toUpperCase()}_WARNING`,
+        severity: "warning",
+        message: result.message,
+        ...(result.coordinates?.length ? { coordinates: result.coordinates } : {}),
+    }));
+    return {
+        ...draft,
+        validation: {
+            valid: contract.status === "valid",
+            blockingIssues: hardIssues.length,
+            warnings: draft.validation.warnings + warningIssues.length,
+            issues: [...draft.validation.issues, ...hardIssues, ...warningIssues],
+            attemptedCollisions: draft.validation.attemptedCollisions,
+        },
+        contract,
+        certificate: contract.certificate,
     };
 }
 export function generateBuildCandidates(rawInput, count = 3, recentPlans = []) {

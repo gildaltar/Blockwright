@@ -7,8 +7,10 @@ import * as THREE from "three";
 import { AlertTriangle, Box as BoxIcon, BoxSelect, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Clipboard, Crosshair, Download, Edit3, Eye, FileInput, Focus, HelpCircle, Layers3, LocateFixed, Maximize2, MousePointer2, Orbit, RotateCcw, Ruler, Search, Trash2, Undo2, Upload, X, } from "lucide-react";
 import { useDisplayMode, useDownload, useLayout, useViewState } from "skybridge/web";
 import { useToolInfo } from "../helpers.js";
+import {} from "../lib/build-view-paging.js";
 import { loadResourcePack, placementTextureKey } from "../lib/resource-pack.js";
 import { countPlacementsWithin, getReviewStateBuildStatus, getReviewBoundsMetrics, getReviewMeasurement, isRoofPlacement, MAX_REVIEW_ANNOTATIONS, MAX_REVIEW_IMPORT_BYTES, MAX_REVIEW_NOTE_LENGTH, MIN_REVIEW_TEXT_SEARCH_LENGTH, parseReviewCoordinate, prependReviewAnnotation, REVIEW_CATEGORIES, searchReviewPlacements, validateReviewDocument, } from "../lib/reviewer.js";
+import { usePagedBuild } from "../use-paged-build.js";
 const COLORS = {
     change: "#e9ad4f", fix: "#ef6b5b", remove: "#c74f76", liked: "#5ec6a7",
 };
@@ -102,20 +104,38 @@ function geometryParts(placement) {
     }
     return [{ size: [1, 1, 1], offset: [0, 0, 0] }];
 }
-function InstancePart({ placements, part, block, textures, dimmed, onPick }) {
+function useResourcePackTextures(texturePack) {
+    const textureMaps = useMemo(() => {
+        const maps = new Map();
+        if (!texturePack)
+            return maps;
+        const loader = new THREE.TextureLoader();
+        for (const faces of texturePack.textures.values()) {
+            for (const url of Object.values(faces)) {
+                if (maps.has(url))
+                    continue;
+                const map = loader.load(url);
+                map.colorSpace = THREE.SRGBColorSpace;
+                map.magFilter = THREE.NearestFilter;
+                map.minFilter = THREE.NearestMipmapNearestFilter;
+                maps.set(url, map);
+            }
+        }
+        return maps;
+    }, [texturePack]);
+    useEffect(() => () => { for (const map of textureMaps.values())
+        map.dispose(); }, [textureMaps]);
+    return textureMaps;
+}
+function InstancePart({ placements, part, block, textures, textureMaps, dimmed, onPick }) {
     const ref = useRef(null);
     const material = useMemo(() => {
         const url = textures?.top;
-        const map = url ? new THREE.TextureLoader().load(url) : undefined;
-        if (map) {
-            map.colorSpace = THREE.SRGBColorSpace;
-            map.magFilter = THREE.NearestFilter;
-            map.minFilter = THREE.NearestMipmapNearestFilter;
-        }
+        const map = url ? textureMaps.get(url) : undefined;
         const emissive = part.role === "lantern" ? new THREE.Color("#b86b22") : new THREE.Color("#000000");
         return new THREE.MeshStandardMaterial({ color: url ? "#ffffff" : part.role === "metal" ? "#242a2c" : colorFor(block), map, roughness: part.role === "metal" ? .45 : .88, metalness: part.role === "metal" ? .5 : 0, transparent: dimmed || /glass|pane|leaves/.test(block), opacity: dimmed ? .2 : 1, alphaTest: /glass|pane|leaves|door|trapdoor/.test(block) ? .08 : 0, emissive, emissiveIntensity: part.role === "lantern" ? 1.1 : 0 });
-    }, [block, dimmed, part.role, textures?.top]);
-    useEffect(() => () => { material.map?.dispose(); material.dispose(); }, [material]);
+    }, [block, dimmed, part.role, textureMaps, textures?.top]);
+    useEffect(() => () => { material.dispose(); }, [material]);
     useEffect(() => {
         if (!ref.current)
             return;
@@ -138,6 +158,7 @@ function SelectionBox({ selection, color = "#f2b661" }) {
     return _jsxs(DreiBox, { args: size, position: center, children: [_jsx("meshBasicMaterial", { transparent: true, opacity: .035, color: color, depthWrite: false }), _jsx(Edges, { color: color })] });
 }
 function ReviewScene({ build, maxLayer, hideRoof, cameraPreset, cameraTarget, cameraDistance, orthographic, selection, annotations, texturePack, onPick }) {
+    const textureMaps = useResourcePackTextures(texturePack);
     const groups = useMemo(() => {
         const map = new Map();
         for (const placement of build.placements) {
@@ -165,7 +186,7 @@ function ReviewScene({ build, maxLayer, hideRoof, cameraPreset, cameraTarget, ca
     };
     return _jsxs(Canvas, { shadows: true, dpr: [1, 1.5], gl: { antialias: true, alpha: false }, onPointerMissed: () => undefined, children: [_jsx("color", { attach: "background", args: ["#06141e"] }), orthographic
                 ? _jsx(OrthographicCamera, { makeDefault: true, position: positions[cameraPreset], zoom: Math.max(4, 850 / radius), onUpdate: (camera) => camera.lookAt(...center) }, `review-ortho-${cameraKey}`)
-                : _jsx(PerspectiveCamera, { makeDefault: true, position: positions[cameraPreset], fov: 42, onUpdate: (camera) => camera.lookAt(...center) }, `review-perspective-${cameraKey}`), _jsx("ambientLight", { intensity: 1.05, color: "#a8bfd0" }), _jsx("directionalLight", { position: [center[0] + radius, center[1] + radius, center[2] - radius], intensity: 2.2, color: "#f5e7cf", castShadow: true }), groups.flatMap(([key, group]) => group.parts.map((part, index) => _jsx(InstancePart, { placements: group.placements, part: part, block: group.placement.block, textures: texturePack?.textures.get(key), dimmed: false, onPick: onPick }, `${key}-${index}`))), _jsx(SelectionBox, { selection: selection }), annotations.map((annotation) => _jsx(SelectionBox, { selection: annotation.bounds, color: annotation.resolved ? "#536b76" : COLORS[annotation.category] }, annotation.id)), _jsx(Grid, { position: [buildCenter[0], build.bounds.min.y - .51, buildCenter[2]], args: [Math.max(64, fullRadius * 2), Math.max(64, fullRadius * 2)], cellSize: 1, cellColor: "#294554", sectionSize: 5, sectionColor: "#3f6170", fadeDistance: fullRadius * 1.8, infiniteGrid: true }), _jsx(OrbitControls, { makeDefault: true, target: center, minDistance: 2, maxDistance: fullRadius * 4, maxPolarAngle: Math.PI / 2.01, enabled: true })] });
+                : _jsx(PerspectiveCamera, { makeDefault: true, position: positions[cameraPreset], fov: 42, onUpdate: (camera) => camera.lookAt(...center) }, `review-perspective-${cameraKey}`), _jsx("ambientLight", { intensity: 1.05, color: "#a8bfd0" }), _jsx("directionalLight", { position: [center[0] + radius, center[1] + radius, center[2] - radius], intensity: 2.2, color: "#f5e7cf", castShadow: true }), groups.flatMap(([key, group]) => group.parts.map((part, index) => _jsx(InstancePart, { placements: group.placements, part: part, block: group.placement.block, textures: texturePack?.textures.get(key), textureMaps: textureMaps, dimmed: false, onPick: onPick }, `${key}-${index}`))), _jsx(SelectionBox, { selection: selection }), annotations.map((annotation) => _jsx(SelectionBox, { selection: annotation.bounds, color: annotation.resolved ? "#536b76" : COLORS[annotation.category] }, annotation.id)), _jsx(Grid, { position: [buildCenter[0], build.bounds.min.y - .51, buildCenter[2]], args: [Math.max(64, fullRadius * 2), Math.max(64, fullRadius * 2)], cellSize: 1, cellColor: "#294554", sectionSize: 5, sectionColor: "#3f6170", fadeDistance: fullRadius * 1.8, infiniteGrid: true }), _jsx(OrbitControls, { makeDefault: true, target: center, minDistance: 2, maxDistance: fullRadius * 4, maxPolarAngle: Math.PI / 2.01, enabled: true })] });
 }
 function orderedBounds(a, b) {
     return { min: { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), z: Math.min(a.z, b.z) }, max: { x: Math.max(a.x, b.x), y: Math.max(a.y, b.y), z: Math.max(a.z, b.z) } };
@@ -204,11 +225,13 @@ export default function ReviewBuildView() {
     const [displayMode, setDisplayMode] = useDisplayMode();
     const { maxHeight } = useLayout();
     const { download } = useDownload();
-    const build = responseMetadata?.build;
-    const audit = responseMetadata?.audit;
+    const metadata = responseMetadata;
+    const pagedBuild = usePagedBuild(metadata?.buildSummary, metadata?.buildPage, metadata?.build);
+    const build = pagedBuild.build;
+    const audit = metadata?.audit;
     const summary = output?.review;
-    const maxBuildLayer = build?.bounds.max.y ?? 0;
-    const minBuildLayer = build?.bounds.min.y ?? 0;
+    const maxBuildLayer = (build ?? metadata?.buildSummary)?.bounds.max.y ?? 0;
+    const minBuildLayer = (build ?? metadata?.buildSummary)?.bounds.min.y ?? 0;
     const [persistedReviewState, setReviewState] = useViewState(reviewDefaults(build));
     const persistedBuildStatus = build ? getReviewStateBuildStatus(persistedReviewState, build) : "unbound";
     // Never render unverified or mismatched state, even for the single paint
@@ -373,8 +396,10 @@ export default function ReviewBuildView() {
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
     }, [displayMode, maxBuildLayer, minBuildLayer, showShortcuts]);
+    if (!isPending && metadata?.buildSummary && pagedBuild.error)
+        return _jsxs("div", { className: "loading-view", children: [_jsx(AlertTriangle, { size: 34 }), _jsxs("span", { children: ["Exact review blocks could not be loaded. ", pagedBuild.error] })] });
     if (isPending || !build || !summary || !audit)
-        return _jsxs("div", { className: "loading-view", children: [_jsx(BoxIcon, { size: 34 }), _jsx("span", { children: "Preparing exact 3D review\u2026" })] });
+        return _jsxs("div", { className: "loading-view", children: [_jsx(BoxIcon, { size: 34 }), _jsx("span", { children: metadata?.buildSummary ? `Loading exact review blocks… ${pagedBuild.loaded.toLocaleString()} / ${pagedBuild.total.toLocaleString()}` : "Preparing exact 3D review…" })] });
     const selectionForPlacement = (placement) => {
         const point = { x: placement.x, y: placement.y, z: placement.z };
         return { ...orderedBounds(point, point), type: "block", blockCount: 1, pickedBlock: placement.block, pickedState: placement.state, pickedPhase: placement.phase };

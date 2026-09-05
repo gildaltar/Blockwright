@@ -1,5 +1,30 @@
 # Blockwright — Minecraft Build Architect
 
+## v0.6.0 Release Contract
+
+Version 0.6.0 is the first commercially oriented Blockwright release. Its promise is narrower and stronger than “AI Minecraft builder”:
+
+> Turn a measurable Java build brief into a deterministic, reviewable, client-ready schematic—or return an honest, actionable failure when the brief cannot be represented or verified.
+
+The release is complete only when the supported local workflow can be installed by a non-developer, validates every declared hard requirement, persists revision history, exports a professional delivery bundle, and can be independently exercised on a clean Windows machine. Hosted commercial capabilities may ship behind explicit configuration gates, but must never appear enabled when identity, storage, billing, signing, DNS, or production credentials are absent.
+
+**Release priorities, in order**
+
+1. Truthful semantic contracts and immutable audit certificates.
+2. A complete Java professional workflow: project, generate, review, revise, approve, and deliver.
+3. A self-contained, repairable, updateable Windows distribution.
+4. Essential WorldEdit and Litematica interoperability.
+5. A direct browser product surface with production-safe tenant, quota, and deletion boundaries.
+6. Evidence from repeatable benchmarks and real customer use; no invented case studies or compatibility claims.
+
+**Explicit v0.6.0 boundaries**
+
+- Supported commercial output is Java-first. Bedrock `.mcstructure`, Bedrock world output, and Marketplace workflows remain deferred.
+- Code signing requires an externally supplied signing identity. Unsigned development artifacts must be labeled as such and may not satisfy the signed-release gate.
+- A first-party domain, production payments, refunds, invoices, email delivery, and public review links require operator-owned service configuration. Missing configuration must fail closed.
+- WinGet submission begins only after the exact installer has passed clean-machine and real-world validation.
+- Showcase builds may be generated as demonstrations, but customer case studies must describe consenting real customers and measured outcomes.
+
 ## Value Proposition
 
 Blockwright turns a plain-language Minecraft build idea into an exact, inspectable block plan. It is for players and creators who want ambitious builds without manually translating a visual idea into coordinates, layers, materials, and commands.
@@ -53,13 +78,52 @@ The painful part today is the gap between inspiration and construction: screensh
 - **Protocol:** Streamable HTTP MCP endpoint at `/mcp` plus health/status endpoints.
 - **Data:** Versioned Java and Bedrock block registries with source, checksum, and sync metadata. Java and Bedrock identifiers remain separate.
 - **World context:** Canonical JSON region format for edition/version, origin, dimensions, blocks, protected coordinates, height maps, biome maps, structures, and terrain conflicts.
-- **Auth:** None for the local vertical slice; deployment can add host-level access controls.
+- **Auth:** Local desktop and portable modes are single-user and loopback-only. Hosted mode requires verified identity, tenant-scoped authorization on every private resource, durable tenant-scoped storage, revocable sessions, and explicit deletion. Hosted private tools fail closed when this configuration is absent.
 - **Scaling:** Every placement uses integer coordinates and renders as exactly one 1×1×1 block.
 - **Textures:** Do not redistribute Mojang artwork. Accept user-owned resource-pack ZIPs and official client JARs locally in the browser; otherwise use a clearly labeled procedural fallback palette. Texture files never leave the user's browser.
 - **Java updates:** Resolve `latest` from Mojang's live version manifest, verify the official client JAR SHA-1, derive block identifiers from its blockstate assets, and record protocol/world/resource-pack versions. Synchronization is explicit and writes only to Blockwright's local data directory.
 - **Lighting:** Minecraft-inspired directional face brightness, ambient/skylight response, and emissive response, clearly labeled as an approximation rather than the engine’s full propagation model.
 - **Originality:** Architectural profiles encode general principles and failure modes, not copied creator builds.
 - **Unavailable in this vertical slice:** Direct Java Anvil-region writes, Bedrock LevelDB/`.mcworld` parsing, exact Minecraft-engine lighting propagation, exhaustive reproduction of every Mojang multipart/custom block model, and automatic modification of a live/open world. World changes use the reversible WorldEdit schematic workflow.
+
+## v0.6.0 Release Gates
+
+**Semantic truth gate**
+
+- Every normalized hard requirement is either linked to an executable check or rejected as unsupported before generation.
+- A build is never reported as contract-valid while a hard requirement fails or remains unevaluated.
+- The same normalized contract and checks run after initial generation and every revision, including selected-region revisions.
+- Results distinguish hard failures, operational warnings, and subjective aesthetic observations.
+- Contract and audit results are tied to the immutable build hash and can be reproduced from the build record.
+
+**Professional workflow gate**
+
+- Projects persist outside process memory and are private by default.
+- Autosave creates immutable versions; history, before/after diff, undo-by-new-version, and selected-region revision preserve provenance.
+- Client review links are random, revocable, expiring, read-only by default, and tenant-scoped. Approval or change-request state records actor and time without altering the build.
+- One action creates a delivery bundle containing the selected Java artifact, material list, build contract, certificate, checksums, compatibility metadata, origin/rotation instructions, and review approval summary.
+
+**Windows distribution gate**
+
+- The portable ZIP and per-user x64 installer carry a private pinned Node.js runtime and do not rely on a machine-wide Node/npm installation.
+- Install, same-version repair, upgrade, launch/readiness, stop, uninstall, and installer-owned-file cleanup are exercised on a clean Windows runner.
+- Codex integration, `.schem` file association, and portable state are explicit user choices.
+- Update checks retrieve release metadata over HTTPS, verify a published checksum and configured trusted signature before execution, stop only the managed server, install, and relaunch with rollback-safe failure reporting.
+- Every published release includes `SHA256SUMS.txt`, an SPDX or CycloneDX SBOM, and a signed-artifact status that cannot be mistaken for a valid signature.
+- The support bundle is generated locally with deterministic redaction of usernames, tokens, world contents, and unrelated absolute paths.
+
+**Hosted-service gate**
+
+- Browser onboarding works without Codex or ChatGPT.
+- Authentication, tenant isolation, durable storage, deletion, rate limits, compressed and decompressed upload limits, and hostile-file parsing safeguards are covered by integration tests.
+- Billing state is checked server-side. Checkout, invoices, cancellations, refunds, support contact, telemetry, and cost signals are observable without logging secrets or customer build contents.
+- Local-only builds and user-owned texture data are not silently uploaded.
+
+**Evidence gate**
+
+- A versioned benchmark corpus contains at least 100 rights-cleared briefs across the advertised categories and records contract, export, and round-trip outcomes.
+- Published compatibility claims identify the exact Minecraft Java, Sponge, WorldEdit, and Litematica versions exercised.
+- Public customer case studies require customer permission and measured evidence; placeholder/demo content is labeled clearly.
 
 ## Acceptance Criteria
 
@@ -87,6 +151,7 @@ The painful part today is the gap between inspiration and construction: screensh
 - The native Windows control center can diagnose a stopped installation without changing it, prevents duplicate managed launches, and leaves a clear process/log trail for every start, stop, restart, or failure.
 - Windows dependency checks compare the installed Node version with the package engine requirement and verify required manifests, entry points, runtime modules, and packaged assets before launch.
 - Dependency repair is serialized by an OS-owned mutex across bridge and controller processes; stale owner metadata is handled only while that mutex is held, so two `npm` repairs cannot overlap.
+- The local production HTTP/MCP runtime proves an IPv4 loopback-only socket, rejects non-loopback Host/Origin values, and requires a private high-entropy bearer token before MCP JSON parsing. Hosted v0.6 is supported only on the bounded production Node listener with a persistent volume; production Vercel and Cloudflare adapters fail closed until a durable hosted data adapter can preserve tenant isolation and deletion across request lifetimes.
 
 ## UX Flows
 
@@ -101,6 +166,30 @@ The painful part today is the gap between inspiration and construction: screensh
 
 1. Select an available export format from the active build.
 2. Download the generated file or checksummed bundle.
+
+**Manage a professional project**
+
+1. Create or open a tenant-scoped project and autosave the normalized contract and current immutable build version.
+2. Review version history and compare exact placement, material, contract, and certificate differences.
+3. Revise the whole build or a selected inclusive region; locked requirements and placements outside the selected region remain protected.
+4. Undo by restoring an earlier version as a new immutable head, preserving history rather than deleting it.
+5. Create a revocable, expiring client review link and record Approved or Changes requested state.
+6. Export a client delivery bundle from the approved version.
+
+**Install, repair, and update on Windows**
+
+1. Choose per-user installation or explicit portable mode, preferred loopback port, optional Codex integration, and optional `.schem` association.
+2. Detect port conflicts, discover local Java worlds read-only, report WorldEdit compatibility, and launch the workbench.
+3. Diagnose, repair, start, stop, or restart only the Blockwright-managed runtime from Control Center.
+4. Check a trusted release feed, verify the downloaded artifact before execution, apply the update, and relaunch or show rollback-safe recovery guidance.
+5. Export a locally redacted support bundle after a failure.
+
+**Use Blockwright from a browser**
+
+1. Understand the Java workflow, compatibility boundary, pricing state, and demonstrations from a first-party landing surface.
+2. Create an account or sign in, enter an isolated private workspace, and complete onboarding without MCP.
+3. Create, review, revise, export, and delete tenant-owned projects within enforced plan and upload limits.
+4. Manage billing through the configured payment provider and reach a visible support contact.
 
 **Review and annotate a build**
 
@@ -185,10 +274,16 @@ The painful part today is the gap between inspiration and construction: screensh
 - **Input:** `{ build }`
 - **Output:** Bounds, counts, collisions, identifier/state issues, support warnings, and budget status.
 
+**Tool: `validate_build_contract`**
+
+- **Input:** `{ build, contract? }`
+- **Output:** Normalized clauses; hard pass/fail/unsupported results; warnings; aesthetic observations; aggregate status; build hash; and evaluator version.
+- **Behavior:** Fails closed for unsupported or unevaluated hard clauses and never silently drops a user requirement.
+
 **Tool: `audit_build`**
 
 - **Input:** `{ build }`
-- **Output:** Grouped whole-build findings for state preservation, roof contact, light support, connection arms, isolated placements, and generator overlaps.
+- **Output:** Grouped whole-build findings for entrances, corridor clearance, spawn safety, room access, lighting, functional interiors, support/contact, state preservation, connection arms, isolation, generator overlap, palette legality, paste origin, budget, and exact-version compatibility, plus a human-readable certificate bound to the build hash.
 - **Behavior:** Scans every canonical placement; coordinate samples are capped for response size while total counts remain exact.
 
 **View: `review_build`**
@@ -221,8 +316,24 @@ The painful part today is the gap between inspiration and construction: screensh
 
 **Tool: `revise_build`**
 
-- **Input:** `{ build, changes }`
-- **Output:** Newly compiled immutable build record with a new deterministic hash.
+- **Input:** `{ build, changes, region? }`
+- **Output:** Newly compiled immutable build record with a new deterministic hash, parent hash, placement diff, and post-revision contract result.
+- **Behavior:** A region is an inclusive integer cuboid. Region revision must preserve placements outside it and fail if the requested change cannot preserve locked hard requirements.
+
+**Project tools: `create_project`, `list_projects`, `get_project`, `save_project_version`, `diff_project_versions`, `restore_project_version`, `delete_project`**
+
+- **Behavior:** Durable project CRUD and append-only immutable version history. Restore creates a new head. Every private operation is tenant-scoped in hosted mode.
+- **View:** Project summary, current certificate, autosave state, version timeline, exact before/after diff, approval state, and delivery action.
+
+**Hosted review routes: create/revoke review link, resolve exact snapshot, page placements, and record decision**
+
+- **Behavior:** Link creation and revocation require tenant-authorized hosted access. Snapshot reads and Approved or Changes requested decisions use a random expiring bearer token; the decision is hash-bound while the typed reviewer name is labeled self-asserted. All routes fail closed when hosted identity/storage are not configured.
+
+**Tool: `create_delivery_bundle`**
+
+- **Input:** `{ build, format, rotation?, origin?, reviewToken? }`
+- **Output:** User-initiated downloadable ZIP metadata and checksums.
+- **Behavior:** Includes the selected artifact, material list, normalized contract, hash-bound certificate, compatibility declaration, placement instructions, manifest, and optional persisted approval summary. Caller-authored approval claims are rejected; reviewer names remain explicitly self-asserted.
 
 **Tool: `continue_palette_interview`**
 
@@ -247,6 +358,15 @@ The painful part today is the gap between inspiration and construction: screensh
 
 - **Behavior:** Write/read GZip-compressed Sponge Schematic v3 NBT with Java `DataVersion`, unsigned dimensions, offset, state palette, varint block data, and supported block entities.
 
+**Litematic modes: `export_build` with `format: "litematic"`, and `import_schematic` with `format: "litematic"`**
+
+- **Behavior:** Write/read the documented Litematica container fields used by the declared compatibility matrix, preserving canonical block states, dimensions, origin, region bounds, timestamps, author metadata, and packed palette indices. Round-trip tests must use an independent parser or Litematica itself before compatibility is claimed.
+
+**Tool: `get_material_list`**
+
+- **Input:** `{ build, sortBy?, includeAir? }`
+- **Output:** Exact canonical block-state counts, grouped base-block totals, stack/shulker estimates labeled as planning aids, and build hash.
+
 **Tool: `discover_worlds`**
 
 - **Input:** Optional explicitly authorized saves root.
@@ -257,4 +377,4 @@ The painful part today is the gap between inspiration and construction: screensh
 - **Input:** World identifier, schematic name/data, explicit WorldEdit folder, transform/mask choices, and confirmation.
 - **Output:** With `confirmed: false`, a no-write preview containing dimension, anchor, affected bounds/chunks, block and palette counts, risk, conflict status, overwrite state, and exact load/paste instructions. With `confirmed: true`, the verified installed path and post-write parse result. It never edits region files.
 
-Large build placement pages are retrieved by an internal widget-only chunk tool and are not advertised as a user-facing action.
+Compile and review responses expose the immutable build shell plus a first page capped at 500 placements; they do not attach a full build record. Both views assemble the exact record with sequential calls to an internal widget-only chunk tool capped at 5,000 placements per response. Hosted chunks are served without recompilation from a 15-minute cache keyed by tenant, user, and build id, bounded to two records per principal, four records globally, and 500,000 placements globally. Cross-principal access and cache misses fail closed with a recompile/review instruction. Views accept the older full-record metadata shape only when it contains at most 2,000 identity-matched placements.

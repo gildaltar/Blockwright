@@ -15,7 +15,7 @@ import {
   paletteInterviewOutputSchema,
   savedPaletteOutputSchema,
 } from "./output-schemas.js";
-import { continuePaletteInterview, deletePalette, listPalettes, loadPalette, renamePalette, savePalette } from "./palette-studio.js";
+import { continuePaletteInterview, deletePalette, listPalettes, loadPalette, renamePalette, savePalette, validatePaletteIdentifiers } from "./palette-studio.js";
 import { estimateBuild } from "./preflight.js";
 import { auditBuild } from "./reviewer.js";
 import { exportSchematic, importSchematic } from "./schematic.js";
@@ -78,6 +78,12 @@ describe("modular architecture", () => {
 
   it("rejects invalid Java 26.2 role identifiers", () => {
     expect(() => compileBuild({ ...base, style: "nordic", rolePalette: { wall: "minecraft:not_a_26_2_block" } })).toThrow(/invalid.*wall/i);
+  });
+
+  it("requires Bedrock palette identifiers to be real registry entries with command-safe grammar", () => {
+    expect(validatePaletteIdentifiers("bedrock", "stable", { wall: "minecraft:stone" }).valid).toBe(true);
+    expect(validatePaletteIdentifiers("bedrock", "stable", { wall: "minecraft:not_a_real_block" }).valid).toBe(false);
+    expect(validatePaletteIdentifiers("bedrock", "stable", { wall: "minecraft:stone\nsetblock 0 0 0 minecraft:tnt" }).valid).toBe(false);
   });
 });
 

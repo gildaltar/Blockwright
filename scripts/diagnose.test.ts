@@ -56,11 +56,21 @@ function createHealthyPluginFixture() {
   addBuildFixture(root, "app");
   for (const name of [
     "Blockwright-ControlCenter.ps1",
+    "Blockwright-Paths.psm1",
+    "Initialize-Blockwright.ps1",
     "Install-BlockwrightShortcut.ps1",
     "Invoke-BlockwrightRuntimeRepair.ps1",
+    "Launch-Blockwright-Mcp.cmd",
     "Launch-Blockwright-ControlCenter.cmd",
     "Launch-Blockwright-ControlCenter.vbs",
+    "New-BlockwrightSupportBundle.ps1",
+    "Register-BlockwrightCodex.ps1",
+    "Remove-BlockwrightOwnedState.ps1",
+    "Set-BlockwrightSchematicAssociation.ps1",
+    "Start-Blockwright-Portable.cmd",
     "Test-ControlCenter.ps1",
+    "Test-WindowsDistribution.ps1",
+    "Update-Blockwright.ps1",
     "README.md",
   ]) writeFixtureFile(root, `scripts/windows/${name}`);
   return root;

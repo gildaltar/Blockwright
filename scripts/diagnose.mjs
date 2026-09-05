@@ -307,11 +307,21 @@ export function runDiagnostics(root = scriptRoot) {
 
   const controllerFiles = [
     resolve(resolvedRoot, "scripts", "windows", "Blockwright-ControlCenter.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Blockwright-Paths.psm1"),
+    resolve(resolvedRoot, "scripts", "windows", "Initialize-Blockwright.ps1"),
     resolve(resolvedRoot, "scripts", "windows", "Install-BlockwrightShortcut.ps1"),
     resolve(resolvedRoot, "scripts", "windows", "Invoke-BlockwrightRuntimeRepair.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Launch-Blockwright-Mcp.cmd"),
     resolve(resolvedRoot, "scripts", "windows", "Launch-Blockwright-ControlCenter.cmd"),
     resolve(resolvedRoot, "scripts", "windows", "Launch-Blockwright-ControlCenter.vbs"),
+    resolve(resolvedRoot, "scripts", "windows", "New-BlockwrightSupportBundle.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Register-BlockwrightCodex.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Remove-BlockwrightOwnedState.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Set-BlockwrightSchematicAssociation.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Start-Blockwright-Portable.cmd"),
     resolve(resolvedRoot, "scripts", "windows", "Test-ControlCenter.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Test-WindowsDistribution.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Update-Blockwright.ps1"),
     resolve(resolvedRoot, "scripts", "windows", "README.md"),
   ];
   const missingController = controllerFiles.filter((path) => !existsSync(path));

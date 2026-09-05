@@ -4,10 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import { Box, BoxSelect, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cuboid, Download, Eye, Folder, Layers3, Maximize2, MessageCircle, MousePointer2, Move, Pause, Pencil, Play, Ruler, Settings, SkipBack, SkipForward, Upload, X, } from "lucide-react";
+import { AlertTriangle, Box, BoxSelect, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Cuboid, Download, Eye, Folder, Layers3, Maximize2, MessageCircle, MousePointer2, Move, Pause, Pencil, Play, Ruler, Settings, SkipBack, SkipForward, Upload, X, } from "lucide-react";
 import { useDisplayMode, useDownload, useLayout, useViewState } from "skybridge/web";
 import { useToolInfo } from "../helpers.js";
+import {} from "../lib/build-view-paging.js";
 import { loadResourcePack, placementTextureKey } from "../lib/resource-pack.js";
+import { usePagedBuild } from "../use-paged-build.js";
 const MATERIAL_COLORS = {
     "minecraft:spruce_planks": "#7a4a28",
     "minecraft:stripped_spruce_log": "#57351e",
@@ -33,23 +35,42 @@ const BLOCK_LABELS = {
 function formatBlock(block) {
     return BLOCK_LABELS[block] ?? block.replace("minecraft:", "").split("_").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ");
 }
-function VoxelInstances({ placements, block, color, highlighted, textures }) {
+function useResourcePackTextures(texturePack) {
+    const textureMaps = useMemo(() => {
+        const maps = new Map();
+        if (!texturePack)
+            return maps;
+        const loader = new THREE.TextureLoader();
+        for (const faces of texturePack.textures.values()) {
+            for (const url of Object.values(faces)) {
+                if (maps.has(url))
+                    continue;
+                const map = loader.load(url);
+                map.colorSpace = THREE.SRGBColorSpace;
+                map.magFilter = THREE.NearestFilter;
+                map.minFilter = THREE.NearestMipmapNearestFilter;
+                maps.set(url, map);
+            }
+        }
+        return maps;
+    }, [texturePack]);
+    useEffect(() => () => { for (const map of textureMaps.values())
+        map.dispose(); }, [textureMaps]);
+    return textureMaps;
+}
+function VoxelInstances({ placements, block, color, highlighted, textures, textureMaps }) {
     const ref = useRef(null);
     const materials = useMemo(() => {
         if (!textures)
             return undefined;
-        const loader = new THREE.TextureLoader();
         const transparent = /glass|pane|door|trapdoor|leaves|lantern/.test(block);
         return [textures.right, textures.left, textures.top, textures.bottom, textures.front, textures.back].map((url) => {
-            const map = loader.load(url);
-            map.colorSpace = THREE.SRGBColorSpace;
-            map.magFilter = THREE.NearestFilter;
-            map.minFilter = THREE.NearestMipmapNearestFilter;
+            const map = textureMaps.get(url);
             return new THREE.MeshStandardMaterial({ map, roughness: 0.88, metalness: 0, transparent, alphaTest: transparent ? 0.08 : 0, emissive: highlighted ? new THREE.Color("#2a1608") : new THREE.Color("#000000"), emissiveIntensity: highlighted ? 0.24 : 0 });
         });
-    }, [block, highlighted, textures]);
+    }, [block, highlighted, textures, textureMaps]);
     useEffect(() => () => {
-        materials?.forEach((material) => { material.map?.dispose(); material.dispose(); });
+        materials?.forEach((material) => material.dispose());
     }, [materials]);
     useEffect(() => {
         if (!ref.current)
@@ -65,6 +86,7 @@ function VoxelInstances({ placements, block, color, highlighted, textures }) {
     return (_jsxs("instancedMesh", { ref: ref, args: [undefined, materials, placements.length], castShadow: true, receiveShadow: true, frustumCulled: false, children: [_jsx("boxGeometry", { args: [1, 1, 1] }), !materials && _jsx("meshStandardMaterial", { color: color, roughness: 0.82, metalness: 0.04, emissive: color, emissiveIntensity: highlighted ? 0.12 : 0, transparent: true, opacity: highlighted ? 1 : 0.96 })] }));
 }
 function VoxelScene({ build, maxLayer, selectedMaterial, orthographic, exploded, cameraPreset, texturePack }) {
+    const textureMaps = useResourcePackTextures(texturePack);
     const grouped = useMemo(() => {
         const result = new Map();
         const minY = build.bounds.min.y;
@@ -88,7 +110,7 @@ function VoxelScene({ build, maxLayer, selectedMaterial, orthographic, exploded,
     const cameraPosition = cameraPositions[cameraPreset];
     return (_jsxs(Canvas, { shadows: true, dpr: [1, 1.5], gl: { antialias: true, alpha: false }, children: [_jsx("color", { attach: "background", args: ["#071724"] }), orthographic
                 ? _jsx(OrthographicCamera, { makeDefault: true, position: cameraPosition, zoom: 16, onUpdate: (camera) => camera.lookAt(...center) }, `ortho-${cameraPreset}`)
-                : _jsx(PerspectiveCamera, { makeDefault: true, position: cameraPosition, fov: 42, onUpdate: (camera) => camera.lookAt(...center) }, `perspective-${cameraPreset}`), _jsx("ambientLight", { intensity: 0.82, color: "#a9bed0" }), _jsx("directionalLight", { position: [12, 24, 18], intensity: 2.1, color: "#dce8f0", castShadow: true, "shadow-mapSize-width": 2048, "shadow-mapSize-height": 2048 }), _jsx("pointLight", { position: [center[0], center[1], center[2] - 2], intensity: 18, distance: 17, color: "#ff9d3b" }), _jsx("group", { children: grouped.map(([key, group]) => _jsx(VoxelInstances, { block: group.block, placements: group.placements, color: MATERIAL_COLORS[group.block] ?? "#9aa1a4", highlighted: selectedMaterial === group.block, textures: texturePack?.textures.get(placementTextureKey(group.block, group.state)) }, key)) }), _jsx(Grid, { position: [center[0], build.bounds.min.y - 0.52, center[2]], args: [58, 58], cellSize: 1, cellThickness: 0.55, cellColor: "#294456", sectionSize: 5, sectionThickness: 0.9, sectionColor: "#36596d", fadeDistance: 42, fadeStrength: 1.5, infiniteGrid: true }), _jsx(OrbitControls, { makeDefault: true, target: center, minDistance: 10, maxDistance: 70, maxPolarAngle: Math.PI / 2.06 }, `${orthographic}-${cameraPreset}`)] }));
+                : _jsx(PerspectiveCamera, { makeDefault: true, position: cameraPosition, fov: 42, onUpdate: (camera) => camera.lookAt(...center) }, `perspective-${cameraPreset}`), _jsx("ambientLight", { intensity: 0.82, color: "#a9bed0" }), _jsx("directionalLight", { position: [12, 24, 18], intensity: 2.1, color: "#dce8f0", castShadow: true, "shadow-mapSize-width": 2048, "shadow-mapSize-height": 2048 }), _jsx("pointLight", { position: [center[0], center[1], center[2] - 2], intensity: 18, distance: 17, color: "#ff9d3b" }), _jsx("group", { children: grouped.map(([key, group]) => _jsx(VoxelInstances, { block: group.block, placements: group.placements, color: MATERIAL_COLORS[group.block] ?? "#9aa1a4", highlighted: selectedMaterial === group.block, textures: texturePack?.textures.get(placementTextureKey(group.block, group.state)), textureMaps: textureMaps }, key)) }), _jsx(Grid, { position: [center[0], build.bounds.min.y - 0.52, center[2]], args: [58, 58], cellSize: 1, cellThickness: 0.55, cellColor: "#294456", sectionSize: 5, sectionThickness: 0.9, sectionColor: "#36596d", fadeDistance: 42, fadeStrength: 1.5, infiniteGrid: true }), _jsx(OrbitControls, { makeDefault: true, target: center, minDistance: 10, maxDistance: 70, maxPolarAngle: Math.PI / 2.06 }, `${orthographic}-${cameraPreset}`)] }));
 }
 function ToolButton({ label, active, children, onClick }) {
     return _jsx("button", { className: `icon-button ${active ? "active" : ""}`, "aria-label": label, title: label, onClick: onClick, children: children });
@@ -129,10 +151,12 @@ export default function CompileBuildView() {
     const { output, isPending, responseMetadata } = useToolInfo();
     const [displayMode, setDisplayMode] = useDisplayMode();
     const { maxHeight } = useLayout();
-    const build = responseMetadata?.build;
-    const summary = output?.build;
-    const minLayer = build?.bounds.min.y ?? 0;
-    const maxLayer = build?.bounds.max.y ?? 13;
+    const metadata = responseMetadata;
+    const summary = output?.build ?? metadata?.buildSummary;
+    const pagedBuild = usePagedBuild(summary, metadata?.buildPage, metadata?.build);
+    const build = pagedBuild.build;
+    const minLayer = (build ?? summary)?.bounds.min.y ?? 0;
+    const maxLayer = (build ?? summary)?.bounds.max.y ?? 13;
     const [{ layer, selectedMaterial, orthographic, exploded, selectedStyle, cameraPreset }, setViewState] = useViewState({ layer: maxLayer, selectedMaterial: null, orthographic: false, exploded: false, selectedStyle: summary?.input.style ?? "nordic", cameraPreset: "iso" });
     const [playing, setPlaying] = useState(false);
     const [texturePack, setTexturePack] = useState(null);
@@ -179,8 +203,10 @@ export default function CompileBuildView() {
         setTexturePack(null);
         setTextureStatus("Procedural fallback");
     };
+    if (!isPending && summary && pagedBuild.error)
+        return _jsxs("div", { className: "loading-view", children: [_jsx(AlertTriangle, { size: 34 }), _jsxs("span", { children: ["Exact blocks could not be loaded. ", pagedBuild.error] })] });
     if (isPending || !summary || !build)
-        return _jsxs("div", { className: "loading-view", children: [_jsx("div", { className: "loading-cube", children: _jsx(Box, { size: 34 }) }), _jsx("span", { children: "Compiling exact blocks\u2026" })] });
+        return _jsxs("div", { className: "loading-view", children: [_jsx("div", { className: "loading-cube", children: _jsx(Box, { size: 34 }) }), _jsx("span", { children: summary ? `Loading exact blocks… ${pagedBuild.loaded.toLocaleString()} / ${pagedBuild.total.toLocaleString()}` : "Compiling exact blocks…" })] });
     if (displayMode !== "fullscreen") {
         return _jsxs("section", { className: "inline-summary", "data-llm": `Viewing ${build.input.name}, ${build.placements.length} blocks, layer ${layer}`, children: [_jsx("div", { className: "brand-cube", children: _jsx(Cuboid, { size: 23 }) }), _jsxs("div", { children: [_jsx("h2", { children: build.input.name }), _jsxs("p", { children: [build.placements.length.toLocaleString(), " exact blocks \u00B7 ", build.input.edition, " ", build.input.version, " \u00B7 ", build.bounds.dimensions.width, "\u00D7", build.bounds.dimensions.depth, "\u00D7", build.bounds.dimensions.height] })] }), _jsxs("button", { className: "primary-button", onClick: () => setDisplayMode("fullscreen"), children: [_jsx(Maximize2, { size: 16 }), "Open workbench"] })] });
     }

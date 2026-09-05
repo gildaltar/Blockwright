@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Blockwright">
+  <path fill="#071014" d="M0 0h64v64H0z"/>
+  <path fill="#ef8b3e" d="M10 10h20v20H10zM10 34h20v20H10zM34 10h20v20H34z"/>
+  <path fill="#16c6c8" d="m32 44 8 8 16-22-6-4-11 15-3-3z"/>
+</svg>

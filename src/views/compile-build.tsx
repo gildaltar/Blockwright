@@ -4,6 +4,7 @@ import { Canvas } from "@react-three/fiber";
 import { Grid, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import {
+  AlertTriangle,
   Box,
   BoxSelect,
   Check,
@@ -32,11 +33,13 @@ import {
 } from "lucide-react";
 import { useDisplayMode, useDownload, useLayout, useViewState } from "skybridge/web";
 import { useToolInfo } from "../helpers.js";
+import { type BuildPlacementPage, type BuildSummary } from "../lib/build-view-paging.js";
 import type { BuildRecord, Placement } from "../lib/types.js";
 import { loadResourcePack, placementTextureKey, type FaceTextures, type LoadedResourcePack } from "../lib/resource-pack.js";
+import { usePagedBuild } from "../use-paged-build.js";
 
-type ToolOutput = { build?: Omit<BuildRecord, "placements"> & { blockCount: number } };
-type ToolMetadata = { build?: BuildRecord };
+type ToolOutput = { build?: BuildSummary };
+type ToolMetadata = { buildSummary?: BuildSummary; buildPage?: BuildPlacementPage; build?: BuildRecord };
 
 const MATERIAL_COLORS: Record<string, string> = {
   "minecraft:spruce_planks": "#7a4a28",
@@ -66,22 +69,39 @@ function formatBlock(block: string) {
   return BLOCK_LABELS[block] ?? block.replace("minecraft:", "").split("_").map((part) => part[0].toUpperCase() + part.slice(1)).join(" ");
 }
 
-function VoxelInstances({ placements, block, color, highlighted, textures }: { placements: Placement[]; block: string; color: string; highlighted: boolean; textures?: FaceTextures }) {
+function useResourcePackTextures(texturePack: LoadedResourcePack | null) {
+  const textureMaps = useMemo(() => {
+    const maps = new Map<string, THREE.Texture>();
+    if (!texturePack) return maps;
+    const loader = new THREE.TextureLoader();
+    for (const faces of texturePack.textures.values()) {
+      for (const url of Object.values(faces)) {
+        if (maps.has(url)) continue;
+        const map = loader.load(url);
+        map.colorSpace = THREE.SRGBColorSpace;
+        map.magFilter = THREE.NearestFilter;
+        map.minFilter = THREE.NearestMipmapNearestFilter;
+        maps.set(url, map);
+      }
+    }
+    return maps;
+  }, [texturePack]);
+  useEffect(() => () => { for (const map of textureMaps.values()) map.dispose(); }, [textureMaps]);
+  return textureMaps;
+}
+
+function VoxelInstances({ placements, block, color, highlighted, textures, textureMaps }: { placements: Placement[]; block: string; color: string; highlighted: boolean; textures?: FaceTextures; textureMaps: Map<string, THREE.Texture> }) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const materials = useMemo(() => {
     if (!textures) return undefined;
-    const loader = new THREE.TextureLoader();
     const transparent = /glass|pane|door|trapdoor|leaves|lantern/.test(block);
     return [textures.right, textures.left, textures.top, textures.bottom, textures.front, textures.back].map((url) => {
-      const map = loader.load(url);
-      map.colorSpace = THREE.SRGBColorSpace;
-      map.magFilter = THREE.NearestFilter;
-      map.minFilter = THREE.NearestMipmapNearestFilter;
+      const map = textureMaps.get(url);
       return new THREE.MeshStandardMaterial({ map, roughness: 0.88, metalness: 0, transparent, alphaTest: transparent ? 0.08 : 0, emissive: highlighted ? new THREE.Color("#2a1608") : new THREE.Color("#000000"), emissiveIntensity: highlighted ? 0.24 : 0 });
     });
-  }, [block, highlighted, textures]);
+  }, [block, highlighted, textures, textureMaps]);
   useEffect(() => () => {
-    materials?.forEach((material) => { material.map?.dispose(); material.dispose(); });
+    materials?.forEach((material) => material.dispose());
   }, [materials]);
   useEffect(() => {
     if (!ref.current) return;
@@ -104,6 +124,7 @@ function VoxelInstances({ placements, block, color, highlighted, textures }: { p
 type CameraPreset = "iso" | "top" | "front" | "left" | "right";
 
 function VoxelScene({ build, maxLayer, selectedMaterial, orthographic, exploded, cameraPreset, texturePack }: { build: BuildRecord; maxLayer: number; selectedMaterial: string | null; orthographic: boolean; exploded: boolean; cameraPreset: CameraPreset; texturePack: LoadedResourcePack | null }) {
+  const textureMaps = useResourcePackTextures(texturePack);
   const grouped = useMemo(() => {
     const result = new Map<string, { block: string; state: Placement["state"]; placements: Placement[] }>();
     const minY = build.bounds.min.y;
@@ -135,7 +156,7 @@ function VoxelScene({ build, maxLayer, selectedMaterial, orthographic, exploded,
       <directionalLight position={[12, 24, 18]} intensity={2.1} color="#dce8f0" castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
       <pointLight position={[center[0], center[1], center[2] - 2]} intensity={18} distance={17} color="#ff9d3b" />
       <group>
-        {grouped.map(([key, group]) => <VoxelInstances key={key} block={group.block} placements={group.placements} color={MATERIAL_COLORS[group.block] ?? "#9aa1a4"} highlighted={selectedMaterial === group.block} textures={texturePack?.textures.get(placementTextureKey(group.block, group.state))} />)}
+        {grouped.map(([key, group]) => <VoxelInstances key={key} block={group.block} placements={group.placements} color={MATERIAL_COLORS[group.block] ?? "#9aa1a4"} highlighted={selectedMaterial === group.block} textures={texturePack?.textures.get(placementTextureKey(group.block, group.state))} textureMaps={textureMaps} />)}
       </group>
       <Grid position={[center[0], build.bounds.min.y - 0.52, center[2]]} args={[58, 58]} cellSize={1} cellThickness={0.55} cellColor="#294456" sectionSize={5} sectionThickness={0.9} sectionColor="#36596d" fadeDistance={42} fadeStrength={1.5} infiniteGrid />
       <OrbitControls key={`${orthographic}-${cameraPreset}`} makeDefault target={center} minDistance={10} maxDistance={70} maxPolarAngle={Math.PI / 2.06} />
@@ -188,10 +209,12 @@ export default function CompileBuildView() {
   const { output, isPending, responseMetadata } = useToolInfo<"compile_build">();
   const [displayMode, setDisplayMode] = useDisplayMode();
   const { maxHeight } = useLayout();
-  const build = (responseMetadata as ToolMetadata | undefined)?.build;
-  const summary = (output as ToolOutput | undefined)?.build;
-  const minLayer = build?.bounds.min.y ?? 0;
-  const maxLayer = build?.bounds.max.y ?? 13;
+  const metadata = responseMetadata as ToolMetadata | undefined;
+  const summary = (output as ToolOutput | undefined)?.build ?? metadata?.buildSummary;
+  const pagedBuild = usePagedBuild(summary, metadata?.buildPage, metadata?.build);
+  const build = pagedBuild.build;
+  const minLayer = (build ?? summary)?.bounds.min.y ?? 0;
+  const maxLayer = (build ?? summary)?.bounds.max.y ?? 13;
   const [{ layer, selectedMaterial, orthographic, exploded, selectedStyle, cameraPreset }, setViewState] = useViewState({ layer: maxLayer, selectedMaterial: null as string | null, orthographic: false, exploded: false, selectedStyle: summary?.input.style ?? "nordic", cameraPreset: "iso" as CameraPreset });
   const [playing, setPlaying] = useState(false);
   const [texturePack, setTexturePack] = useState<LoadedResourcePack | null>(null);
@@ -236,7 +259,8 @@ export default function CompileBuildView() {
     setTextureStatus("Procedural fallback");
   };
 
-  if (isPending || !summary || !build) return <div className="loading-view"><div className="loading-cube"><Box size={34} /></div><span>Compiling exact blocks…</span></div>;
+  if (!isPending && summary && pagedBuild.error) return <div className="loading-view"><AlertTriangle size={34} /><span>Exact blocks could not be loaded. {pagedBuild.error}</span></div>;
+  if (isPending || !summary || !build) return <div className="loading-view"><div className="loading-cube"><Box size={34} /></div><span>{summary ? `Loading exact blocks… ${pagedBuild.loaded.toLocaleString()} / ${pagedBuild.total.toLocaleString()}` : "Compiling exact blocks…"}</span></div>;
   if (displayMode !== "fullscreen") {
     return <section className="inline-summary" data-llm={`Viewing ${build.input.name}, ${build.placements.length} blocks, layer ${layer}`}>
       <div className="brand-cube"><Cuboid size={23} /></div>

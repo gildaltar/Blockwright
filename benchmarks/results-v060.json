@@ -1,0 +1,2029 @@
+{
+  "schemaVersion": 1,
+  "release": "0.6.0",
+  "classification": "synthetic internal acceptance corpus; not customer work",
+  "startedAt": "2026-09-05T07:17:17.081Z",
+  "durationMs": 1059,
+  "corpusSize": 100,
+  "passed": 100,
+  "failed": 0,
+  "categoryCounts": {
+    "baseline": 50,
+    "soft-requirements": 15,
+    "unsupported-hard": 15,
+    "lighting-threshold": 10,
+    "cardinal-entrances": 10
+  },
+  "results": [
+    {
+      "id": "BW060-001",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "ced138a894aa44a9a0e0a3350627586e08683000efc650a4eb50fd7e9f1724ed",
+      "blockCount": 744,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-002",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "cb34f9c354402f81f0c313d45692cec7f997d21f28aff0159d8fbe344218ba4e",
+      "blockCount": 1575,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-003",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "43be022f547e4e4066f18bc349478796acb7a0e7f6293992723b56cee41b0bf2",
+      "blockCount": 1507,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-004",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "bc5137dbbfd40a40af06a79babff33c01981a5a0cabad64a92688aac37a01d6e",
+      "blockCount": 1510,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-005",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "7fec35e1f9c5c2a423b545cb4497ce42802dae17a13af92152f6a8f261c2cea6",
+      "blockCount": 1337,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-006",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "19f148316bdf2b0834974834a12535cef11851c114787e3ae94f08438b288326",
+      "blockCount": 889,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-007",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "b1409c30aa97118df755001e8cdcc6eff11d580d8ae4b00109ef1eaccc99374e",
+      "blockCount": 1865,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-008",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "c1966c8dd71e1ddcdf2fa45e0c1d3c1a91c02532aa5030e049cffdad9da2db8a",
+      "blockCount": 1582,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-009",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "d72d6e6936f6fb2827c5a3a72bf65aa3013f3788c7e3c7ba12f889ad3580d453",
+      "blockCount": 958,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-010",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "dfb5759fae7df78a0f39d41ab6953e43a69f48d6a1d363f76da7a072f75c4738",
+      "blockCount": 1573,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-011",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "ddf83edf7b63ab06e04dcd124e2863a9b5ff784a83af27770fd80fca29668ce4",
+      "blockCount": 1064,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-012",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "5daf5a1c56e52d4f821cdf69627245417162ee32f0093be5695864fd5af43910",
+      "blockCount": 2091,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-013",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "a9de150ab603f4a1c575c9d2ee3751499f5237542bd32dd593d75dce07c52d0c",
+      "blockCount": 899,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-014",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "fcfb861b78ce34d645224acb502c90f66201bfe5a07278f14d9eaf88eedd49f7",
+      "blockCount": 1142,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-015",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "635d39e2980f86112840c015251e04b5dc3c0c58a99f4d09aaea84d277f26d8e",
+      "blockCount": 1776,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-016",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "634fb644c37711d2eb4da2244a7b8271aa622d97cbfccfd5cd7557ae6b0cc02a",
+      "blockCount": 1208,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-017",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "8afe3562c6226daca6fc1ec311465a80e5bfb22b502e6617473a0d85c008e90e",
+      "blockCount": 1341,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-018",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "a8c1f80516ce0a6fb79d8eaa447ea5a91895013482b58eaf6a5b258ad7cc0d0a",
+      "blockCount": 1234,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-019",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "be5149c2c4d39a107c5221f1235ba0307167935a74be9e78cae53a89abfb7b1f",
+      "blockCount": 1340,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-020",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "92f338a4c9307185e25888d04c0ef97924f43582e7bbe4c8c300e1f9dd77ca26",
+      "blockCount": 2245,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-021",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "c5650cc4f3fad3e68aac9caa22ed524a7e91c1c6fdc4c0faee9e8a6dfd673849",
+      "blockCount": 748,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-022",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "c9b7514b5d2ced3ebe149035d45eb65e6384848c051f7d86c81d1dba4be0e5b3",
+      "blockCount": 1575,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-023",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "27a8db03bd431a158a575b0128acee46e48a402a189a5fe449933689526cbdcb",
+      "blockCount": 1416,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-024",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "b7ba372b2f54a08da45ba8c449c5933db7b3d5ac71f63a574d0fcff16853c2c9",
+      "blockCount": 1888,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-025",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "01e604783efa944b5476afff1f6ce43c21e0d46950fb276c66c01d707eed824b",
+      "blockCount": 1337,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-026",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "39e8cae5282dbd00fa9a79ee9051a735f71492762f5655bca81bfa11c17bb93b",
+      "blockCount": 900,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-027",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "f87b468835da40daced4f61a794fce8c83637c6e646dd7e9b62a0cccbc0d8f1c",
+      "blockCount": 1865,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-028",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "b8c31a6d73306ebc3d033c7a00bc8b18ba2ad3deceb05d66bdd7dc18e789451a",
+      "blockCount": 1637,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-029",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "09c4dcaf0ce92787531f2f3809fbab30f7be77c0f3179f620577f536795579cd",
+      "blockCount": 952,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-030",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "ad03b295adea275971e3c994580e239e56f401bc03bb9043e851ef2a43b20697",
+      "blockCount": 1573,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-031",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "bfd97b3b73ebf1c85d4bbcbc9d9fbda8b45567af9d0acfec17c104957b5faa3f",
+      "blockCount": 1225,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-032",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "2fae7bff0db06ef9b1f9039e488834259f810a57cf8466b545f6a64fb5bdeda1",
+      "blockCount": 2135,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-033",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "aed19f150db38e797c3fe244ad7e0d33d97888a3bad0b2517c25e9f97a8cfe85",
+      "blockCount": 1023,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-034",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "0fb2f2b049bd4a5b93de43a04f3578c6d86091e4ca29925c90af62b3afaa1572",
+      "blockCount": 1123,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-035",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "c61aa287ed7aa36c794ab7cefaf6220242b77cb03287112d4e4f7f71af6d1c85",
+      "blockCount": 1776,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-036",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "90e43572bebcb588c0ee75021200295c863ccff600d144650dd640fe8327f49c",
+      "blockCount": 1206,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-037",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "98783316af5deba7a93738880b9f60f3790eb8c4dc7a8f4f77660fdddca77707",
+      "blockCount": 1341,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-038",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "be78558e1a4a74f4efbc444ff92a8ec46f3c37f9cde37070b487b0039828200a",
+      "blockCount": 1230,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-039",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "3cc2dd37f7a8b25e1053a7fdfc4581bfba50617ec2cf2c9436f5b9ba13c7d0fe",
+      "blockCount": 1338,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-040",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "4686191cc16d10d4d86f34d5d85082199365f38a3c5088d2b7bcd3834c0dd7b3",
+      "blockCount": 2049,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-041",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "933b671e3bc12851b7e9931112dc2233c665343b6a7aab8e3553c06e22636f30",
+      "blockCount": 759,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-042",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "3b9c5d55391300aa3e550990645361c5efd0df0c921ab88d364d32a20057b456",
+      "blockCount": 1575,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-043",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "577ae057ea7d1ae2c84e346927a944922a1a329b3ac2caccaf9b5a75fd88c193",
+      "blockCount": 1512,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-044",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "252c93960391434c41f622c24c032b04d90f84b20b0bfee08990e02b9fb1ab70",
+      "blockCount": 1506,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-045",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "c5f990ab779100e5e9097ee1ac7f1de92567c7a5ead841d5e58c8fee3ae7182c",
+      "blockCount": 1337,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-046",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "3afa2e68f264d1ec121ab26381566b16af1a0c693b45f82cb996dd8f45cbbdb6",
+      "blockCount": 898,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-047",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "39118c66c40a23b2e2a70331e6a5aecaac4dfecb75e4f94881417a9418085590",
+      "blockCount": 1865,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-048",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "fd7306e576935db442977d680a18d5fa4d6313f7dc2b8934cd3f2e1b7976862e",
+      "blockCount": 2129,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-049",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "24a79a64abca98303746b87b2c3f5ffda62f70942bf4ee0f851a77a6cd47c4c4",
+      "blockCount": 952,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-050",
+      "category": "baseline",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "dadc6fff46d0cd3dc7cd2f916552c4e288199ab232c09278f26df6e452600426",
+      "blockCount": 1573,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-051",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "90bfc083ae78c2656c0ef6e8eb7cc09d4f147ea36705ec578f3b602e21de83a1",
+      "blockCount": 1062,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-052",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "b90cdeb395a3ed07da61ee5714715be85f578cb5596848ecb601bdaf96127cb6",
+      "blockCount": 2135,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-053",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "a99877512146a87f9fdcc4c69c19cf42caaad1599720ca8a2451423895050096",
+      "blockCount": 1035,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-054",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "ac8484a8d9f63ba21ea4ba0c3215137483320d368515c6b67648031ad84eb880",
+      "blockCount": 1140,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-055",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "82d8e07be017c6d667ad992c37ee0c2d45f04b3dcc07b4e626e908e41f026ebf",
+      "blockCount": 1959,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-056",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "79ac3bfb4e0ebd25fc50638269fe2f64673264511057aee641f152f5182cfc51",
+      "blockCount": 1210,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-057",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "abb165b6ce50f2e52cd8d54269be99c65cc58c3bcc9d9fe7f5cc1ee779216359",
+      "blockCount": 1341,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-058",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "161468dad5a67d7351ba6b25534a0e1acfb3da17bd9629d501eaa0dc3c996983",
+      "blockCount": 1328,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-059",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "26b856898049dd6fcc92bdb27e466351a96fb37765642fae48da210f934ab08f",
+      "blockCount": 1633,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-060",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "a486e1d4f64d0f9dd7a01f3638ed25389be784aea7d09fffe53b88a90c86b53a",
+      "blockCount": 2049,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-061",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "7c5c4a5429116a787904cf4fca34f92a853f0068da8496671cf7e6bd2898861d",
+      "blockCount": 748,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-062",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "b8ec505cb8106a324b8275c90e776d509e365c5eb475116bf1fcd95046155ae8",
+      "blockCount": 1575,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-063",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "a995349e3576dcd280287ec7ed54c965203d549f6710b84308051fbca11263e9",
+      "blockCount": 1415,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-064",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "8006d307f26e1d0036e3644f0b49efb5ac94ba12c78f5144bfbd7f4b7ea472bf",
+      "blockCount": 1508,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-065",
+      "category": "soft-requirements",
+      "expectedContractStatus": "valid",
+      "observedContractStatus": "valid",
+      "passed": true,
+      "buildHash": "ba3b390341c66323ebda0e001f762d62904bfde6d0169dd7ed67594d096960bf",
+      "blockCount": 1337,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": []
+    },
+    {
+      "id": "BW060-066",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "cd8e8e16ba0fca2bca877eea1e9e20b7865a993a8823349291a99e858a8046ae",
+      "blockCount": 1079,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 1"
+        }
+      ]
+    },
+    {
+      "id": "BW060-067",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "0e7dd41bf84ed2dab3598c6ce4042cbe0fb05917bfe8dbc3ff4f3024ff2eef84",
+      "blockCount": 1865,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 2"
+        }
+      ]
+    },
+    {
+      "id": "BW060-068",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "f90466630c9e20f913f4ed3442299a83c8f8f0e8609a8bec5625e8b6c9272ac7",
+      "blockCount": 1674,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 3"
+        }
+      ]
+    },
+    {
+      "id": "BW060-069",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "375fa485ea1fd789f91067da4b2d0be6969b068214b546497b22e9fd11278231",
+      "blockCount": 969,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 4"
+        }
+      ]
+    },
+    {
+      "id": "BW060-070",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "d6e2aec7b79d3ea2f749f6124364df62055ed206fa520eabdd46e08f699b583d",
+      "blockCount": 1573,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 5"
+        }
+      ]
+    },
+    {
+      "id": "BW060-071",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "86194244f668f8d4b1c6be03df3aa59c4568dce0c580d6eb358d812ef5ae94ac",
+      "blockCount": 1062,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 6"
+        }
+      ]
+    },
+    {
+      "id": "BW060-072",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "3bbc6b22a68eb094f4f7fc60bc5e849c467fc994b408d30baa1037686ea66756",
+      "blockCount": 2135,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 7"
+        }
+      ]
+    },
+    {
+      "id": "BW060-073",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "df8fa375b5c11a3177881acf10c63592adc8df0ff743a9c83b0d8f448ff7db60",
+      "blockCount": 1197,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 8"
+        }
+      ]
+    },
+    {
+      "id": "BW060-074",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "4f6ae19cb461882e1a20c02383fda3c69b0d0edbce73e2d3f1b75139baa96a09",
+      "blockCount": 1144,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 9"
+        }
+      ]
+    },
+    {
+      "id": "BW060-075",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "ccd878acb10a91dba6a57997fb486a07451cebc568c1a7fde4249030c3e29e3b",
+      "blockCount": 1776,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 10"
+        }
+      ]
+    },
+    {
+      "id": "BW060-076",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "2037c162a88c7f6bbbd140c395d1a6d19499b71def41b05d8189acce5a1cebbc",
+      "blockCount": 1173,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 11"
+        }
+      ]
+    },
+    {
+      "id": "BW060-077",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "2a102041c069844a0545be504940473117a83d3ba341103394a0d598a7527f42",
+      "blockCount": 1341,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 12"
+        }
+      ]
+    },
+    {
+      "id": "BW060-078",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "906b264719e7fbc9f12da156bdaaddef0c829e94b5b1c37fb1d14176586b1922",
+      "blockCount": 1238,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 13"
+        }
+      ]
+    },
+    {
+      "id": "BW060-079",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "863b00208010418644f32e17b7a65acd16dcf22fdf2dc2e43482a451c8ec0fa8",
+      "blockCount": 1342,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 14"
+        }
+      ]
+    },
+    {
+      "id": "BW060-080",
+      "category": "unsupported-hard",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "01e220df21fb581f3b13a33cad3ebfef5c712b894e182188a27e9c46bbff42f7",
+      "blockCount": 2049,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 0,
+        "unsupported": 1,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1",
+          "status": "unsupported",
+          "requirement": "dragon statue variant 15"
+        }
+      ]
+    },
+    {
+      "id": "BW060-081",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "0bf91603ed54a36de969383e14f8c2fd233205051155787346194891e45200e7",
+      "blockCount": 746,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-082",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "12dc451a34677053796a44db68143ed35ba178038e73f2f7143a53121e1a8f66",
+      "blockCount": 1611,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-083",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "6fc86081db54603a028ce6f9f30f86874b0671a039ef54b7039c0e3e79726d48",
+      "blockCount": 1859,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-084",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "c07d68f81f80905bc3e0c1e5abf57a74ae24aa45602607738947c432e08c3961",
+      "blockCount": 1514,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-085",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "1461a05b8c3e4c8a67f24802964ad31a08cc679861820001535c65a487ec5e56",
+      "blockCount": 1337,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-086",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "ce6304efb833fd0fd03b658284c6d7768e6b33af4a664c4bed09686043a7c734",
+      "blockCount": 904,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-087",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "0ff20c98bcc21e90a80cf7f01f92f708b96677c5be8036c25c1e555eab7be5a3",
+      "blockCount": 1865,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-088",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "b498002bdb982949a24cc53f0facf21223702b4947e8adebe9273c51d2d56041",
+      "blockCount": 1674,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-089",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "9ada982c9d0c1a123e657444de47cbe281dd1a68960c78da521c2439b45c0573",
+      "blockCount": 958,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-090",
+      "category": "lighting-threshold",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "b8632776dfd381afd10d3d1af9778af77a50e5cde9aa1838f6116e6ebcb6078f",
+      "blockCount": 1177,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-lighting",
+          "status": "fail",
+          "requirement": "distributed interior lighting"
+        }
+      ]
+    },
+    {
+      "id": "BW060-091",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "47bf9d79d53b69b7a72884588a82ae613bcd0c32366f5371ac0b0b2f1a91fa38",
+      "blockCount": 1062,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-092",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "8016924973df9ffde244ec3f2089cf60cd7c7cb0004b6de746e5f8ef8c9cf74b",
+      "blockCount": 2135,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-093",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "5308e906fa941e9f59e8bd307d2835e0379518b721535371ff4623e62c789513",
+      "blockCount": 978,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-094",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "505e85e2b291d76acb42da89d7713be5cc1d6157c68a127608d03e47133e7f10",
+      "blockCount": 1445,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-095",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "3ac88dbec7b08d8eb58e1ad4f9612f78bdbee0b07d78223e316e84c0ef872f8d",
+      "blockCount": 1776,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-096",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "5a03124268fce563e203258f168b45291f8bb9936404db42fc3b16489c70bb08",
+      "blockCount": 1206,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-097",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "0d68166c6fa1ac027dfdf87eb71639228d8c5791b1912da9fefa3e0d2a568337",
+      "blockCount": 1341,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-098",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "ce04ca38cc0548c70a4800ef62d9af5ba6252340df491a5f5a06c8a30916fae6",
+      "blockCount": 1230,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-099",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "cd84bae9aaea76612a099569a64b3c970bce7cde386d46a2456944db4b35a273",
+      "blockCount": 1338,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    },
+    {
+      "id": "BW060-100",
+      "category": "cardinal-entrances",
+      "expectedContractStatus": "invalid",
+      "observedContractStatus": "invalid",
+      "passed": true,
+      "buildHash": "a3d8c06144e3bc7ca0e3f1bdeb0f865bf9014286e25211c241de0ae94369dad6",
+      "blockCount": 2049,
+      "certificateBound": true,
+      "missingSemanticCategories": [],
+      "hardSummary": {
+        "passed": 8,
+        "failed": 1,
+        "unsupported": 0,
+        "unevaluated": 0
+      },
+      "nonPassingClauses": [
+        {
+          "clauseId": "feature-1-entrances",
+          "status": "fail",
+          "requirement": "north, south, east, west entrances with at least 9 block(s) clear width"
+        }
+      ]
+    }
+  ]
+}

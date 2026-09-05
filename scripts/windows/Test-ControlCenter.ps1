@@ -6,6 +6,7 @@ if ($env:OS -ne "Windows_NT") { throw "These controller integration checks requi
 
 $controllerPath = Join-Path $PSScriptRoot "Blockwright-ControlCenter.ps1"
 $repairPath = Join-Path $PSScriptRoot "Invoke-BlockwrightRuntimeRepair.ps1"
+$pathsModulePath = Join-Path $PSScriptRoot "Blockwright-Paths.psm1"
 $shortcutInstallerPath = Join-Path $PSScriptRoot "Install-BlockwrightShortcut.ps1"
 $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $testRoot = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) ("Blockwright Control Center Test " + [guid]::NewGuid().ToString("N"))))
@@ -48,6 +49,7 @@ function Invoke-WindowsPowerShell {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.EnvironmentVariables["BLOCKWRIGHT_STATE_ROOT"] = (Join-Path $testRoot "state")
     if ($null -ne $EnvironmentVariables) {
         foreach ($name in $EnvironmentVariables.Keys) {
             $startInfo.EnvironmentVariables[[string]$name] = [string]$EnvironmentVariables[$name]
@@ -124,6 +126,8 @@ import http from "node:http";
 
 const port = Number(process.env.__PORT || process.env.PORT);
 const service = process.env.BLOCKWRIGHT_FIXTURE_SERVICE || "blockwright";
+const token = process.env.BLOCKWRIGHT_LOCAL_MCP_TOKEN;
+if (!/^[A-Za-z0-9_-]{43,128}$/.test(token || "")) throw new Error("Fixture did not receive a strong per-launch MCP token.");
 const server = http.createServer((request, response) => {
   response.setHeader("content-type", "application/json");
   if (request.url === "/health") {
@@ -132,6 +136,22 @@ const server = http.createServer((request, response) => {
   }
   if (request.url === "/ready") {
     response.end(JSON.stringify({ status: "ready", service, version: "9.9.9", checks: { runtime: { ok: true } } }));
+    return;
+  }
+  if (request.url === "/mcp") {
+    if (request.headers.authorization !== `Bearer ${token}`) {
+      response.statusCode = 401;
+      response.end(JSON.stringify({ ok: false, error: "authorization required" }));
+      return;
+    }
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      const message = JSON.parse(body);
+      console.log("MCP_AUTH=ok");
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: service, version: "9.9.9" } } }));
+    });
     return;
   }
   response.end(JSON.stringify({ service, endpoint: request.url }));
@@ -146,20 +166,25 @@ process.stdin.on("end", () => server.close(() => process.exit(0)));
     [System.IO.File]::WriteAllText((Join-Path $appRoot "package-lock.json"), $packageLock, (New-Object System.Text.UTF8Encoding($false)))
     [System.IO.File]::WriteAllText((Join-Path $distRoot "__entry.js"), $fixtureServer, (New-Object System.Text.UTF8Encoding($false)))
     [System.IO.File]::Copy($repairPath, (Join-Path $fixtureWindowsScripts "Invoke-BlockwrightRuntimeRepair.ps1"), $true)
+    [System.IO.File]::Copy($pathsModulePath, (Join-Path $fixtureWindowsScripts "Blockwright-Paths.psm1"), $true)
 
-    foreach ($scriptPath in @($controllerPath, $repairPath, $shortcutInstallerPath, $PSCommandPath)) {
+    foreach ($scriptPath in @($controllerPath, $repairPath, $pathsModulePath, $shortcutInstallerPath, $PSCommandPath)) {
         $tokens = $null
         $parseErrors = $null
         [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
         Assert-Condition ($parseErrors.Count -eq 0) "PowerShell parsing failed for $scriptPath`: $($parseErrors.Message -join '; ')"
     }
-    Add-Pass "powershell-parse" "Controller, repair helper, shortcut helper, and this test script parse without errors."
+    Add-Pass "powershell-parse" "Controller, path/runtime module, repair helper, shortcut helper, and this test script parse without errors."
 
     $controllerSource = [System.IO.File]::ReadAllText($controllerPath)
-    foreach ($requiredFragment in @('app\dist\__entry.js', 'NODE_ENV = "production"', '__PORT = [string]$Port', 'npm ls', 'TakeDroppedCount', 'MaxLines = 250')) {
+    foreach ($requiredFragment in @('app\dist\__entry.js', 'Get-BlockwrightPrivateNode', 'Write-ManagedServerRecord', 'BLOCKWRIGHT_STATE_ROOT = $script:StateRoot', 'BLOCKWRIGHT_STATE_DIR = $script:StateRoot', 'BLOCKWRIGHT_LOCAL_MCP_TOKEN = $script:LocalMcpToken', 'New-LocalMcpToken', 'Authorization', 'NODE_ENV = "production"', '__PORT = [string]$Port', 'npm ls', 'TakeDroppedCount', 'MaxLines = 250', 'UpdateButton', 'Update-Blockwright.ps1', 'Start-BlockwrightUpdateProcess -Mode "check"', ' -CheckOnly', 'MessageBoxResult]::Yes', 'Start-BlockwrightUpdateProcess -Mode "install"', 'last-check.json', 'nothing will be installed without confirmation')) {
         Assert-Condition ($controllerSource.Contains($requiredFragment)) "Controller contract fragment is missing: $requiredFragment"
     }
-    Add-Pass "source-contracts" "Direct entry, production port variables, full dependency validation, and bounded log drains are present."
+    $checkInvocationIndex = $controllerSource.IndexOf('Start-BlockwrightUpdateProcess -Mode "check"')
+    $confirmationIndex = $controllerSource.IndexOf('MessageBoxResult]::Yes')
+    $installInvocationIndex = $controllerSource.IndexOf('Start-BlockwrightUpdateProcess -Mode "install"')
+    Assert-Condition ($checkInvocationIndex -ge 0 -and $confirmationIndex -ge 0 -and $installInvocationIndex -gt $confirmationIndex) "Control Center update installation is not structurally gated behind the explicit confirmation result."
+    Add-Pass "source-contracts" "Direct entry, production port variables, full dependency validation, bounded log drains, and confirmed two-phase updates are present."
 
     $validateArguments = "-NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -ValidateUi"
     $validateResult = Invoke-WindowsPowerShell -Arguments $validateArguments
@@ -167,6 +192,13 @@ process.stdin.on("end", () => server.close(() => process.exit(0)));
     $validation = $validateResult.StandardOutput | ConvertFrom-Json
     Assert-Condition ([bool]$validation.valid) "WPF named-control validation reported invalid."
     Add-Pass "wpf-validation" "$($validation.controls) named controls resolved without opening the UI."
+
+    $capturePath = Join-Path $testRoot "control-center-render.png"
+    $captureArguments = "-NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -CaptureUiPath $(Quote-NativeArgument $capturePath)"
+    $captureResult = Invoke-WindowsPowerShell -Arguments $captureArguments
+    Assert-Condition ($captureResult.ExitCode -eq 0) "Render-only Control Center capture failed: $($captureResult.StandardError)"
+    Assert-Condition ((Test-Path -LiteralPath $capturePath -PathType Leaf) -and (Get-Item -LiteralPath $capturePath).Length -gt 10000) "Render-only Control Center capture did not produce a substantive PNG."
+    Add-Pass "render-only-capture" "The updated stopped-state Control Center can render to PNG without starting a server or update operation."
 
     $smokePort = Get-FreePort
     $smokeArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -SmokeTest -SmokeTestSeconds 10 -Port $smokePort -Json"
@@ -176,6 +208,8 @@ process.stdin.on("end", () => server.close(() => process.exit(0)));
     Assert-Condition ([bool]$smoke.healthy) "Direct-entry smoke did not become healthy."
     $joinedLogs = @($smoke.logs) -join "`n"
     Assert-Condition ($joinedLogs -match "ENTRY=__entry NODE_ENV=production __PORT=$smokePort PORT=$smokePort") "Direct entry did not receive the required production environment."
+    Assert-Condition ($joinedLogs -match "MCP_AUTH=ok") "Control Center did not authenticate its MCP initialize smoke request."
+    Assert-Condition ($joinedLogs -notmatch "BLOCKWRIGHT_LOCAL_MCP_TOKEN=") "The per-launch MCP token was written to a captured log."
     Assert-Condition (Test-PortAvailable -Port $smokePort) "The bounded smoke test left port $smokePort in use."
     Add-Pass "direct-entry-smoke" "Strict /health and /ready passed on port $smokePort; the process stopped and released the listener."
 
