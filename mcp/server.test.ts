@@ -6,6 +6,7 @@ import { networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { describe, expect, it } from "vitest";
+import { loadBuildForView } from "../src/lib/build-view-paging.js";
 import { isStrongLocalMcpToken, mcpRequestTargetDisposition, trustedClientAddress } from "../src/lib/runtime-listener.js";
 import {
   appRoot,
@@ -1198,6 +1199,47 @@ describe("Blockwright stdio bridge helpers", () => {
         input: { dimensions: { width: 256, depth: 32, height: 64 } },
         preflight: { totalVolume: 524_288, estimatedPlacementAttempts: 8_192 },
       });
+
+      const sparseReview = await callTool(
+        "public-connector-review-paging",
+        "review_build",
+        { build: sparseBuild.cacheRef },
+        sharedSessionHeaders,
+      );
+      expect(sparseReview.result?.isError, JSON.stringify(sparseReview)).not.toBe(true);
+      const reviewSummary = sparseReview.result?._meta?.buildSummary;
+      const initialReviewPage = sparseReview.result?._meta?.buildPage;
+      expect(reviewSummary).toMatchObject({
+        id: sparseBuild.id,
+        cacheRef: expect.stringMatching(/^bwc_[A-Za-z0-9_-]{32}\.bw_[a-f0-9]{12}$/),
+        blockCount: 8_192,
+      });
+      expect(initialReviewPage).toMatchObject({
+        buildId: reviewSummary.cacheRef,
+        offset: 0,
+        returned: 500,
+        total: 8_192,
+      });
+
+      const pageReferences: string[] = [];
+      const reassembledReviewBuild = await loadBuildForView({
+        summary: reviewSummary,
+        initialPage: initialReviewPage,
+        fetchPage: async ({ buildId, offset, limit }) => {
+          pageReferences.push(buildId);
+          const response = await callTool(
+            `public-connector-review-page-${offset}`,
+            "get_build_chunk",
+            { build: buildId, offset, limit },
+            sharedSessionHeaders,
+          );
+          expect(response.result?.isError, JSON.stringify(response)).not.toBe(true);
+          return { ...response.result?.structuredContent, placements: response.result?._meta?.placements };
+        },
+      });
+      expect(pageReferences).toEqual([reviewSummary.cacheRef, reviewSummary.cacheRef]);
+      expect(reassembledReviewBuild).toMatchObject({ id: sparseBuild.id, hash: sparseBuild.hash });
+      expect(reassembledReviewBuild.placements).toHaveLength(8_192);
 
       // Trust-proxy=0 must ignore a caller-controlled forwarding header. The
       // cached id therefore resolves under the same synthetic request principal.

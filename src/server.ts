@@ -601,7 +601,7 @@ function cachedBuildForView(value: unknown) {
     throw new Error("VIEW_BUILD_CACHE_MISS: this build is no longer available in the bounded view cache. Rerun compile_build or review_build to reopen it.");
   }
   if (suppliedHash && suppliedHash !== build.hash) throw new Error("Build integrity check failed: the requested placement page hash does not match the cached build.");
-  return build;
+  return { build, pageReference: publicLocation?.cacheRef ?? build.id };
 }
 
 function buildSummaryForClient(build: BuildRecord, cacheRef: string) {
@@ -2334,9 +2334,9 @@ const server = new McpServer(
       },
     },
     async ({ build: value, offset, limit }) => {
-      const build = cachedBuildForView(value);
+      const { build, pageReference } = cachedBuildForView(value);
       const { placements, ...page } = createBuildPlacementPage(build, offset, limit);
-      return { structuredContent: page, content: [], _meta: { placements } };
+      return { structuredContent: { ...page, buildId: pageReference }, content: [], _meta: { placements } };
     },
   );
 
