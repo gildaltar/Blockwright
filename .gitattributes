@@ -6,3 +6,7 @@
 # Generated application bundles can contain vendor shader strings whose
 # whitespace is semantically owned by the bundler, not by source formatting.
 app/dist/** -whitespace
+
+# Vite copies these inputs byte-for-byte into content-addressed assets. Keep
+# their checkout form identical on Windows and Linux so hashes stay stable.
+standalone/** text eol=lf
