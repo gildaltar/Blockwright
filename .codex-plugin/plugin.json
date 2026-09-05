@@ -1,7 +1,7 @@
 {
   "name": "blockwright",
-  "version": "0.6.0",
-  "description": "Contract-driven Minecraft Java architect with deterministic plans, semantic verification, client review, and delivery-ready schematics.",
+  "version": "0.7.0",
+  "description": "Contract-driven Minecraft Java and Bedrock architect with generic requirement-mapped geometry, open-ended materials, semantic verification, and certified construction artifacts.",
   "author": {
     "name": "Gildaltar",
     "url": "https://github.com/gildaltar"
@@ -13,8 +13,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Blockwright",
-    "shortDescription": "Turn exact briefs into verified Java builds.",
-    "longDescription": "Blockwright turns measurable Minecraft Java briefs into deterministic build records, validates hard semantic requirements, supports region-scoped review and revision, exports Sponge and Litematica deliverables, and packages evidence that a client can inspect before installation.",
+    "shortDescription": "Turn exact briefs into verified Minecraft builds.",
+    "longDescription": "Blockwright turns complete Minecraft Java or Bedrock briefs into deterministic, requirement-mapped build records. It composes unfamiliar forms from generic geometry, supports open-ended material libraries, validates hard semantic requirements, keeps visual review opt-in, and exports certified Java or tiled Bedrock construction artifacts.",
     "developerName": "Gildaltar",
     "category": "Developer Tools",
     "capabilities": [
@@ -22,16 +22,20 @@
       "Minecraft version sync",
       "Texture preview",
       "Adaptive palette studio",
+      "Open-ended material libraries",
+      "Generic requirement-mapped design geometry",
       "Seeded architectural candidates",
       "Fail-closed build contracts",
       "State-aware 3D build reviewer",
       "Whole-build structural audit",
       "Region-scoped revision history",
       "Sponge and Litematica delivery exports",
+      "Tiled Bedrock mcstructure and mcpack exports",
       "Local world discovery",
       "Private Windows runtime, updates, and diagnostics"
     ],
     "defaultPrompt": [
+      "Design a verified Bedrock attraction from my complete brief and export an mcpack.",
       "Design a verified Java 26.2 survival base.",
       "Audit my build contract and show every hard failure.",
       "Revise one region and prepare a client delivery bundle."

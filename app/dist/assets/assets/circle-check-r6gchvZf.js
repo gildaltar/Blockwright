@@ -1,0 +1,1 @@
+import{O as e}from"./v4-BJmWi5kg.js";import{d as t,r as n,u as r}from"./helpers-z9v0JHte.js";var i=e(t(),1);function a(){let e=r();return(0,i.useCallback)(()=>e.requestClose(),[e])}var o=n(`circle-check`,[[`circle`,{cx:`12`,cy:`12`,r:`10`,key:`1mglay`}],[`path`,{d:`m9 12 2 2 4-4`,key:`dzmm74`}]]);export{a as n,o as t};

@@ -166,26 +166,29 @@
 .review-status span:nth-child(3) { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
 .review-status strong { color: #9fb1ba; white-space: nowrap; }
 .review-inline .brand-cube { color: #dfa15f; }
+.review-header-actions > .review-close-button { color: #ffc2ba; border-color: rgba(239,107,91,.45); background: rgba(92,34,31,.5); }
+.review-header-actions > .review-close-button:hover { color: #fff; border-color: #ef6b5b; background: rgba(126,42,37,.72); }
 .review-shell button:focus-visible, .review-shell input:focus-visible, .review-shell select:focus-visible, .review-shell textarea:focus-visible { outline: 2px solid #f0a04a; outline-offset: 2px; }
 
 @media (max-width: 900px) {
-  .review-shell { grid-template-columns: 48px minmax(0, 1fr); grid-template-rows: 58px minmax(480px, 58vh) minmax(240px, auto) 34px; height: auto; max-height: none !important; overflow: visible; }
+  .review-shell { grid-template-columns: 48px minmax(0, 1fr); grid-template-rows: 58px minmax(160px, 58%) minmax(0, 1fr) 34px; height: 100vh; min-height: 0; overflow: hidden; }
   .review-header { grid-column: 1 / -1; }
   .review-header-actions > button { width: 34px; padding: 0 !important; justify-content: center; font-size: 0 !important; }
   .review-header-actions > button:first-child { display: none; }
   .review-tools { grid-row: 2; }
-  .review-viewport { grid-column: 2; grid-row: 2; min-height: 480px; }
-  .review-inspector { grid-column: 1 / -1; grid-row: 3; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); overflow: visible; border-left: 0; border-top: 1px solid var(--review-border); }
+  .review-viewport { grid-column: 2; grid-row: 2; min-height: 0; }
+  .review-inspector { grid-column: 1 / -1; grid-row: 3; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); overflow: hidden auto; overscroll-behavior: contain; border-left: 0; border-top: 1px solid var(--review-border); }
   .review-inspector > section { border-right: 1px solid var(--review-border); }
   .review-status { grid-row: 4; }
 }
 
 @media (max-width: 620px) {
-  .review-shell { grid-template-columns: 44px minmax(0,1fr); grid-template-rows: 56px minmax(380px, 60vh) auto 32px; border-radius: 10px; }
+  .review-shell { grid-template-columns: 44px minmax(0,1fr); grid-template-rows: 56px minmax(150px, 52%) minmax(0,1fr) 32px; height: 100vh; min-height: 0; border-radius: 10px; }
   .review-header { padding-left: 12px; }
   .review-header h1 { max-width: 145px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .review-header-actions { gap: 4px; }
-  .review-header-actions .review-icon-button { display: none; }
+  .review-header-actions > button:not(.review-close-button) { display: none; }
+  .review-header-actions > .review-close-button { display: inline-flex; }
   .review-inspector { grid-template-columns: 1fr; }
   .review-tools { padding-inline: 3px; }
   .review-icon-button { width: 36px; }
@@ -208,12 +211,80 @@ html, body, #root { min-width: 0; min-height: 100%; margin: 0; }
 button, input { font: inherit; }
 button { color: inherit; }
 
+/* Export-only Bedrock card: intentionally no canvas, paging, or 3D surface. */
+.bedrock-download-card {
+  width: 100%; max-width: 620px; min-height: 0; margin: 0 auto; overflow: hidden;
+  color: var(--text); background: #0b1821; border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0,0,0,.28);
+}
+.bedrock-download-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; background: #0e202b; border-bottom: 1px solid var(--line-soft); }
+.bedrock-download-header h1 { margin: 2px 0 0; overflow: hidden; font-size: 17px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.bedrock-download-header > div { min-width: 0; }
+.bedrock-close { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 10px; color: #ffc2ba; background: rgba(92,34,31,.5); border: 1px solid rgba(239,107,91,.45); border-radius: 8px; cursor: pointer; }
+.bedrock-close:hover { color: #fff; border-color: #ef6b5b; background: rgba(126,42,37,.72); }
+.bedrock-download-file { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 12px; margin: 16px 18px 12px; padding: 13px; background: #0f2531; border: 1px solid #29404c; border-radius: 10px; }
+.bedrock-file-icon { display: grid; place-items: center; width: 44px; height: 44px; color: #f3b16f; background: rgba(217,130,50,.12); border-radius: 9px; }
+.bedrock-download-file > div { display: grid; min-width: 0; gap: 4px; }
+.bedrock-download-file strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.bedrock-download-file span { color: var(--muted); font-size: 11px; }
+.bedrock-download-file > svg { color: #78c8ad; }
+.bedrock-download-facts { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 0 18px 12px; }
+.bedrock-download-facts > div { min-width: 0; padding: 10px; background: #091923; border: 1px solid var(--line-soft); border-radius: 8px; }
+.bedrock-download-facts dt { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; color: #78909b; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+.bedrock-download-facts dd { margin: 0; overflow-wrap: anywhere; color: #dce7eb; font-size: 11px; }
+.bedrock-compatibility-note { margin: 0 18px 10px; color: #aebdc4; font-size: 11px; line-height: 1.45; }
+.bedrock-download-status { min-height: 17px; margin: 0 18px 12px; color: #8fa8b3; font-size: 10px; }
+.bedrock-download-status.error { color: #ffc1b8; }
+.bedrock-download-status.cancelled { color: #f0c58f; }
+.bedrock-download-action { display: flex; align-items: center; justify-content: center; gap: 8px; width: calc(100% - 36px); min-height: 44px; margin: 0 18px 8px; color: #fff; background: #c56f27; border: 1px solid #e4954a; border-radius: 9px; font-weight: 700; cursor: pointer; }
+.bedrock-download-action:hover:not(:disabled) { background: #da8032; }
+.bedrock-download-action:disabled { opacity: .5; cursor: wait; }
+.bedrock-download-help { display: block; margin: 0 18px 17px; color: #708995; font-size: 9px; line-height: 1.4; }
+.bedrock-download-loading { display: flex; align-items: center; gap: 10px; min-height: 120px; padding: 24px; color: var(--muted); }
+.spin { animation: spin 1s linear infinite; }
+.bedrock-download-card button:focus-visible { outline: 2px solid #f0a04a; outline-offset: 2px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 520px) {
+  .bedrock-download-card { border-radius: 10px; }
+  .bedrock-download-header { padding: 13px 14px; }
+  .bedrock-close span { display: none; }
+  .bedrock-download-file { margin: 13px 14px 10px; }
+  .bedrock-download-facts { grid-template-columns: 1fr; margin-inline: 14px; }
+  .bedrock-compatibility-note, .bedrock-download-status { margin-inline: 14px; }
+  .bedrock-download-action { width: calc(100% - 28px); margin-inline: 14px; }
+  .bedrock-download-help { margin-inline: 14px; }
+}
+
 .loading-view, .inline-summary { min-height: 178px; background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 12px; display: flex; align-items: center; gap: 16px; padding: 24px; }
 .loading-view { justify-content: center; color: var(--muted); }
 .loading-cube { color: var(--accent-bright); animation: float 1.5s ease-in-out infinite; }
 .inline-summary h2 { margin: 0 0 5px; font-size: 18px; font-weight: 600; }
 .inline-summary p { margin: 0; color: var(--muted); font-size: 13px; }
 .inline-summary .primary-button { margin-left: auto; }
+.inline-summary.review-inline-summary { width: 100%; min-height: 0; max-height: 100%; overflow: auto; overscroll-behavior: contain; }
+.review-inline-copy { min-width: 0; flex: 1; }
+.review-inline-facts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.review-inline-facts span { padding: 4px 7px; color: #a9bac2; background: #0b202b; border: 1px solid var(--review-border, var(--line)); border-radius: 99px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.review-inline-palette { margin-top: 8px !important; overflow: hidden; text-overflow: ellipsis; font-size: 10px !important; white-space: nowrap; }
+.review-inline-palette strong { color: #d8e2e6; }
+.review-inline-notice { margin-top: 8px !important; padding: 6px 8px; border-left: 2px solid #5ba8d1; font-size: 10px !important; white-space: normal; }
+.review-inline-notice.error { color: #ffc1b8; border-color: #ef6b5b; }
+.review-inline-notice.success { color: #9bdbc5; border-color: #56ba96; }
+.review-inline-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.review-inline-actions .primary-button { margin-left: 0; }
+.review-inline-actions > button:not(.primary-button), .review-close-button { min-height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 11px; color: #cbd7dc; background: #14242d; border: 1px solid var(--line); border-radius: 7px; font: inherit; font-size: 11px; cursor: pointer; }
+.review-inline-actions > button:hover, .review-close-button:hover { border-color: #d98232; }
+.review-inline-actions .review-close-button, .review-close-button { color: #ffc2ba; border-color: rgba(239,107,91,.45); }
+
+@media (max-width: 620px) {
+  .inline-summary.review-inline-summary { align-items: flex-start; flex-wrap: wrap; gap: 10px; padding: 14px; }
+  .review-inline-summary > .brand-cube { flex: 0 0 auto; }
+  .review-inline-copy { flex: 1 1 calc(100% - 54px); }
+  .review-inline-actions { width: 100%; margin-left: 0; }
+  .review-inline-actions > button { flex: 1; }
+  .review-inline-palette { white-space: normal; }
+}
 
 .app-shell { width: 100%; height: min(960px, 100vh); min-height: 660px; overflow: hidden; background: var(--bg); color: var(--text); display: grid; grid-template-columns: 300px minmax(480px, 1fr) 286px; grid-template-rows: 64px minmax(0, 1fr) 52px; grid-template-areas: "top top top" "left canvas right" "status status status"; border: 1px solid #263640; box-shadow: 0 18px 50px rgba(0,0,0,.35); }
 .topbar { grid-area: top; display: grid; grid-template-columns: 300px 1fr 286px; align-items: center; border-bottom: 1px solid var(--line); background: #0d171f; z-index: 20; }
@@ -232,6 +303,7 @@ button { color: inherit; }
 .export-menu { position: absolute; top: 48px; right: 0; width: 210px; padding: 6px; border: 1px solid var(--line); background: #121c23; border-radius: 8px; box-shadow: 0 18px 40px rgba(0,0,0,.45); z-index: 50; }
 .export-menu button { width: 100%; border: 0; border-radius: 5px; background: transparent; text-align: left; padding: 10px; color: var(--muted); cursor: pointer; font-size: 13px; }
 .export-menu button:hover { color: var(--text); background: var(--panel-2); }
+.export-blocked { margin: 2px 4px 6px; padding: 8px; border: 1px solid #734d35; border-radius: 5px; color: #efb27e; background: #241b17; font-size: 11px; line-height: 1.35; }
 
 .left-rail { grid-area: left; min-height: 0; display: grid; grid-template-columns: 56px 1fr; background: var(--panel); border-right: 1px solid var(--line); z-index: 10; }
 .rail-icons { display: flex; flex-direction: column; gap: 12px; align-items: center; padding: 14px 7px 10px; border-right: 1px solid var(--line); }

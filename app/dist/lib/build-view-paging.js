@@ -2,6 +2,15 @@ export const BUILD_VIEW_INITIAL_PAGE_SIZE = 500;
 export const BUILD_VIEW_PAGE_SIZE = 5_000;
 export const BUILD_VIEW_LEGACY_INLINE_LIMIT = 2_000;
 export const BUILD_VIEW_MAX_PLACEMENTS = 2_000_000;
+function throwIfAborted(signal) {
+    if (!signal?.aborted)
+        return;
+    if (signal.reason instanceof Error)
+        throw signal.reason;
+    const error = new Error("Build placement loading was cancelled.");
+    error.name = "AbortError";
+    throw error;
+}
 function assertPlacementCount(blockCount) {
     if (!Number.isSafeInteger(blockCount) || blockCount < 0 || blockCount > BUILD_VIEW_MAX_PLACEMENTS) {
         throw new Error(`Build placement count must be an integer from 0 to ${BUILD_VIEW_MAX_PLACEMENTS.toLocaleString()}.`);
@@ -21,8 +30,9 @@ function assertPlacement(value, index) {
 function validatedPage(summary, page, expectedOffset, maximumReturned) {
     if (!page || typeof page !== "object")
         throw new Error("Build placement page is missing.");
-    if (page.buildId !== summary.id)
-        throw new Error(`Build placement page belongs to ${page.buildId || "an unknown build"}, not ${summary.id}.`);
+    const expectedReference = summary.cacheRef ?? summary.id;
+    if (page.buildId !== expectedReference)
+        throw new Error(`Build placement page belongs to ${page.buildId || "an unknown build"}, not the expected build reference.`);
     if (page.offset !== expectedOffset)
         throw new Error(`Build placement page started at ${page.offset}, but offset ${expectedOffset} was required.`);
     if (page.total !== summary.blockCount)
@@ -74,10 +84,12 @@ export function buildPlacementPageFromToolResponse(response) {
         placements: metadata?.placements,
     };
 }
-export async function loadBuildForView({ summary, fetchPage, initialPage, legacyBuild, onProgress }) {
+export async function loadBuildForView({ summary, fetchPage, initialPage, legacyBuild, onProgress, signal }) {
+    throwIfAborted(signal);
     assertPlacementCount(summary.blockCount);
     if (!initialPage && validLegacyBuild(summary, legacyBuild)) {
         legacyBuild.placements.forEach(assertPlacement);
+        throwIfAborted(signal);
         onProgress?.(summary.blockCount, summary.blockCount);
         return legacyBuild;
     }
@@ -85,18 +97,23 @@ export async function loadBuildForView({ summary, fetchPage, initialPage, legacy
     if (initialPage) {
         const page = validatedPage(summary, initialPage, 0, BUILD_VIEW_INITIAL_PAGE_SIZE);
         placements.push(...page.placements);
+        throwIfAborted(signal);
         onProgress?.(placements.length, summary.blockCount);
     }
     while (placements.length < summary.blockCount) {
+        throwIfAborted(signal);
         const offset = placements.length;
         const limit = Math.min(BUILD_VIEW_PAGE_SIZE, summary.blockCount - offset);
-        const page = validatedPage(summary, await fetchPage({ buildId: summary.id, offset, limit }), offset, limit);
+        const response = await fetchPage({ buildId: summary.cacheRef ?? summary.id, offset, limit });
+        throwIfAborted(signal);
+        const page = validatedPage(summary, response, offset, limit);
         placements.push(...page.placements);
         onProgress?.(placements.length, summary.blockCount);
     }
+    throwIfAborted(signal);
     if (placements.length !== summary.blockCount)
         throw new Error("Build placement paging did not reproduce the immutable placement count.");
-    const { blockCount: _blockCount, ...shell } = summary;
+    const { blockCount: _blockCount, cacheRef: _cacheRef, ...shell } = summary;
     return { ...shell, placements };
 }
 //# sourceMappingURL=build-view-paging.js.map

@@ -29,6 +29,7 @@ export const buildPreflightOutputSchema = z.object({
     dimensions: outputDimensionsSchema,
     totalVolume: nonNegativeInteger.describe("Total requested envelope volume in blocks."),
     estimatedOccupiedBlocks: nonNegativeInteger.describe("Estimated non-air placement count."),
+    estimatedPlacementAttempts: nonNegativeInteger.describe("Conservative no-loop upper bound on put/remove coordinate operations, including overlap and carve work."),
     estimatedUniqueMaterials: nonNegativeInteger.describe("Estimated number of distinct block materials."),
     chunksTouched: nonNegativeInteger.describe("Estimated number of touched chunk columns."),
     estimatedCommandCount: nonNegativeInteger.describe("Estimated setblock-equivalent command count."),
@@ -116,14 +117,201 @@ export const architecturalPlanOutputSchema = z.object({
 });
 const rolePaletteShape = Object.fromEntries(paletteRoleNames.map((role) => [role, z.string().describe(`Namespaced block identifier assigned to the ${role} role.`)]));
 export const rolePaletteOutputSchema = z.object(rolePaletteShape);
+const blockStateValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+export const designMaterialOutputSchema = z.union([
+    z.string().describe("Namespaced Minecraft block identifier used by this material-library entry."),
+    z.object({
+        block: z.string().describe("Namespaced Minecraft block identifier used by this material-library entry."),
+        state: z.record(z.string(), blockStateValueSchema).optional().describe("Exact block-state properties applied whenever this material is placed."),
+        tags: z.array(z.string().describe("Caller-defined material classification used for planning and audit context.")).optional().describe("Open-ended planning tags; they do not restrict which materials may be supplied."),
+    }).describe("State-aware material definition for the generic design program."),
+]).describe("Either a namespaced block identifier or a state-aware material definition.");
+const designElementBase = {
+    id: z.string().describe("Stable element identifier referenced by hard-requirement mappings."),
+    intent: z.string().describe("Human-readable purpose of this generic geometry element."),
+    phase: z.string().optional().describe("Optional construction or attraction phase label attached to generated placements."),
+    requirementIds: z.array(z.string().describe("Hard-requirement identifier evidenced by this element.")).describe("All hard requirements for which this element supplies placement evidence."),
+    offsets: z.array(outputVec3Schema.describe("Local translation used to repeat this generic operation.")).optional().describe("Optional translations that repeat the element without duplicating its definition."),
+};
+export const designElementOutputSchema = z.discriminatedUnion("kind", [
+    z.object({
+        ...designElementBase,
+        kind: z.literal("fill").describe("Generate an inclusive filled cuboid."),
+        min: outputVec3Schema.describe("Minimum local coordinate of the inclusive fill."),
+        max: outputVec3Schema.describe("Maximum local coordinate of the inclusive fill."),
+        material: z.string().describe("Material-library key, palette role, or namespaced block identifier used for the fill."),
+    }).describe("Generic inclusive filled-cuboid operation."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("shell").describe("Generate the boundary of an inclusive cuboid."),
+        min: outputVec3Schema.describe("Minimum local coordinate of the inclusive shell."),
+        max: outputVec3Schema.describe("Maximum local coordinate of the inclusive shell."),
+        material: z.string().describe("Material-library key, palette role, or namespaced block identifier used for the shell."),
+        thickness: z.number().int().positive().optional().describe("Optional shell thickness in blocks; defaults to one."),
+    }).describe("Generic hollow cuboid-shell operation."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("carve").describe("Remove placements from an inclusive cuboid."),
+        min: outputVec3Schema.describe("Minimum local coordinate of the inclusive carve region."),
+        max: outputVec3Schema.describe("Maximum local coordinate of the inclusive carve region."),
+    }).describe("Generic inclusive cuboid carve operation."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("cylinder").describe("Generate a vertical solid or hollow cylinder."),
+        center: outputVec3Schema.describe("Local coordinate of the cylinder's bottom-center block."),
+        radius: z.number().int().positive().describe("Outer cylinder radius in blocks."),
+        height: z.number().int().positive().describe("Vertical cylinder height in blocks."),
+        material: z.string().describe("Material-library key, palette role, or namespaced block identifier used for the cylinder."),
+        hollow: z.boolean().optional().describe("Whether to generate only the cylinder wall instead of a solid volume."),
+        thickness: z.number().int().positive().optional().describe("Wall thickness in blocks when the cylinder is hollow."),
+        cap: z.boolean().optional().describe("Whether to close the top and bottom faces of a hollow cylinder."),
+    }).describe("Generic vertical cylinder operation."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("basin").describe("Generate a bounded, optionally liquid-filled basin."),
+        min: outputVec3Schema.describe("Minimum local coordinate of the basin envelope."),
+        max: outputVec3Schema.describe("Maximum local coordinate of the basin envelope."),
+        wallMaterial: z.string().describe("Material-library key, palette role, or namespaced block identifier used for basin walls."),
+        floorMaterial: z.string().optional().describe("Optional material reference used for the basin floor."),
+        rimMaterial: z.string().optional().describe("Optional material reference used for the upper rim or coping."),
+        liquidMaterial: z.string().optional().describe("Optional material reference used to fill the basin to liquidLevel."),
+        liquidLevel: z.number().int().optional().describe("Local y coordinate of the highest liquid layer."),
+        wallThickness: z.number().int().positive().optional().describe("Basin wall thickness in blocks; defaults to one."),
+    }).describe("Generic basin operation for pools, channels, planters, tanks, and similar forms."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("sweep").describe("Sweep a generic cross-section along a three-dimensional polyline."),
+        points: z.array(outputVec3Schema.describe("Local control point on the sweep centerline.")).describe("Ordered centerline control points; interpolation creates a continuous voxel path."),
+        crossSection: z.enum(["solid", "open_channel", "tube"]).describe("Cross-section topology applied along the path."),
+        material: z.string().describe("Material-library key, palette role, or namespaced block identifier used for the sweep body."),
+        width: z.number().int().positive().describe("Outer cross-section width in blocks."),
+        height: z.number().int().positive().optional().describe("Outer cross-section height in blocks; defaults from width when omitted."),
+        thickness: z.number().int().positive().optional().describe("Wall or channel thickness in blocks for hollow cross-sections."),
+        innerMaterial: z.string().optional().describe("Optional material reference used inside an open channel or tube."),
+        supports: z.object({
+            material: z.string().describe("Material reference used for vertical supports."),
+            interval: z.number().int().positive().describe("Centerline interval in blocks between automatic supports."),
+            toY: z.number().int().describe("Local y coordinate at which every support terminates."),
+            radius: z.number().int().nonnegative().optional().describe("Horizontal support radius in blocks; zero produces a one-block column."),
+        }).optional().describe("Optional generic support rule applied along the sweep."),
+    }).describe("Generic path-sweep operation for rails, ducts, bridges, flumes, pipes, roads, and other continuous forms."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("stairs").describe("Generate a stepped connection between two local coordinates."),
+        from: outputVec3Schema.describe("Local start coordinate of the staircase."),
+        to: outputVec3Schema.describe("Local end coordinate of the staircase."),
+        width: z.number().int().positive().describe("Clear stair width in blocks."),
+        material: z.string().describe("Material reference used for stair treads and structure."),
+        railingMaterial: z.string().optional().describe("Optional material reference used for edge railings."),
+    }).describe("Generic staircase operation."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("ramp").describe("Generate a continuous voxel ramp between two local coordinates."),
+        from: outputVec3Schema.describe("Local start coordinate of the ramp."),
+        to: outputVec3Schema.describe("Local end coordinate of the ramp."),
+        width: z.number().int().positive().describe("Clear ramp width in blocks."),
+        material: z.string().describe("Material reference used for the ramp surface and structure."),
+        railingMaterial: z.string().optional().describe("Optional material reference used for edge railings."),
+    }).describe("Generic ramp operation."),
+]).describe("One domain-independent voxel operation in a generic design program.");
+const assertionSourceSpanOutputSchema = z.object({
+    start: z.number().int().nonnegative().describe("Zero-based first character of the cited wording within requirement.text."),
+    end: z.number().int().positive().describe("Exclusive final character of the cited wording within requirement.text."),
+    text: z.string().min(1).describe("Exact requirement.text substring between start and end."),
+}).describe("Exact half-open source-text span that authorizes this geometric assertion.");
+const assertionScopeOutputShape = {
+    claimId: z.string().describe("Atomic-claim identifier within this requirement that the assertion proves."),
+    sourceSpan: assertionSourceSpanOutputSchema,
+    elementIds: z.array(z.string().describe("Mapped element identifier included in this assertion's narrower scope.")).min(1).optional().describe("Optional subset of the requirement's mapped elements; omission evaluates all mapped elements."),
+};
+export const designAssertionOutputSchema = z.discriminatedUnion("kind", [
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("placement_count").describe("Require a minimum number of canonical placements."),
+        minimum: z.number().int().positive().describe("Minimum canonical placement count."),
+    }).describe("Basic placement-count evidence; every requirement also needs a stronger structural assertion."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("axis_span").describe("Require an inclusive occupied span along one axis."),
+        axis: z.enum(["x", "y", "z"]).describe("World-coordinate axis to measure."),
+        minimum: z.number().int().positive().describe("Minimum inclusive span in blocks."),
+    }).describe("Measurable width, height, or depth evidence."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("distinct_elements").describe("Require multiple distinct mapped element IDs to generate placements."),
+        minimum: z.number().int().positive().describe("Minimum distinct generated element count."),
+    }).describe("Distinct-element evidence for compound or enumerated requirements."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("element_instances").describe("Require multiple generated base-or-offset instances of scoped elements."),
+        minimum: z.number().int().positive().describe("Minimum distinct generated element-instance count."),
+    }).describe("Repeated-instance evidence for quantified subjects such as two kiosks without relying on unrelated elements."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("distinct_materials").describe("Require multiple block materials in canonical evidence."),
+        minimum: z.number().int().positive().describe("Minimum distinct canonical block identifier count."),
+    }).describe("Material-diversity evidence within one requirement."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("element_kind").describe("Require generated mapped elements of a generic operation kind."),
+        elementKind: z.enum(["fill", "shell", "carve", "cylinder", "basin", "sweep", "stairs", "ramp"]).describe("Generic Design IR operation kind to require."),
+        minimum: z.number().int().positive().describe("Minimum generated mapped elements of this kind."),
+    }).describe("Typed generic-operation evidence; it does not by itself satisfy the structural-strength rule."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("path_geometry").describe("Require measurable routed sweep geometry."),
+        minimumPaths: z.number().int().positive().optional().describe("Minimum distinct mapped sweep paths."),
+        minimumControlPointsPerPath: z.number().int().positive().optional().describe("Minimum control points on every scoped path."),
+        minimumVerticalDrop: z.number().int().positive().optional().describe("Minimum max-y minus min-y drop on every scoped path."),
+        supportsRequired: z.boolean().optional().describe("When true, every scoped path must declare supports and produce support placements."),
+    }).describe("Path count, complexity, vertical drop, and support evidence; at least one threshold or supportsRequired=true is required."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("material_tag_count").describe("Require canonical placements whose material definitions carry one tag."),
+        tag: z.string().min(1).describe("Exact caller-defined material-library tag."),
+        minimumPlacements: z.number().int().positive().describe("Minimum canonical placements made from materials carrying the tag."),
+    }).describe("Source-grounded semantic-material evidence backed by actual placements."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("support_count").describe("Require distinct generated vertical support columns."),
+        minimumColumns: z.number().int().positive().describe("Minimum distinct x,z support columns evidenced by support-phase placements."),
+    }).describe("Generated support-column evidence."),
+    z.object({
+        ...assertionScopeOutputShape,
+        kind: z.literal("boundary_contact").describe("Require mapped geometry to touch specified build-envelope faces."),
+        sides: z.array(z.enum(["north", "south", "east", "west", "top", "bottom"]).describe("Requested envelope face.")).min(1).describe("Every envelope face that must be touched."),
+        minimumPlacementsPerSide: z.number().int().positive().describe("Minimum canonical placements on each requested face."),
+    }).describe("Measurable build-envelope connection evidence."),
+]).describe("One typed, source-grounded assertion evaluated against canonical geometry.");
+export const designProgramOutputSchema = z.object({
+    schemaVersion: z.literal(1).describe("Generic-design schema version; currently exactly 1."),
+    description: z.string().describe("Concise explanation of how the operations realize the retained source brief."),
+    requirements: z.array(z.object({
+        id: z.string().describe("Stable hard-requirement identifier referenced by design elements."),
+        text: z.string().describe("Exact hard requirement retained from the source brief or feature list."),
+        elementIds: z.array(z.string().describe("Design-element identifier expected to evidence this requirement.")).describe("All generic elements that must produce evidence for this requirement."),
+        claims: z.array(z.object({
+            id: z.string().describe("Stable atomic-claim identifier referenced by assertions."),
+            sourceSpan: assertionSourceSpanOutputSchema,
+            predicate: z.enum(["extent", "quantity", "path", "containment", "enclosure", "access", "support", "boundary", "material", "fixture", "surface"]).describe("Allowlisted geometric predicate that determines which assertion families may prove this claim."),
+            status: z.enum(["asserted", "unsupported"]).describe("Asserted claims need structural evidence; unsupported claims invalidate the hard requirement."),
+            reason: z.string().optional().describe("Concise explanation when no implemented geometric predicate can verify this exact claim."),
+        }).describe("One non-overlapping atomic source claim.")).min(1).describe("Atomic claims covering every substantive part of requirement.text; compound wording must be decomposed."),
+        assertions: z.array(designAssertionOutputSchema).min(1).describe("Source-grounded machine checks; at least one must be stronger than placement count or an element-kind label."),
+    }).describe("Hard requirement, explicit element mapping, and typed geometric acceptance assertions.")).describe("All hard requirements represented by this generic design program; there is no arbitrary cardinality cap."),
+    elements: z.array(designElementOutputSchema).describe("Ordered generic geometry operations; there is no domain-object catalog or arbitrary element-count cap."),
+}).describe("Domain-independent design program compiled directly into canonical voxel placements.");
 export const normalizedBuildInputOutputSchema = z.object({
     name: z.string(),
     edition: z.enum(["java", "bedrock"]),
     version: z.string(),
     style: z.string(),
+    sourceBrief: z.string(),
     dimensions: outputDimensionsSchema,
     palette: z.array(z.string()),
     rolePalette: rolePaletteOutputSchema.partial(),
+    materialLibrary: z.record(z.string(), designMaterialOutputSchema),
+    design: designProgramOutputSchema,
     origin: outputVec3Schema,
     features: z.array(z.string()),
     blockBudget: z.number().int().positive(),
@@ -227,6 +415,7 @@ export const semanticBuildAuditOutputSchema = z.object({
 export const buildRegistryOutputSchema = z.object({
     edition: z.enum(["java", "bedrock"]),
     requestedVersion: z.string(),
+    resolvedVersion: z.string().optional().describe("Exact registry version selected after resolving aliases such as Bedrock stable or latest."),
     coverageVersion: z.string(),
     source: z.string(),
     sourceUrl: z.string(),
@@ -241,6 +430,7 @@ export const buildRegistryOutputSchema = z.object({
 export const buildSummaryOutputSchema = z.object({
     schemaVersion: z.literal(2),
     id: z.string().describe("Stable id derived from the deterministic build hash."),
+    cacheRef: z.string().optional().describe("Short-lived, unguessable hosted cache capability. Pass this value—not the deterministic id—to a later hosted review, validation, revision, paging, or export call. Omitted for PC-local builds."),
     hash: sha256Schema.describe("Full deterministic SHA-256 build hash."),
     input: normalizedBuildInputOutputSchema,
     plan: architecturalPlanOutputSchema,

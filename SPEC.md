@@ -1,5 +1,55 @@
 # Blockwright — Minecraft Build Architect
 
+## v0.7.0 Recovery Contract
+
+This section supersedes conflicting v0.6.0 behavior. It was added after the Aqua Meridian mobile test proved that a valid ZIP and a below-budget placement count can still be a knowingly unusable result.
+
+**Intent is part of the artifact**
+
+- Complex compilation retains the user's complete `sourceBrief`, every hard feature, and an explicit requirement-to-element mapping.
+- A requirement may not disappear merely because the caller omitted it from a shorter summary. Every design requirement is hash-bound and must produce canonical placement evidence.
+- Every requirement is decomposed into non-overlapping atomic claims that cite exact character spans from the requirement text. Each asserted claim uses an allowlisted geometric predicate and at least one matching machine-checkable assertion; unsupported spans invalidate the hard requirement.
+- Element labels and fixture mappings cannot certify a noun's identity or gameplay function. Operational wording such as a “working elevator” is rejected unless an implemented operational predicate can evaluate it.
+- Numeric and scale wording binds to commensurate scoped evidence: counts require subject instances, stated heights require vertical span, and “large” or “life-sized” requires three-dimensional extent, placement volume, and element or material diversity. A single block or flat slab cannot certify those claims.
+- Unknown style text is preserved as a custom direction. It never silently normalizes to Nordic or another preset.
+- Unsupported, unmapped, failed, or unevaluated hard requirements produce no construction artifact and no automatically opened viewer.
+- Large envelopes do not use the legacy shell generator. They require a generic design program.
+
+**Generic synthesis, not a noun catalog**
+
+- The planning model composes arbitrary forms from a versioned Design IR: fill, shell, carve, cylinder, contained basin, routed solid/open-channel/tube sweep, stairs, ramp, repetition offsets, and periodic supports.
+- Elements have stable IDs, intent, phase, requirement IDs, and named material references. Generated placements retain those IDs as audit evidence.
+- A requested water slide is not a `slide` enum. It is a routed descending sweep, access geometry, supports, containment/runout geometry, and mapped evidence. The same primitives remain useful for forms the package has never named.
+- Changing the design program changes the structural fingerprint and immutable build hash. Reusing the same normalized input and seed remains deterministic.
+
+**Open-ended materials**
+
+- The eleven compatibility roles remain useful defaults but are not the palette universe.
+- `materialLibrary` is an open-ended named map with no arbitrary entry-count ceiling. Every entry, including unused and late entries, is checked against the exact target registry; workload and payload byte limits may still apply.
+- Each material may carry exact block state and semantic tags. Elements choose their own materials, enabling structural, finish, safety, mechanical, landscape, signage, furnishing, and attraction-specific variation in one build.
+- Review and response UIs may summarize or virtualize large material sets, but canonical data and exports retain every material actually used.
+
+**Bedrock/iPhone delivery**
+
+- Certified Bedrock builds export as an importable behavior-pack `.mcpack` containing spatially tiled, uncompressed little-endian `.mcstructure` files instead of one `setblock` command per voxel.
+- Each tile resolves complete block-state permutations against one exact `minecraft-data` Bedrock registry. Unknown blocks, unknown state keys, wrong state types, and unavailable permutations fail closed.
+- Sparse cells use structure-void indices unless explicit air was requested. A tile's two index layers, palette indices, dimensions, origin, NBT consumption, and ZIP checksums are independently verified.
+- The pack contains canonical build inputs, contracts, certificates, tile origins, checksums, cancel/status/cleanup controls, and an installation controller that advances at most one structure tile per tick without permanent ticking areas or an idle scoreboard scan.
+- Internal NBT/ZIP round trips are not a claim of real-client compatibility. The exact generated artifact remains labeled `iphoneRuntime: unverified` until it is imported, activated, placed, and checked in a matching real Bedrock client.
+
+**Viewer lifecycle**
+
+- `compile_build` is tool-only. It does not register or return a view and therefore cannot open a webpage.
+- `review_build` is called only after explicit user intent to inspect. Its inline view shows a compact audit/material summary and performs no placement pagination or WebGL allocation.
+- 3D starts only after **Open 3D**. Mobile uses demand rendering and a constrained rendering profile. **Close viewer** remains visible and tears down paging, textures, and Canvas before requesting host closure.
+- Cooperative review instances enforce one active 3D lease; an older instance becomes dormant when a newer one activates.
+
+**Aqua Meridian acceptance fixture**
+
+- `benchmarks/aqua-meridian-waterpark.project.json` preserves the five supplied sectors, exact dimensions/origins, all feature text, open palette requirement, and 256×240×72 overall envelope.
+- Acceptance requires five contract-valid sector records, requirement evidence for every original feature, distinct routed attractions/basins/circulation, contained water where requested, project-wide material diversity beyond the compatibility roles, exact bounds, per-sector budgets, a combined checksummed `.mcpack`, and independent parse/round-trip tests.
+- The prior massing artifact—generic L/courtyard shells, zero water, invalid Bedrock states, disconnected circulation, and mobile-hostile command batches—is a negative fixture, never a deliverable design.
+
 ## v0.6.0 Release Contract
 
 Version 0.6.0 is the first commercially oriented Blockwright release. Its promise is narrower and stronger than “AI Minecraft builder”:
@@ -96,6 +146,9 @@ The painful part today is the gap between inspiration and construction: screensh
 - The same normalized contract and checks run after initial generation and every revision, including selected-region revisions.
 - Results distinguish hard failures, operational warnings, and subjective aesthetic observations.
 - Contract and audit results are tied to the immutable build hash and can be reproduced from the build record.
+- Construction artifacts and world-install previews are unavailable unless the exact build has a valid hash-bound contract and certificate. Diagnostic JSON, CSV, and blueprint exports may remain available for inspection of an invalid build.
+- Edition-specific construction output fails closed: Java builds cannot be exported as Bedrock commands, Bedrock builds cannot be exported as Java commands or Java schematics, and general bundles contain only the selected edition's command artifact.
+- A Bedrock `.mcfunction` is limited to Minecraft Bedrock's 10,000-command function-call ceiling. Blockwright does not create or claim support for `.mcpack`, `.mcstructure`, Bedrock world, or Marketplace deliverables in v0.6.0, and it must not imply that splitting an unsupported design into command files makes it a verified mobile build.
 
 **Professional workflow gate**
 
@@ -132,6 +185,10 @@ The painful part today is the gap between inspiration and construction: screensh
 - Repeat compilation of the same normalized input yields the same placements and hash.
 - Java and Bedrock command syntax are never mixed or silently substituted.
 - Large command exports are safely chunked.
+- Unsupported hard requirements are rejected before architectural planning or placement generation; they are never converted into a generic shell merely so an artifact can be returned.
+- Invalid or uncertified builds cannot produce executable command files, schematics, Litematics, bundles, or WorldEdit installation previews.
+- Bedrock `stable` and `latest` resolve to the exact packaged `minecraft-data` `BEDROCK_STABLE_VERSION` (currently 1.26.40), record that resolved version, and validate against the same exact coverage version; any other unproven Bedrock version remains a blocking coverage gap.
+- Bedrock command exports contain at most 10,000 commands, are available only for valid Bedrock builds, and are described as standalone function source rather than an iPhone-installable pack.
 - App UI is functional on desktop and mobile, keyboard accessible, and responsive.
 - Core server, compiler, exporter, and HTTP/MCP behavior are covered by automated tests.
 - Core build, candidate, preflight, audit, palette, and guarded-install responses publish concrete MCP schemas that are validated against their real handler data.
@@ -378,4 +435,4 @@ The painful part today is the gap between inspiration and construction: screensh
 - **Input:** World identifier, schematic name/data, explicit WorldEdit folder, transform/mask choices, and confirmation.
 - **Output:** With `confirmed: false`, a no-write preview containing dimension, anchor, affected bounds/chunks, block and palette counts, risk, conflict status, overwrite state, and exact load/paste instructions. With `confirmed: true`, the verified installed path and post-write parse result. It never edits region files.
 
-Compile and review responses expose the immutable build shell plus a first page capped at 500 placements; they do not attach a full build record. Both views assemble the exact record with sequential calls to an internal widget-only chunk tool capped at 5,000 placements per response. Hosted chunks are served without recompilation from a 15-minute cache keyed by tenant, user, and build id, bounded to two records per principal, four records globally, and 500,000 placements globally. Cross-principal access and cache misses fail closed with a recompile/review instruction. Views accept the older full-record metadata shape only when it contains at most 2,000 identity-matched placements.
+Review responses expose the immutable build shell plus a first page capped at 500 placements; they never attach a full build record. The view assembles the exact record with sequential calls to an internal widget-only chunk tool capped at 5,000 placements per response. Public hosted chunks and follow-up tools use a cryptographically random, short-lived `cacheRef` capability rather than the deterministic build id, so proxy-terminated MCP sessions cannot collapse cache isolation. The 15-minute cache is bounded to eight records per principal/capability, eight records globally, and 500,000 placements globally—enough for the five Aqua Meridian sectors without removing the placement ceiling. Invalid capabilities and cache misses fail closed with a recompile/review instruction. Views accept the older full-record metadata shape only when it contains at most 2,000 identity-matched placements.

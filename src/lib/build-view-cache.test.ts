@@ -19,10 +19,18 @@ function build(id: string, placementCount = 1): BuildRecord {
 
 describe("principal-scoped build view cache", () => {
   it("keeps the release bounds explicit", () => {
-    expect(HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS).toBe(4);
+    expect(HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS).toBe(8);
     expect(HOSTED_BUILD_VIEW_CACHE_MAX_PLACEMENTS).toBe(500_000);
-    expect(HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS_PER_PRINCIPAL).toBe(2);
+    expect(HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS_PER_PRINCIPAL).toBe(8);
     expect(HOSTED_BUILD_VIEW_CACHE_TTL_MS).toBe(15 * 60_000);
+  });
+
+  it("retains every sector needed for a five-build project export", () => {
+    const cache = new PrincipalBuildViewCache();
+    const sectors = Array.from({ length: 5 }, (_, index) => build(`bw_project_sector_${index + 1}`));
+    for (const sector of sectors) expect(cache.set(alpha, sector)).toBe(true);
+    for (const sector of sectors) expect(cache.get(alpha, sector.id)).toBe(sector);
+    expect(cache.stats()).toEqual({ records: 5, placements: 5 });
   });
 
   it("never exposes one tenant or user cache entry to another principal", () => {

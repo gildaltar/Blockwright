@@ -23,10 +23,10 @@ function rehash(build: BuildRecord, input: BuildRecord["input"], placements: Pla
   return { ...build, id: `bw_${hash.slice(0, 12)}`, hash, input, placements: canonical };
 }
 
-function addBoundaryDoor(build: BuildRecord, side: "north" | "east" | "west") {
+function addBoundaryDoor(build: BuildRecord, side: "north" | "south" | "east" | "west") {
   const { origin, dimensions, rolePalette } = build.input;
   const x = side === "east" ? origin.x + dimensions.width - 1 : side === "west" ? origin.x : origin.x + Math.floor(dimensions.width / 2);
-  const z = side === "north" ? origin.z + dimensions.depth - 1 : origin.z + Math.floor(dimensions.depth / 2);
+  const z = side === "north" ? origin.z : side === "south" ? origin.z + dimensions.depth - 1 : origin.z + Math.floor(dimensions.depth / 2);
   const replacements = new Set([`${x},${origin.y + 2},${z}`, `${x},${origin.y + 3},${z}`]);
   const placements = build.placements.filter((placement) => !replacements.has(`${placement.x},${placement.y},${placement.z}`));
   placements.push(
@@ -50,21 +50,33 @@ describe("v0.6 semantic contract", () => {
     expect(buildSummaryOutputSchema.safeParse(summarizeBuild(first)).success).toBe(true);
   });
 
-  it("does not report the south-only Japanese generator as satisfying four cardinal entrances", () => {
+  it("uses Minecraft north=-Z and does not report one facade as four cardinal entrances", () => {
     const build = compileBuild({ ...base, features: ["four cardinal 9-wide entrances"] });
     const entrances = build.contract.hardResults.find(({ evaluator }) => evaluator === "entrances");
     expect(build.plan.entrances.map(({ side }) => side)).toEqual(["south"]);
     expect(entrances?.status).toBe("fail");
-    expect(entrances?.actual).toContain("south=2");
-    expect(entrances?.actual).toContain("north=0");
+    expect(entrances?.actual).toContain("north=2");
+    expect(entrances?.actual).toContain("south=0");
     expect(entrances?.expected).toContain("north>=9");
     expect(build.validation.valid).toBe(false);
     expect(build.certificate.text).toContain("[FAIL] north, south, east, west entrances");
   });
 
+  it("counts only lower Bedrock door halves as entrance geometry", () => {
+    const compiled = compileBuild({ ...base, features: [] });
+    const placements = compiled.placements.map((placement) => {
+      if (!/_door$/.test(placement.block) || /_trapdoor$/.test(placement.block)) return placement;
+      const { half, ...state } = placement.state ?? {};
+      return { ...placement, state: { ...state, upper_block_bit: half === "upper" } };
+    });
+    const build = rehash(compiled, compiled.input, placements);
+    const entrances = auditBuildSemantics(build).checks.find(({ id }) => id === "entrances");
+    expect(entrances?.coordinates).toHaveLength(2);
+  });
+
   it("passes the entrance clause only when canonical boundary geometry contains all four sides", () => {
     const compiled = compileBuild({ ...base, features: [] });
-    let placements = addBoundaryDoor(compiled, "north");
+    let placements = addBoundaryDoor(compiled, "south");
     let staged = rehash(compiled, { ...compiled.input, features: ["four cardinal entrances"] }, placements);
     placements = addBoundaryDoor(staged, "east");
     staged = rehash(staged, staged.input, placements);
@@ -107,9 +119,7 @@ describe("v0.6 semantic contract", () => {
   });
 
   it("fails closed for unknown and currently unevaluable hard requirements", () => {
-    const unknown = compileBuild({ ...base, features: ["dragon statue"] });
-    expect(unknown.contract.hardResults.some(({ status }) => status === "unsupported")).toBe(true);
-    expect(unknown.validation.issues.some(({ code }) => code === "UNSUPPORTED_HARD_REQUIREMENT")).toBe(true);
+    expect(() => compileBuild({ ...base, features: ["dragon statue"] })).toThrow(/UNSUPPORTED_HARD_REQUIREMENT/);
 
     const roomAccess = validateBuildContract(compileBuild({ ...base, features: [] }), { clauses: ["all rooms accessible"] });
     expect(roomAccess.hardResults.find(({ clauseId }) => clauseId.endsWith("room-access"))?.status).toBe("unsupported");

@@ -73,7 +73,21 @@ async function main() {
   const startedAt = new Date().toISOString();
   const started = performance.now();
   const results = corpus.map((entry) => {
-    const build = compileBuild(entry.brief);
+    let build;
+    try {
+      build = compileBuild(entry.brief);
+    } catch (error) {
+      const rejectedBeforeGeneration = error instanceof Error && error.message.includes("UNSUPPORTED_HARD_REQUIREMENT");
+      return {
+        id: entry.id,
+        category: entry.category,
+        expectedContractStatus: entry.expectedContractStatus,
+        observedContractStatus: rejectedBeforeGeneration ? "rejected_before_generation" : "error",
+        passed: entry.category === "unsupported-hard" && rejectedBeforeGeneration,
+        rejectedBeforeGeneration,
+        error: error instanceof Error ? error.message : "Unknown benchmark error",
+      };
+    }
     const audit = auditBuild(build);
     const observedCategories = new Set(audit.semantic.checks.map(({ category }) => category));
     const missingCategories = semanticCategories.filter((category) => !observedCategories.has(category));

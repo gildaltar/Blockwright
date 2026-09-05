@@ -99,6 +99,23 @@ describe("safety preflight", () => {
     expect(preflight.choices).toContain("split_into_phases");
     expect(() => compileBuild(request)).toThrow(/CONFIRMATION_REQUIRED|MUST_BE_SPLIT/);
   });
+
+  it("makes an oversized Bedrock function a red, confirmation-gated risk", () => {
+    const preflight = estimateBuild({
+      name: "Mobile waterpark stress test",
+      edition: "bedrock",
+      version: "stable",
+      style: "modern",
+      buildingType: "megabase",
+      dimensions: { width: 256, depth: 240, height: 77 },
+      features: [],
+      blockBudget: 500_000,
+    });
+    expect(preflight.estimatedCommandCount).toBeGreaterThan(10_000);
+    expect(preflight.minecraftRisk).toBe("red");
+    expect(preflight.requiresConfirmation).toBe(true);
+    expect(preflight.warnings.join(" ")).toMatch(/10,000 commands.*tiled \.mcstructure\/\.mcpack/i);
+  });
 });
 
 describe("palette persistence", () => {

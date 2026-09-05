@@ -8,6 +8,7 @@ import { AlertTriangle, Box, BoxSelect, Check, ChevronDown, ChevronLeft, Chevron
 import { useDisplayMode, useDownload, useLayout, useViewState } from "skybridge/web";
 import { useToolInfo } from "../helpers.js";
 import {} from "../lib/build-view-paging.js";
+import { constructionExportBlocker } from "../lib/export-policy.js";
 import { loadResourcePack, placementTextureKey } from "../lib/resource-pack.js";
 import { usePagedBuild } from "../use-paged-build.js";
 const MATERIAL_COLORS = {
@@ -119,6 +120,9 @@ function ExportMenu({ build }) {
     const [open, setOpen] = useState(false);
     const { download } = useDownload();
     const safeName = build.input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const commandFormat = build.input.edition === "java" ? "java" : "bedrock";
+    const constructionBlocker = constructionExportBlocker(build, build.input.edition === "java" ? "java_mcfunction" : "bedrock_mcfunction");
+    const availableFormats = ["json", "csv", "blueprint", ...(constructionBlocker ? [] : [commandFormat])];
     const makeText = (format) => {
         if (format === "json")
             return JSON.stringify(build, null, 2);
@@ -145,7 +149,7 @@ function ExportMenu({ build }) {
         await download({ contents: [{ type: "resource", resource: { uri: `file:///${details.name}`, mimeType: details.type, text: makeText(format) } }] });
         setOpen(false);
     };
-    return (_jsxs("div", { className: "export-wrap", children: [_jsxs("button", { className: "primary-button", onClick: () => setOpen((value) => !value), children: [_jsx(Download, { size: 17 }), "Export build"] }), open && _jsx("div", { className: "export-menu", role: "menu", children: ["json", "csv", "java", "bedrock", "blueprint"].map((format) => _jsx("button", { onClick: () => void save(format), children: format === "json" ? "Blockwright JSON" : format === "csv" ? "Coordinate CSV" : format === "java" ? "Java .mcfunction" : format === "bedrock" ? "Bedrock .mcfunction" : "Layer blueprint" }, format)) })] }));
+    return (_jsxs("div", { className: "export-wrap", children: [_jsxs("button", { className: "primary-button", onClick: () => setOpen((value) => !value), children: [_jsx(Download, { size: 17 }), "Export build"] }), open && _jsxs("div", { className: "export-menu", role: "menu", children: [constructionBlocker && _jsx("p", { className: "export-blocked", role: "status", children: "Construction export blocked. Diagnostic files remain available." }), availableFormats.map((format) => _jsx("button", { onClick: () => void save(format), children: format === "json" ? "Blockwright JSON" : format === "csv" ? "Coordinate CSV" : format === "java" ? "Java .mcfunction" : format === "bedrock" ? "Bedrock .mcfunction" : "Layer blueprint" }, format))] })] }));
 }
 export default function CompileBuildView() {
     const { output, isPending, responseMetadata } = useToolInfo();

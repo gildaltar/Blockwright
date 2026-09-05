@@ -58,6 +58,25 @@ describe("build view placement paging", () => {
     expect(loaded).toEqual(build);
   });
 
+  it("uses a hosted cache capability for every placement page without adding it to the immutable build", async () => {
+    const { build, summary: baseSummary } = fixture(BUILD_VIEW_INITIAL_PAGE_SIZE + 1);
+    const cacheRef = `bwc_${"a".repeat(32)}.${build.id}`;
+    const summary = { ...baseSummary, cacheRef };
+    const initialPage = { ...createBuildPlacementPage(build, 0, BUILD_VIEW_INITIAL_PAGE_SIZE), buildId: cacheRef };
+    const requests: { buildId: string; offset: number; limit: number }[] = [];
+    const loaded = await loadBuildForView({
+      summary,
+      initialPage,
+      fetchPage: async (request) => {
+        requests.push(request);
+        return { ...createBuildPlacementPage(build, request.offset, request.limit), buildId: cacheRef };
+      },
+    });
+    expect(requests).toEqual([{ buildId: cacheRef, offset: BUILD_VIEW_INITIAL_PAGE_SIZE, limit: 1 }]);
+    expect(loaded).toEqual(build);
+    expect("cacheRef" in loaded).toBe(false);
+  });
+
   it("uses only a small identity-matched legacy build and never needs a tool call for that fallback", async () => {
     const { build, summary } = fixture(Math.min(75, BUILD_VIEW_LEGACY_INLINE_LIMIT));
     const fetchPage = vi.fn<() => Promise<BuildPlacementPage>>();
@@ -118,5 +137,34 @@ describe("build view placement paging", () => {
     expect(page).toMatchObject({ buildId: compiled.id, offset: 0, returned: 1, total: 1 });
     expect(page.placements).toHaveLength(1);
     expect(() => buildPlacementPageFromToolResponse({ meta: { placements: [] } })).toThrow(/structured page identity/);
+  });
+
+  it("stops before requesting another page when the viewer is torn down", async () => {
+    const { build, summary } = fixture(BUILD_VIEW_INITIAL_PAGE_SIZE + BUILD_VIEW_PAGE_SIZE + 1);
+    const controller = new AbortController();
+    const fetchPage = vi.fn(async ({ offset, limit }: { offset: number; limit: number }) => createBuildPlacementPage(build, offset, limit));
+
+    const loading = loadBuildForView({
+      summary,
+      initialPage: createBuildPlacementPage(build, 0, BUILD_VIEW_INITIAL_PAGE_SIZE),
+      fetchPage,
+      signal: controller.signal,
+      onProgress: () => controller.abort(),
+    });
+
+    await expect(loading).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
+
+  it("discards an in-flight page after cancellation instead of continuing pagination", async () => {
+    const { build, summary } = fixture(BUILD_VIEW_PAGE_SIZE + 1);
+    const controller = new AbortController();
+    const fetchPage = vi.fn(async ({ offset, limit }: { offset: number; limit: number }) => {
+      controller.abort();
+      return createBuildPlacementPage(build, offset, limit);
+    });
+
+    await expect(loadBuildForView({ summary, fetchPage, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" });
+    expect(fetchPage).toHaveBeenCalledTimes(1);
   });
 });

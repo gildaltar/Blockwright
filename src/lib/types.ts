@@ -9,10 +9,132 @@ export type Placement = Vec3 & {
   block: string;
   state?: Record<string, string | number | boolean>;
   phase: string;
+  /** Stable generic-design element which produced this placement. */
+  elementId?: string;
+  /** Stable base-or-offset instance which produced this placement. */
+  elementInstanceId?: string;
+  /** Hard requirements for which this exact placement is evidence. */
+  requirementIds?: string[];
   blockEntity?: { id: string; data?: Record<string, unknown> };
 };
 
 export type BuildingType = "house" | "temple" | "tower" | "workshop" | "hall" | "courtyard" | "megabase";
+
+export type DesignMaterial = string | {
+  block: string;
+  state?: Record<string, string | number | boolean>;
+  tags?: string[];
+};
+
+export type DesignElementKind = "fill" | "shell" | "carve" | "cylinder" | "basin" | "sweep" | "stairs" | "ramp";
+
+/** Exact half-open character range within DesignRequirement.text. */
+export type DesignSourceSpan = {
+  start: number;
+  end: number;
+  text: string;
+};
+
+type DesignAssertionBase = {
+  /** Atomic claim within the requirement that this assertion proves. */
+  claimId: string;
+  /** Exact wording that authorizes this assertion; indexes are relative to DesignRequirement.text. */
+  sourceSpan: DesignSourceSpan;
+  /** Optional subset of the requirement's mapped elements against which to evaluate the assertion. */
+  elementIds?: string[];
+};
+
+export type DesignAssertion =
+  | (DesignAssertionBase & { kind: "placement_count"; minimum: number })
+  | (DesignAssertionBase & { kind: "axis_span"; axis: "x" | "y" | "z"; minimum: number })
+  | (DesignAssertionBase & { kind: "distinct_elements"; minimum: number })
+  | (DesignAssertionBase & { kind: "element_instances"; minimum: number })
+  | (DesignAssertionBase & { kind: "distinct_materials"; minimum: number })
+  | (DesignAssertionBase & { kind: "element_kind"; elementKind: DesignElementKind; minimum: number })
+  | (DesignAssertionBase & {
+      kind: "path_geometry";
+      minimumPaths?: number;
+      minimumControlPointsPerPath?: number;
+      minimumVerticalDrop?: number;
+      supportsRequired?: boolean;
+    })
+  | (DesignAssertionBase & { kind: "material_tag_count"; tag: string; minimumPlacements: number })
+  | (DesignAssertionBase & { kind: "support_count"; minimumColumns: number })
+  | (DesignAssertionBase & {
+      kind: "boundary_contact";
+      sides: Array<"north" | "south" | "east" | "west" | "top" | "bottom">;
+      minimumPlacementsPerSide: number;
+    });
+
+export type DesignAtomicClaim = {
+  id: string;
+  sourceSpan: DesignSourceSpan;
+  predicate: "extent" | "quantity" | "path" | "containment" | "enclosure" | "access" | "support" | "boundary" | "material" | "fixture" | "surface";
+  status: "asserted" | "unsupported";
+  reason?: string;
+};
+
+export type DesignRequirement = {
+  id: string;
+  text: string;
+  elementIds: string[];
+  /** Non-overlapping source spans that cover every substantive part of the compound requirement. */
+  claims: DesignAtomicClaim[];
+  /** Machine-checkable, source-grounded claims. Label-only element mappings are never sufficient. */
+  assertions: DesignAssertion[];
+};
+
+type DesignElementBase = {
+  id: string;
+  intent: string;
+  phase?: string;
+  requirementIds: string[];
+  /** Optional local offsets repeat the same generic operation without duplicating its definition. */
+  offsets?: Vec3[];
+};
+
+export type DesignElement =
+  | (DesignElementBase & { kind: "fill"; min: Vec3; max: Vec3; material: string })
+  | (DesignElementBase & { kind: "shell"; min: Vec3; max: Vec3; material: string; thickness?: number })
+  | (DesignElementBase & { kind: "carve"; min: Vec3; max: Vec3 })
+  | (DesignElementBase & { kind: "cylinder"; center: Vec3; radius: number; height: number; material: string; hollow?: boolean; thickness?: number; cap?: boolean })
+  | (DesignElementBase & {
+      kind: "basin";
+      min: Vec3;
+      max: Vec3;
+      wallMaterial: string;
+      floorMaterial?: string;
+      rimMaterial?: string;
+      liquidMaterial?: string;
+      liquidLevel?: number;
+      wallThickness?: number;
+    })
+  | (DesignElementBase & {
+      kind: "sweep";
+      points: Vec3[];
+      crossSection: "solid" | "open_channel" | "tube";
+      material: string;
+      width: number;
+      height?: number;
+      thickness?: number;
+      innerMaterial?: string;
+      supports?: { material: string; interval: number; toY: number; radius?: number };
+    })
+  | (DesignElementBase & {
+      kind: "stairs" | "ramp";
+      from: Vec3;
+      to: Vec3;
+      width: number;
+      material: string;
+      railingMaterial?: string;
+    });
+
+export type DesignProgram = {
+  schemaVersion: 1;
+  description: string;
+  requirements: DesignRequirement[];
+  elements: DesignElement[];
+};
 
 export type BuildInput = {
   name: string;
@@ -20,8 +142,14 @@ export type BuildInput = {
   version: string;
   style: string;
   dimensions: Dimensions;
+  /** Verbatim user intent retained to prevent a lossy tool call from looking complete. */
+  sourceBrief?: string;
   palette?: string[];
   rolePalette?: Partial<RolePalette>;
+  /** Open-ended named material vocabulary. There is intentionally no cardinality limit. */
+  materialLibrary?: Record<string, DesignMaterial>;
+  /** Generic geometry program supplied by the planning model; no domain-object catalog is required. */
+  design?: DesignProgram;
   origin?: Vec3;
   features?: string[];
   blockBudget?: number;
@@ -94,6 +222,7 @@ export type BuildPreflight = {
   dimensions: Dimensions;
   totalVolume: number;
   estimatedOccupiedBlocks: number;
+  estimatedPlacementAttempts: number;
   estimatedUniqueMaterials: number;
   chunksTouched: number;
   estimatedCommandCount: number;
@@ -162,6 +291,7 @@ export type BuildRecord = {
   registry: {
     edition: Edition;
     requestedVersion: string;
+    resolvedVersion?: string;
     coverageVersion: string;
     source: string;
     sourceUrl: string;

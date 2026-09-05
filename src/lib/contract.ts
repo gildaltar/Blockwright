@@ -7,11 +7,15 @@ import type {
   ContractCheckResult,
   ContractClause,
   ContractClauseSeverity,
+  DesignAssertion,
+  DesignElement,
+  DesignRequirement,
   Placement,
   Vec3,
 } from "./types.js";
+import { validateDesignRequirementAssertions } from "./design-kernel.js";
 
-export const CONTRACT_EVALUATOR_VERSION = "blockwright-contract/0.6.0";
+export const CONTRACT_EVALUATOR_VERSION = "blockwright-contract/0.7.0";
 
 export type ContractClauseInput = string | { requirement: string; severity?: ContractClauseSeverity };
 export type BuildContractOverride = { features?: string[]; clauses?: ContractClauseInput[] };
@@ -64,12 +68,15 @@ export function calculateBuildHash(input: Required<BuildInput>, placements: Plac
   const { confirmationToken: _confirmationToken, ...designInput } = input;
   const payload = {
     input: designInput,
-    placements: placements.map(({ x, y, z, block, phase, state, blockEntity }) => ({
+    placements: placements.map(({ x, y, z, block, phase, state, elementId, elementInstanceId, requirementIds, blockEntity }) => ({
       x,
       y,
       z,
       block,
       phase,
+      ...(elementId ? { elementId } : {}),
+      ...(elementInstanceId ? { elementInstanceId } : {}),
+      ...(requirementIds?.length ? { requirementIds: [...requirementIds].sort() } : {}),
       ...(state ? { state: canonicalValue(state) } : {}),
       ...(blockEntity ? { blockEntity: canonicalValue(blockEntity) } : {}),
     })),
@@ -234,13 +241,42 @@ const implicitClauses: Array<Omit<ContractClause, "sourceText">> = [
   clause("implicit-version", "hard", "exact requested-version registry compatibility", "implicit", "", "exact-version"),
   clause("implicit-dimensions", "hard", "all placements remain inside the requested dimensions", "implicit", "", "dimensions"),
   clause("implicit-origin", "hard", "occupied minimum corner matches the requested paste origin", "implicit", "", "paste-origin"),
-  clause("implicit-palette", "hard", "every placement uses a validated role-palette identifier", "implicit", "", "palette-legality"),
+  clause("implicit-palette", "hard", "every placement uses a validated material-library or compatibility-role identifier", "implicit", "", "palette-legality"),
   clause("implicit-budget", "hard", "canonical placement count stays within the block budget", "implicit", "", "block-budget"),
 ];
 
 export function normalizeBuildContract(input: Required<BuildInput>, override?: BuildContractOverride): ContractClause[] {
   const clauses: ContractClause[] = implicitClauses.map((item) => ({ ...item, sourceText: item.requirement, parameters: { ...item.parameters } }));
-  input.features.forEach((feature, index) => clauses.push(...parseFeature(feature, "feature", index)));
+  const mappedRequirements = new Map(input.design.requirements.map((requirement) => [normalizeText(requirement.text), requirement]));
+  input.features.forEach((feature, index) => {
+    const mapped = mappedRequirements.get(normalizeText(feature));
+    if (mapped) {
+      clauses.push(clause(
+        `feature-${index + 1}-design`,
+        "hard",
+        mapped.text,
+        "feature",
+        feature,
+        "design-assertions",
+        { requirementId: mapped.id, elementIds: [...mapped.elementIds].sort(), assertionKinds: (mapped.assertions ?? []).map(({ kind }) => kind).sort() },
+      ));
+      return;
+    }
+    clauses.push(...parseFeature(feature, "feature", index));
+  });
+  const mappedFeatureTexts = new Set(input.features.map(normalizeText));
+  input.design.requirements.forEach((requirement, index) => {
+    if (mappedFeatureTexts.has(normalizeText(requirement.text))) return;
+    clauses.push(clause(
+      `design-${index + 1}-${requirement.id}`,
+      "hard",
+      requirement.text,
+      "feature",
+      requirement.text,
+      "design-assertions",
+      { requirementId: requirement.id, elementIds: [...requirement.elementIds].sort(), assertionKinds: (requirement.assertions ?? []).map(({ kind }) => kind).sort() },
+    ));
+  });
   const extra = [
     ...(override?.features ?? []),
     ...(override?.clauses ?? []),
@@ -264,12 +300,20 @@ function expectedEnvelope(build: ContractEvaluableBuild) {
 }
 
 function entranceSide(placement: Placement, envelope: ReturnType<typeof expectedEnvelope>): CardinalSide | undefined {
-  // Generator convention: the minimum-z facade is called south throughout schema v2.
-  if (placement.z === envelope.min.z) return "south";
-  if (placement.z === envelope.max.z) return "north";
+  // Minecraft convention: north is decreasing z; south is increasing z.
+  if (placement.z === envelope.min.z) return "north";
+  if (placement.z === envelope.max.z) return "south";
   if (placement.x === envelope.min.x) return "west";
   if (placement.x === envelope.max.x) return "east";
   return undefined;
+}
+
+function isLowerDoorHalf(placement: Placement) {
+  const upperBlockBit = placement.state?.upper_block_bit;
+  if (upperBlockBit !== undefined) {
+    return upperBlockBit !== true && upperBlockBit !== 1 && upperBlockBit !== "true" && upperBlockBit !== "1";
+  }
+  return String(placement.state?.half ?? "lower") === "lower";
 }
 
 function detectEntrances(build: ContractEvaluableBuild) {
@@ -277,7 +321,7 @@ function detectEntrances(build: ContractEvaluableBuild) {
   const coordinates: Record<CardinalSide, Placement[]> = { north: [], south: [], east: [], west: [] };
   for (const placement of build.placements) {
     if (!/_door$/.test(placement.block) || /_trapdoor$/.test(placement.block)) continue;
-    if (String(placement.state?.half ?? "lower") !== "lower") continue;
+    if (!isLowerDoorHalf(placement)) continue;
     const side = entranceSide(placement, envelope);
     if (side) coordinates[side].push(placement);
   }
@@ -361,7 +405,7 @@ export function auditBuildSemantics(build: ContractEvaluableBuild): SemanticBuil
   const blockedEntranceCoordinates: Vec3[] = [];
   for (const placement of entrancePlacements) {
     const side = entranceSide(placement, envelope)!;
-    const inward = side === "south" ? { x: 0, z: 1 } : side === "north" ? { x: 0, z: -1 } : side === "west" ? { x: 1, z: 0 } : { x: -1, z: 0 };
+    const inward = side === "north" ? { x: 0, z: 1 } : side === "south" ? { x: 0, z: -1 } : side === "west" ? { x: 1, z: 0 } : { x: -1, z: 0 };
     for (let distance = 1; distance <= 2; distance += 1) for (let dy = 0; dy < 2; dy += 1) {
       const point = { x: placement.x + inward.x * distance, y: placement.y + dy, z: placement.z + inward.z * distance };
       if (byCoordinate.has(coordinateKey(point))) blockedEntranceCoordinates.push(point);
@@ -377,7 +421,11 @@ export function auditBuildSemantics(build: ContractEvaluableBuild): SemanticBuil
     if (functionalCoordinates.length < 250) functionalCoordinates.push({ x: placement.x, y: placement.y, z: placement.z });
   }
   const unsupported = supportFailures(build, byCoordinate);
-  const palette = new Set(Object.values(build.input.rolePalette).filter((value): value is string => typeof value === "string"));
+  const palette = new Set([
+    ...Object.values(build.input.rolePalette).filter((value): value is string => typeof value === "string"),
+    ...build.input.palette,
+    ...Object.values(build.input.materialLibrary).map((material) => typeof material === "string" ? material : material.block),
+  ]);
   let illegalPaletteTotal = 0;
   const illegalPaletteCoordinates: Vec3[] = [];
   for (const placement of build.placements) {
@@ -390,9 +438,14 @@ export function auditBuildSemantics(build: ContractEvaluableBuild): SemanticBuil
   const allInteger = build.placements.every(({ x, y, z }) => [x, y, z].every(Number.isSafeInteger));
   const allInside = build.placements.every((point) => isInsideEnvelope(point, envelope));
   const originMatches = build.bounds.min.x === envelope.min.x && build.bounds.min.y === envelope.min.y && build.bounds.min.z === envelope.min.z;
+  const bedrockResolvedExactly = build.input.edition !== "bedrock" || Boolean(build.registry.resolvedVersion)
+    && build.registry.resolvedVersion === build.registry.coverageVersion
+    && build.registry.source === "minecraft-data"
+    && (/^(?:stable|latest)$/i.test(build.input.version) || build.registry.resolvedVersion === build.input.version);
   const exactVersion = build.registry.edition === build.input.edition
     && build.registry.requestedVersion === build.input.version
     && (build.input.edition !== "java" || build.registry.coverageVersion === build.input.version)
+    && bedrockResolvedExactly
     && !build.registry.note;
   const checks: SemanticAuditCheck[] = [
     {
@@ -442,13 +495,17 @@ export function auditBuildSemantics(build: ContractEvaluableBuild): SemanticBuil
     },
     {
       id: "palette-legality", category: "palette", status: illegalPaletteTotal ? "fail" : "pass",
-      message: illegalPaletteTotal ? "Placements contain identifiers outside the normalized role palette." : "Every placement identifier belongs to the normalized role palette.",
-      expected: "all placements drawn from normalized role palette", actual: `${illegalPaletteTotal} illegal placements`, coordinates: illegalPaletteCoordinates, total: illegalPaletteTotal,
+      message: illegalPaletteTotal ? "Placements contain identifiers outside the normalized material library." : "Every placement identifier belongs to the normalized material library.",
+      expected: "all placements drawn from normalized material library", actual: `${illegalPaletteTotal} illegal placements`, coordinates: illegalPaletteCoordinates, total: illegalPaletteTotal,
     },
     {
       id: "exact-version", category: "version", status: exactVersion ? "pass" : "fail",
-      message: exactVersion ? "Registry metadata exactly covers the requested edition/version." : "Registry metadata does not prove exact requested-version compatibility.",
-      expected: `${build.input.edition} ${build.input.version}`, actual: `${build.registry.edition} requested=${build.registry.requestedVersion} coverage=${build.registry.coverageVersion}${build.registry.note ? ` (${build.registry.note})` : ""}`, coordinates: [],
+      message: exactVersion
+        ? build.input.edition === "bedrock" && /^(?:stable|latest)$/i.test(build.input.version)
+          ? `Bedrock ${build.input.version} resolved to exact minecraft-data registry ${build.registry.resolvedVersion}.`
+          : "Registry metadata exactly covers the requested edition/version."
+        : "Registry metadata does not prove exact requested-version compatibility.",
+      expected: `${build.input.edition} ${build.input.version}${build.input.edition === "bedrock" ? " resolved to one exact minecraft-data version" : ""}`, actual: `${build.registry.edition} requested=${build.registry.requestedVersion} resolved=${build.registry.resolvedVersion ?? "missing"} coverage=${build.registry.coverageVersion}${build.registry.note ? ` (${build.registry.note})` : ""}`, coordinates: [],
     },
     {
       id: "dimensions", category: "origin", status: allInside ? "pass" : "fail",
@@ -522,7 +579,7 @@ function corridorResult(build: ContractEvaluableBuild, clause: ContractClause) {
     }
     for (const entrance of entrances) {
       const side = entranceSide(entrance, envelope)!;
-      const inward = side === "south" ? { x: 0, z: 1 } : side === "north" ? { x: 0, z: -1 } : side === "west" ? { x: 1, z: 0 } : { x: -1, z: 0 };
+      const inward = side === "north" ? { x: 0, z: 1 } : side === "south" ? { x: 0, z: -1 } : side === "west" ? { x: 1, z: 0 } : { x: -1, z: 0 };
       const distance = side === "north" || side === "south" ? Math.floor(build.input.dimensions.depth / 2) : Math.floor(build.input.dimensions.width / 2);
       for (let step = 1; step <= distance; step += 1) for (const y of [entrance.y, entrance.y + 1]) {
         const point = { x: entrance.x + inward.x * step, y, z: entrance.z + inward.z * step };
@@ -589,6 +646,139 @@ function lightingResult(build: ContractEvaluableBuild, clause: ContractClause) {
   );
 }
 
+function assertionPlacementScope(requirement: DesignRequirement, assertion: DesignAssertion, matches: Placement[]) {
+  const scopedIds = new Set(assertion.elementIds?.length ? assertion.elementIds : requirement.elementIds);
+  return matches.filter(({ elementId }) => Boolean(elementId && scopedIds.has(elementId)));
+}
+
+function materialTagsByBlock(build: ContractEvaluableBuild) {
+  const tags = new Map<string, Set<string>>();
+  for (const material of Object.values(build.input.materialLibrary)) {
+    if (typeof material === "string" || !material.tags?.length) continue;
+    const blockTags = tags.get(material.block) ?? new Set<string>();
+    material.tags.forEach((tag) => blockTags.add(tag));
+    tags.set(material.block, blockTags);
+  }
+  return tags;
+}
+
+function evaluateDesignAssertion(
+  build: ContractEvaluableBuild,
+  requirement: DesignRequirement,
+  assertion: DesignAssertion,
+  matches: Placement[],
+) {
+  const scoped = assertionPlacementScope(requirement, assertion, matches);
+  const scopedIds = new Set(assertion.elementIds?.length ? assertion.elementIds : requirement.elementIds);
+  const generatedIds = new Set(scoped.map(({ elementId }) => elementId).filter((id): id is string => Boolean(id)));
+  const expectedPrefix = `${assertion.kind} [${assertion.sourceSpan.start},${assertion.sourceSpan.end}) “${assertion.sourceSpan.text}”`;
+  switch (assertion.kind) {
+    case "placement_count":
+      return { pass: scoped.length >= assertion.minimum, expected: `${expectedPrefix}: >=${assertion.minimum}`, actual: `${scoped.length} placement(s)`, coordinates: scoped };
+    case "axis_span": {
+      const values = scoped.map((placement) => placement[assertion.axis]);
+      const span = values.length ? Math.max(...values) - Math.min(...values) + 1 : 0;
+      return { pass: span >= assertion.minimum, expected: `${expectedPrefix}: ${assertion.axis} span >=${assertion.minimum}`, actual: `${span} block(s)`, coordinates: scoped };
+    }
+    case "distinct_elements":
+      return { pass: generatedIds.size >= assertion.minimum, expected: `${expectedPrefix}: >=${assertion.minimum} generated element(s)`, actual: `${generatedIds.size} element(s)`, coordinates: scoped };
+    case "element_instances": {
+      const instances = new Set(scoped.map(({ elementInstanceId }) => elementInstanceId).filter((id): id is string => Boolean(id)));
+      return { pass: instances.size >= assertion.minimum, expected: `${expectedPrefix}: >=${assertion.minimum} generated element instance(s)`, actual: `${instances.size} instance(s)`, coordinates: scoped };
+    }
+    case "distinct_materials": {
+      const materials = new Set(scoped.map(({ block }) => block));
+      return { pass: materials.size >= assertion.minimum, expected: `${expectedPrefix}: >=${assertion.minimum} material(s)`, actual: `${materials.size} material(s)`, coordinates: scoped };
+    }
+    case "element_kind": {
+      const elements = build.input.design.elements.filter((element) => scopedIds.has(element.id) && generatedIds.has(element.id) && element.kind === assertion.elementKind);
+      return { pass: elements.length >= assertion.minimum, expected: `${expectedPrefix}: >=${assertion.minimum} ${assertion.elementKind} element(s)`, actual: `${elements.length} element(s)`, coordinates: scoped };
+    }
+    case "path_geometry": {
+      const paths = build.input.design.elements.filter((element): element is Extract<DesignElement, { kind: "sweep" }> => element.kind === "sweep" && scopedIds.has(element.id) && generatedIds.has(element.id));
+      const controlPointFloor = paths.length ? Math.min(...paths.map(({ points }) => points.length)) : 0;
+      const verticalDropFloor = paths.length ? Math.min(...paths.map(({ points }) => Math.max(...points.map(({ y }) => y)) - Math.min(...points.map(({ y }) => y)))) : 0;
+      const supportPlacements = scoped.filter(({ phase }) => /(?:^|:\s*)support$/i.test(phase));
+      const supportedIds = new Set(supportPlacements.map(({ elementId }) => elementId));
+      const allSupported = paths.length > 0 && paths.every((path) => Boolean(path.supports) && supportedIds.has(path.id));
+      const checks = [
+        assertion.minimumPaths === undefined || paths.length >= assertion.minimumPaths,
+        assertion.minimumControlPointsPerPath === undefined || controlPointFloor >= assertion.minimumControlPointsPerPath,
+        assertion.minimumVerticalDrop === undefined || verticalDropFloor >= assertion.minimumVerticalDrop,
+        assertion.supportsRequired !== true || allSupported,
+      ];
+      const expected = [
+        assertion.minimumPaths === undefined ? undefined : `paths>=${assertion.minimumPaths}`,
+        assertion.minimumControlPointsPerPath === undefined ? undefined : `controlPoints/path>=${assertion.minimumControlPointsPerPath}`,
+        assertion.minimumVerticalDrop === undefined ? undefined : `verticalDrop/path>=${assertion.minimumVerticalDrop}`,
+        assertion.supportsRequired === true ? "generated supports on every path" : undefined,
+      ].filter(Boolean).join(", ");
+      return {
+        pass: checks.every(Boolean),
+        expected: `${expectedPrefix}: ${expected}`,
+        actual: `${paths.length} path(s), ${controlPointFloor} min control point(s), ${verticalDropFloor} min vertical drop, ${supportPlacements.length} support placement(s)`,
+        coordinates: scoped,
+      };
+    }
+    case "material_tag_count": {
+      const tags = materialTagsByBlock(build);
+      const tagged = scoped.filter(({ block }) => tags.get(block)?.has(assertion.tag));
+      return { pass: tagged.length >= assertion.minimumPlacements, expected: `${expectedPrefix}: >=${assertion.minimumPlacements} placement(s) tagged ${assertion.tag}`, actual: `${tagged.length} placement(s)`, coordinates: tagged };
+    }
+    case "support_count": {
+      const supports = scoped.filter(({ phase }) => /(?:^|:\s*)support$/i.test(phase));
+      const columns = new Set(supports.map(({ x, z }) => `${x},${z}`));
+      return { pass: columns.size >= assertion.minimumColumns, expected: `${expectedPrefix}: >=${assertion.minimumColumns} support column(s)`, actual: `${columns.size} column(s)`, coordinates: supports };
+    }
+    case "boundary_contact": {
+      const envelope = expectedEnvelope(build);
+      const counts = Object.fromEntries(assertion.sides.map((side) => [side, scoped.filter((placement) => (
+        side === "west" ? placement.x === envelope.min.x
+          : side === "east" ? placement.x === envelope.max.x
+            : side === "north" ? placement.z === envelope.min.z
+              : side === "south" ? placement.z === envelope.max.z
+                : side === "bottom" ? placement.y === envelope.min.y
+                  : placement.y === envelope.max.y
+      )).length])) as Record<(typeof assertion.sides)[number], number>;
+      const pass = assertion.sides.every((side) => counts[side] >= assertion.minimumPlacementsPerSide);
+      return {
+        pass,
+        expected: `${expectedPrefix}: ${assertion.sides.map((side) => `${side}>=${assertion.minimumPlacementsPerSide}`).join(", ")}`,
+        actual: assertion.sides.map((side) => `${side}=${counts[side]}`).join(", "),
+        coordinates: scoped,
+      };
+    }
+  }
+}
+
+function designAssertionResult(build: ContractEvaluableBuild, clause: ContractClause) {
+  const requirementId = String(clause.parameters.requirementId ?? "");
+  const requirement = build.input.design.requirements.find(({ id }) => id === requirementId);
+  if (!requirement) return hardResult(clause, "fail", "The normalized requirement is absent from the hash-bound design program.", requirementId, "missing");
+  try {
+    validateDesignRequirementAssertions(requirement, new Set(build.input.design.elements.map(({ id }) => id)));
+  } catch (error) {
+    return hardResult(clause, "fail", error instanceof Error ? error.message : String(error));
+  }
+  const elementIds = new Set(requirement.elementIds);
+  const matches = build.placements.filter((placement) => Boolean(
+    placement.elementId && elementIds.has(placement.elementId) && placement.requirementIds?.includes(requirementId),
+  ));
+  const generatedElementIds = new Set(matches.map(({ elementId }) => elementId!));
+  const missing = [...elementIds].filter((id) => !generatedElementIds.has(id));
+  const results = requirement.assertions.map((assertion) => evaluateDesignAssertion(build, requirement, assertion, matches));
+  const failed = results.filter(({ pass }) => !pass);
+  const pass = !missing.length && !failed.length;
+  return hardResult(
+    clause,
+    pass ? "pass" : "fail",
+    pass ? "Every source-grounded design assertion passed against canonical geometry." : "One or more source-grounded design assertions failed against canonical geometry.",
+    [`${elementIds.size} mapped element(s)`, ...results.map(({ expected }) => expected)].join("; "),
+    [`${generatedElementIds.size} generated element(s)${missing.length ? `; missing ${missing.join(", ")}` : ""}`, ...results.map(({ actual }, index) => `${requirement.assertions[index].kind}: ${actual}`)].join("; "),
+    results.flatMap(({ coordinates }) => coordinates),
+  );
+}
+
 function evaluateHardClause(build: ContractEvaluableBuild, clause: ContractClause, audit: SemanticBuildAudit): ContractCheckResult {
   if (!clause.supported || !clause.evaluator) {
     const reason = typeof clause.parameters.reason === "string" ? clause.parameters.reason : undefined;
@@ -624,6 +814,7 @@ function evaluateHardClause(build: ContractEvaluableBuild, clause: ContractClaus
     case "corridor-clearance": return corridorResult(build, clause);
     case "spawn-pedestal": return pedestalResult(build, clause);
     case "lighting": return lightingResult(build, clause);
+    case "design-assertions": return designAssertionResult(build, clause);
     case "covered-porch": {
       const porch = build.placements.filter((placement) => /porch/i.test(placement.phase));
       const byColumn = new Set(build.placements.filter((placement) => /roof|cover|eave/i.test(placement.phase)).map(({ x, z }) => `${x},${z}`));

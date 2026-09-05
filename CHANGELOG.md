@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.0 - 2026-09-05
+
+- Added a generic, requirement-mapped Design IR for arbitrary fills, shells, carves, cylinders, basins, sweeps, stairs, ramps, repetition, and supports.
+- Preserved custom style text instead of silently falling back to Nordic; large builds now reject legacy massing substitution.
+- Added an open-ended named material library with exhaustive target-registry validation and no fixed palette-cardinality ceiling.
+- Made compilation data-only and visual review explicit; added low-resource inline review, single-owner 3D, immediate close/teardown, abortable paging, and a constrained iPhone rendering profile.
+- Added internally verified, spatially tiled Bedrock `.mcstructure`/`.mcpack` delivery with exact permutation lowering, canonical metadata, certificates, and checksums. Real iPhone runtime compatibility remains unverified until an on-device import-and-placement smoke test succeeds.
+- Added the complete five-sector Aqua Meridian brief as a permanent regression fixture.
+- Replaced public deterministic-id cache lookups with short-lived cryptographically random `cacheRef` capabilities and raised the still placement-bounded hosted cache to eight records so a five-sector project can be reviewed and exported without self-eviction behind a session-terminating proxy.
+
 ## 0.6.0 - 2026-09-05
 
 - Added normalized build contracts and deterministic, full-hash certificates. Hard requirements now fail closed when they fail, are unsupported, or cannot be evaluated; semantic auditing covers entrances, clearance, spawn safety, requested spaces, explicit lighting, interiors, support, palette, version, origin, and budget.

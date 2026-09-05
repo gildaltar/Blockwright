@@ -4,6 +4,7 @@ export type StyleProfile = {
   principles: string[];
   palette: string[];
   failureModes: string[];
+  custom?: boolean;
 };
 
 export const STYLE_PROFILES: StyleProfile[] = [
@@ -38,5 +39,14 @@ export const STYLE_PROFILES: StyleProfile[] = [
 
 export function getStyleProfile(style: string) {
   const needle = style.trim().toLowerCase();
-  return STYLE_PROFILES.find((profile) => profile.id === needle || profile.name.toLowerCase() === needle) ?? STYLE_PROFILES[0];
+  const known = STYLE_PROFILES.find((profile) => profile.id === needle || profile.name.toLowerCase() === needle);
+  if (known) return known;
+  return {
+    id: needle || "custom",
+    name: style.trim() || "Custom",
+    principles: ["caller-defined spatial and material rules"],
+    palette: [],
+    failureModes: ["silently substituting a preset style"],
+    custom: true,
+  } satisfies StyleProfile;
 }

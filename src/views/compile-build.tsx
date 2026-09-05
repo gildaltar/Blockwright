@@ -34,6 +34,7 @@ import {
 import { useDisplayMode, useDownload, useLayout, useViewState } from "skybridge/web";
 import { useToolInfo } from "../helpers.js";
 import { type BuildPlacementPage, type BuildSummary } from "../lib/build-view-paging.js";
+import { constructionExportBlocker } from "../lib/export-policy.js";
 import type { BuildRecord, Placement } from "../lib/types.js";
 import { loadResourcePack, placementTextureKey, type FaceTextures, type LoadedResourcePack } from "../lib/resource-pack.js";
 import { usePagedBuild } from "../use-paged-build.js";
@@ -172,6 +173,9 @@ function ExportMenu({ build }: { build: BuildRecord }) {
   const [open, setOpen] = useState(false);
   const { download } = useDownload();
   const safeName = build.input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const commandFormat = build.input.edition === "java" ? "java" : "bedrock";
+  const constructionBlocker = constructionExportBlocker(build, build.input.edition === "java" ? "java_mcfunction" : "bedrock_mcfunction");
+  const availableFormats = ["json", "csv", "blueprint", ...(constructionBlocker ? [] : [commandFormat])] as Array<"json" | "csv" | "java" | "bedrock" | "blueprint">;
   const makeText = (format: "json" | "csv" | "java" | "bedrock" | "blueprint") => {
     if (format === "json") return JSON.stringify(build, null, 2);
     if (format === "csv") return ["x,y,z,block,state,phase", ...build.placements.map((p) => `${p.x},${p.y},${p.z},${p.block},"${JSON.stringify(p.state ?? {}).replaceAll('"', '""')}","${p.phase}"`)].join("\n");
@@ -199,7 +203,8 @@ function ExportMenu({ build }: { build: BuildRecord }) {
     <div className="export-wrap">
       <button className="primary-button" onClick={() => setOpen((value) => !value)}><Download size={17} />Export build</button>
       {open && <div className="export-menu" role="menu">
-        {(["json", "csv", "java", "bedrock", "blueprint"] as const).map((format) => <button key={format} onClick={() => void save(format)}>{format === "json" ? "Blockwright JSON" : format === "csv" ? "Coordinate CSV" : format === "java" ? "Java .mcfunction" : format === "bedrock" ? "Bedrock .mcfunction" : "Layer blueprint"}</button>)}
+        {constructionBlocker && <p className="export-blocked" role="status">Construction export blocked. Diagnostic files remain available.</p>}
+        {availableFormats.map((format) => <button key={format} onClick={() => void save(format)}>{format === "json" ? "Blockwright JSON" : format === "csv" ? "Coordinate CSV" : format === "java" ? "Java .mcfunction" : format === "bedrock" ? "Bedrock .mcfunction" : "Layer blueprint"}</button>)}
       </div>}
     </div>
   );

@@ -1,0 +1,140 @@
+{
+  "project": {
+    "name": "Aqua Meridian Waterpark",
+    "purpose": "Large-scale Bedrock waterpark and mobile import test",
+    "overallBounds": {
+      "minimum": { "x": 0, "y": 64, "z": 0 },
+      "maximum": { "x": 255, "y": 135, "z": 239 }
+    },
+    "estimatedFootprint": { "width": 256, "depth": 240, "height": 72 }
+  },
+  "sharedRolePalette": {
+    "foundation": "minecraft:smooth_stone",
+    "wall": "minecraft:white_concrete",
+    "frame": "minecraft:gray_concrete",
+    "roof": "minecraft:smooth_quartz",
+    "trim": "minecraft:light_gray_concrete",
+    "glazing": "minecraft:tinted_glass",
+    "lighting": "minecraft:sea_lantern",
+    "doors": "minecraft:iron_door",
+    "railings": "minecraft:iron_bars",
+    "accents": "minecraft:cyan_concrete",
+    "landscaping": "minecraft:jungle_leaves"
+  },
+  "acceptance": {
+    "paletteCardinalityLimit": null,
+    "requirementsMustMapToGeometry": true,
+    "genericGeometryOnly": true,
+    "reviewerErrorsMustBeZero": true,
+    "boundaryEntrancesMustHaveClearHeadroom": true,
+    "unexpectedReviewerWarningsMustBeZero": true,
+    "mobileArtifact": "mcpack",
+    "notes": [
+      "The material library is open-ended. The shared role palette is a baseline, not a maximum.",
+      "Named attractions must be synthesized from generic spatial and path primitives, not from hardcoded attraction enums.",
+      "Every requested feature must have hash-bound generated and independently evaluated evidence.",
+      "Room-to-door geometry remains explicitly unevaluated by schema v2; every other physical-review warning is a generation failure."
+    ]
+  },
+  "builds": [
+    {
+      "name": "Aqua Meridian 01 Arrival",
+      "edition": "bedrock",
+      "version": "stable",
+      "buildingType": "hall",
+      "style": "modern",
+      "seed": "aqua-meridian-arrival-01",
+      "blockBudget": 150000,
+      "dimensions": { "width": 160, "depth": 48, "height": 32 },
+      "origin": { "x": 48, "y": 64, "z": 0 },
+      "features": [
+        "Grand modern waterpark entrance with a resort sign and broad arrival plaza",
+        "Ticket windows, turnstiles, security screening, guest services and first-aid station",
+        "Glass-roofed atrium with a park map, clocks, directional signs, speakers and integrated lighting",
+        "Locker rooms, changing rooms, showers, restrooms and family facilities",
+        "Main promenade exits aligned south into the thrill and family sectors",
+        "Fine details including drains, benches, bins, planters, railings, counters and ventilation"
+      ]
+    },
+    {
+      "name": "Aqua Meridian 02 Thrill Sector",
+      "edition": "bedrock",
+      "version": "stable",
+      "buildingType": "tower",
+      "style": "modern",
+      "seed": "aqua-meridian-thrill-02",
+      "blockBudget": 150000,
+      "dimensions": { "width": 112, "depth": 112, "height": 72 },
+      "origin": { "x": 0, "y": 64, "z": 48 },
+      "features": [
+        "Fifty-block-high sculptural slide tower with an elevator core and realistic access stairs",
+        "Four distinct open and enclosed flume routes with drops, turns, supports and runout channels",
+        "Queue switchbacks, loading-platform gates, guardrails, shade roofs and height-restriction signs",
+        "Deep splashdown pool, landing channels, lifeguard posts and rescue equipment",
+        "Pump and filtration facade with exposed pipes, vents, service doors and maintenance access",
+        "Connection plaza aligned east and north with adjacent waterpark sectors",
+        "Fine details including deck drains, coping, grates, cameras, speakers, lights and warning markings"
+      ]
+    },
+    {
+      "name": "Aqua Meridian 03 Wave And Activity",
+      "edition": "bedrock",
+      "version": "stable",
+      "buildingType": "courtyard",
+      "style": "modern",
+      "seed": "aqua-meridian-wave-03",
+      "blockBudget": 150000,
+      "dimensions": { "width": 128, "depth": 112, "height": 32 },
+      "origin": { "x": 128, "y": 64, "z": 48 },
+      "features": [
+        "Large wave pool with graduated beach entry and a deep-end wave-machine wall",
+        "Activity pool with lane markings, climbing wall, basketball goals and diving edge",
+        "Surf simulator with equipment counter, queue area, spectator deck and safety railings",
+        "Lifeguard stands, warning signs, depth markers, rescue rings and lane ropes",
+        "Broad pool deck with loungers, umbrellas, shade sails, showers and foot-rinse stations",
+        "Connection promenade aligned west, north and south",
+        "Fine details including pool coping, drains, expansion joints, lighting, planters, bins and speakers"
+      ]
+    },
+    {
+      "name": "Aqua Meridian 04 Family River",
+      "edition": "bedrock",
+      "version": "stable",
+      "buildingType": "courtyard",
+      "style": "modern",
+      "seed": "aqua-meridian-family-04",
+      "blockBudget": 150000,
+      "dimensions": { "width": 120, "depth": 80, "height": 40 },
+      "origin": { "x": 0, "y": 64, "z": 160 },
+      "features": [
+        "Wide looping lazy river with bridges, entry stairs, current jets and tube-staging areas",
+        "Multi-level family play fortress with tipping bucket, spray features and small slides",
+        "Zero-depth splash pad with colorful safety surfacing and shaded parent seating",
+        "Rockwork islands, waterfalls, palms, ornamental planting beds and retaining walls",
+        "Accessible ramps, wide gates, step-free approaches and clearly marked emergency exits",
+        "Connection promenade aligned north and east",
+        "Fine details including railings, grates, drains, signs, clocks, lighting, benches and bins"
+      ]
+    },
+    {
+      "name": "Aqua Meridian 05 Hospitality Service",
+      "edition": "bedrock",
+      "version": "stable",
+      "buildingType": "hall",
+      "style": "modern",
+      "seed": "aqua-meridian-service-05",
+      "blockBudget": 150000,
+      "dimensions": { "width": 128, "depth": 80, "height": 32 },
+      "origin": { "x": 128, "y": 64, "z": 160 },
+      "features": [
+        "Modern food hall with service counters, kitchens, dining seating and a glass facade",
+        "Two snack kiosks, vending alcove, towel station and retail counter",
+        "Private cabanas, pergolas, loungers, umbrellas and landscaped dining terraces",
+        "Back-of-house pump rooms, filtration plant, staff corridor and chemical-storage facade",
+        "Maintenance yard with screened service access, loading area, exposed pipes and vents",
+        "Connection promenade aligned north and west with a clearly marked emergency exit",
+        "Fine details including tables, counters, bins, recycling stations, lighting, signage, cameras and speakers"
+      ]
+    }
+  ]
+}

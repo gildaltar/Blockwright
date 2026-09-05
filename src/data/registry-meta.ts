@@ -8,9 +8,9 @@ export const REGISTRY_META = {
   },
   bedrock: {
     requestedVersion: "stable",
-    coverageVersion: "@minecraft/vanilla-data 1.26.44",
-    source: "Microsoft @minecraft/vanilla-data",
-    sourceUrl: "https://www.npmjs.com/package/@minecraft/vanilla-data",
-    syncedAt: "2026-09-02T19:35:00.000Z",
+    coverageVersion: "1.26.40",
+    source: "minecraft-data",
+    sourceUrl: "https://github.com/PrismarineJS/minecraft-data",
+    syncedAt: "2026-09-05T00:00:00.000Z",
   },
 } as const;

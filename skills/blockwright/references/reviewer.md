@@ -16,7 +16,14 @@ Use `review_build` after compilation when the user wants to inspect or annotate 
 3. Save annotations as Change, Fix, Remove, or Liked. Include the intended rule in the note, not only what looks wrong at one coordinate.
 4. Export review JSON when feedback needs to move between chats or tools. Import only when its build hash matches the current build.
 5. Call `audit_build` after any issue is identified. Group the annotation into a defect class and check all analogous placements before revising.
-6. After `revise_build`, open a fresh review and rerun the audit. Never carry old annotations forward merely because the build name is unchanged.
+6. After `revise_build`, invalidate the old hash-bound review and rerun the audit. Open one replacement review only when the user asks to inspect it; never auto-open another card after compile or revision.
+
+## Mobile lifecycle
+
+- Inline review is a compact audit/material summary. It must not download all placements or allocate WebGL resources.
+- 3D is explicit, fullscreen, and single-owner. Opening it retires any older Blockwright 3D instance in the same host where cooperative lifecycle messaging is available.
+- **Close viewer** must stay visible on narrow screens and release paging, textures, and Canvas immediately even if the host cannot remove an older result card.
+- Keep exact high-cardinality palette data, but virtualize/search the list and create GPU resources only for the active layer or chunks.
 
 ## Global defect classes
 

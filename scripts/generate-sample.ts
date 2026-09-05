@@ -20,7 +20,6 @@ await Promise.all([
   writeFile(join(output, "build.json"), toJson(build)),
   writeFile(join(output, "coordinates.csv"), toCsv(build)),
   writeFile(join(output, "build-java.mcfunction"), toMcfunction(build, "java")),
-  writeFile(join(output, "build-bedrock.mcfunction"), toMcfunction(build, "bedrock")),
   writeFile(join(output, "blueprint.txt"), toBlueprint(build)),
   writeFile(join(output, "blockwright-bundle.zip"), await createBundle(build)),
 ]);

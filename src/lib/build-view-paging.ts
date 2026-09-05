@@ -5,7 +5,7 @@ export const BUILD_VIEW_PAGE_SIZE = 5_000;
 export const BUILD_VIEW_LEGACY_INLINE_LIMIT = 2_000;
 export const BUILD_VIEW_MAX_PLACEMENTS = 2_000_000;
 
-export type BuildSummary = Omit<BuildRecord, "placements"> & { blockCount: number };
+export type BuildSummary = Omit<BuildRecord, "placements"> & { blockCount: number; cacheRef?: string };
 
 export type BuildPlacementPage = {
   buildId: string;
@@ -27,7 +27,16 @@ type LoadBuildForViewOptions = {
   initialPage?: BuildPlacementPage;
   legacyBuild?: BuildRecord;
   onProgress?: (loaded: number, total: number) => void;
+  signal?: AbortSignal;
 };
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) return;
+  if (signal.reason instanceof Error) throw signal.reason;
+  const error = new Error("Build placement loading was cancelled.");
+  error.name = "AbortError";
+  throw error;
+}
 
 function assertPlacementCount(blockCount: number) {
   if (!Number.isSafeInteger(blockCount) || blockCount < 0 || blockCount > BUILD_VIEW_MAX_PLACEMENTS) {
@@ -48,7 +57,8 @@ function assertPlacement(value: unknown, index: number) {
 
 function validatedPage(summary: BuildSummary, page: BuildPlacementPage, expectedOffset: number, maximumReturned: number) {
   if (!page || typeof page !== "object") throw new Error("Build placement page is missing.");
-  if (page.buildId !== summary.id) throw new Error(`Build placement page belongs to ${page.buildId || "an unknown build"}, not ${summary.id}.`);
+  const expectedReference = summary.cacheRef ?? summary.id;
+  if (page.buildId !== expectedReference) throw new Error(`Build placement page belongs to ${page.buildId || "an unknown build"}, not the expected build reference.`);
   if (page.offset !== expectedOffset) throw new Error(`Build placement page started at ${page.offset}, but offset ${expectedOffset} was required.`);
   if (page.total !== summary.blockCount) throw new Error(`Build placement page reports ${page.total} total placements, but the immutable summary reports ${summary.blockCount}.`);
   if (!Number.isSafeInteger(page.returned) || page.returned < 0 || page.returned > maximumReturned) {
@@ -102,11 +112,13 @@ export function buildPlacementPageFromToolResponse(response: unknown): BuildPlac
   };
 }
 
-export async function loadBuildForView({ summary, fetchPage, initialPage, legacyBuild, onProgress }: LoadBuildForViewOptions): Promise<BuildRecord> {
+export async function loadBuildForView({ summary, fetchPage, initialPage, legacyBuild, onProgress, signal }: LoadBuildForViewOptions): Promise<BuildRecord> {
+  throwIfAborted(signal);
   assertPlacementCount(summary.blockCount);
 
   if (!initialPage && validLegacyBuild(summary, legacyBuild)) {
     legacyBuild!.placements.forEach(assertPlacement);
+    throwIfAborted(signal);
     onProgress?.(summary.blockCount, summary.blockCount);
     return legacyBuild!;
   }
@@ -115,18 +127,23 @@ export async function loadBuildForView({ summary, fetchPage, initialPage, legacy
   if (initialPage) {
     const page = validatedPage(summary, initialPage, 0, BUILD_VIEW_INITIAL_PAGE_SIZE);
     placements.push(...page.placements);
+    throwIfAborted(signal);
     onProgress?.(placements.length, summary.blockCount);
   }
 
   while (placements.length < summary.blockCount) {
+    throwIfAborted(signal);
     const offset = placements.length;
     const limit = Math.min(BUILD_VIEW_PAGE_SIZE, summary.blockCount - offset);
-    const page = validatedPage(summary, await fetchPage({ buildId: summary.id, offset, limit }), offset, limit);
+    const response = await fetchPage({ buildId: summary.cacheRef ?? summary.id, offset, limit });
+    throwIfAborted(signal);
+    const page = validatedPage(summary, response, offset, limit);
     placements.push(...page.placements);
     onProgress?.(placements.length, summary.blockCount);
   }
 
+  throwIfAborted(signal);
   if (placements.length !== summary.blockCount) throw new Error("Build placement paging did not reproduce the immutable placement count.");
-  const { blockCount: _blockCount, ...shell } = summary;
+  const { blockCount: _blockCount, cacheRef: _cacheRef, ...shell } = summary;
   return { ...shell, placements };
 }

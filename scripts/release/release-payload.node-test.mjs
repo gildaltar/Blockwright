@@ -33,14 +33,16 @@ function writeFixtureJson(root, path, value) {
 }
 
 test("all release package identities declare the GPL-2.0-only project license", () => {
+  const repositoryVersion = JSON.parse(readFileSync(resolve(repositoryRoot, "package.json"), "utf8")).version;
+  assert.match(repositoryVersion, /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/, "package.json version");
   for (const path of ["package.json", "app/package.json", ".codex-plugin/plugin.json"]) {
     const manifest = JSON.parse(readFileSync(resolve(repositoryRoot, path), "utf8"));
-    assert.equal(manifest.version, "0.6.0", path);
+    assert.equal(manifest.version, repositoryVersion, path);
     assert.equal(manifest.license, "GPL-2.0-only", path);
   }
   for (const path of ["package-lock.json", "app/package-lock.json"]) {
     const lock = JSON.parse(readFileSync(resolve(repositoryRoot, path), "utf8"));
-    assert.equal(lock.packages[""].version, "0.6.0", path);
+    assert.equal(lock.packages[""].version, repositoryVersion, path);
     assert.equal(lock.packages[""].license, "GPL-2.0-only", path);
   }
 });

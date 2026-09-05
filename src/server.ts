@@ -1,14 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createHash, randomBytes } from "node:crypto";
 import { isAbsolute, relative, resolve } from "node:path";
 import { McpServer } from "skybridge/server";
 import { z } from "zod";
 import minecraftData from "minecraft-data";
-import { MinecraftBlockTypes } from "@minecraft/vanilla-data";
 import { REGISTRY_META } from "./data/registry-meta.js";
 import { STYLE_PROFILES, getStyleProfile } from "./data/styles.js";
 import { compileBuild, generateBuildCandidates, summarizeBuild } from "./lib/compiler.js";
 import { createBundle, toBlueprint, toCsv, toJson, toMcfunction, type ExportFormat } from "./lib/exports.js";
+import { assertConstructionExportable, type ConstructionExportFormat } from "./lib/export-policy.js";
 import { listJavaRegistries, readJavaRegistry, registryMetadata } from "./lib/java-registry.js";
 import { checkJavaUpdates, syncJavaVersion } from "./lib/java-version-sync.js";
 import {
@@ -20,6 +21,8 @@ import {
   buildPreflightOutputSchema,
   buildSummaryOutputSchema,
   buildValidationOutputSchema,
+  designMaterialOutputSchema,
+  designProgramOutputSchema,
   discoveredWorldOutputSchema,
   installWorldEditResultOutputSchema,
   outputBoundsSchema,
@@ -37,6 +40,7 @@ import {
 } from "./lib/build-view-cache.js";
 import { BUILD_VIEW_INITIAL_PAGE_SIZE, BUILD_VIEW_PAGE_SIZE, createBuildPlacementPage, createInitialBuildPlacementPage } from "./lib/build-view-paging.js";
 import { createDeliveryBundle, createMaterialList } from "./lib/delivery.js";
+import { BEDROCK_STABLE_VERSION, createBedrockMcpack } from "./lib/bedrock-structure.js";
 import { exportLitematic, importLitematic } from "./lib/litematic.js";
 import { continuePaletteInterview, deletePalette, listPalettes, loadPalette, renamePalette, savePalette } from "./lib/palette-studio.js";
 import { estimateBuild } from "./lib/preflight.js";
@@ -53,7 +57,7 @@ import { mcpRequestTargetDisposition, runBlockwrightRuntime } from "./lib/runtim
 import type { ArchitecturalPlan, BuildInput, BuildRecord, Placement, WorldRegion } from "./lib/types.js";
 
 const APP_NAME = "blockwright";
-const APP_VERSION = "0.6.0";
+const APP_VERSION = "0.7.0";
 const startedAt = Date.now();
 type JsonResponse = {
   setHeader(name: string, value: string): void;
@@ -65,7 +69,7 @@ type McpHttpRequest = {
   url?: string;
   ip?: string;
   socket: { remoteAddress?: string };
-  headers: { authorization?: string; cookie?: string };
+  headers: { authorization?: string; cookie?: string; "mcp-session-id"?: string | string[] };
   blockwrightHostedPrincipal?: HostedPrincipal;
   blockwrightHostedPreAuthRateLimit?: ReturnType<FixedWindowRateLimiter["consume"]>;
   blockwrightHostedRateLimit?: ReturnType<FixedWindowRateLimiter["consume"]>;
@@ -82,7 +86,7 @@ const dimensionsSchema = z.object({
   depth: z.number().int().min(5).max(65535).describe("Exterior depth in blocks along the z axis."),
   height: z.number().int().min(5).max(65535).describe("Maximum build height in blocks along the y axis."),
 });
-const styleSchema = z.string().min(1).max(80).describe("Architectural style profile identifier, such as nordic or japanese.");
+const styleSchema = z.string().min(1).max(160).describe("Preset identifier or freeform custom design direction. Freeform styles require a generic design program and are never silently replaced by another style.");
 const extentDimensionsSchema = z.object({
   width: z.number().int().min(1).max(65535).describe("Width in blocks along the x axis."),
   depth: z.number().int().min(1).max(65535).describe("Depth in blocks along the z axis."),
@@ -95,11 +99,14 @@ const buildInputSchema = {
   edition: z.enum(["java", "bedrock"]).describe("Minecraft edition whose identifiers and commands must be used."),
   version: z.string().min(1).max(32).describe("Exact Minecraft version requested for registry coverage and export compatibility."),
   style: styleSchema.default("nordic"),
+  sourceBrief: z.string().min(1).max(20000).optional().describe("The user's complete natural-language brief, retained verbatim enough to audit whether the structured requirements lost intent. Required for a generic design program."),
   dimensions: dimensionsSchema.describe("Requested exterior build envelope in blocks."),
-  palette: z.array(z.string().min(1).max(128)).max(16).optional().describe("Legacy ordered list of namespaced block identifiers; prefer rolePalette for precise control."),
-  rolePalette: rolePaletteSchema.partial().optional().describe("Optional explicit mapping from architectural roles to namespaced block identifiers."),
+  palette: z.array(z.string().min(1).max(128).describe("Namespaced Minecraft block identifier retained in the legacy ordered palette.")).optional().describe("Legacy ordered identifiers retained without a cardinality cap. Prefer materialLibrary for arbitrary designs."),
+  rolePalette: rolePaletteSchema.partial().optional().describe("Optional compatibility mapping for common architectural roles. These eleven roles are defaults, not the complete material vocabulary."),
+  materialLibrary: z.record(z.string().min(1).max(120).describe("Stable caller-defined material key referenced by generic design elements."), designMaterialOutputSchema).optional().describe("Open-ended named material library. There is intentionally no arbitrary entry-count limit; every entry is exact-version validated."),
+  design: designProgramOutputSchema.optional().describe("Generic geometry program whose requirement mappings, elements, paths, basins, shells, fills, stairs, ramps, and sweeps are compiled without a domain-specific object catalog."),
   origin: vec3Schema.optional().describe("World-space coordinate for the minimum corner of the build; defaults to 0,0,0."),
-  features: z.array(z.string().min(1).max(256)).max(12).optional().describe("Requested rooms, amenities, terrain elements, or construction features."),
+  features: z.array(z.string().min(1).max(1000).describe("One complete hard feature requirement retained from the user's brief.")).optional().describe("Complete hard feature requirements with no arbitrary item-count cap. For generic designs, each entry must map exactly to generated design elements."),
   blockBudget: z.number().int().min(100).max(2000000).optional().describe("Maximum occupied-block count allowed for compilation."),
   seed: z.string().min(1).max(120).optional().describe("Visible deterministic seed; reuse it to reproduce the same normalized plan."),
   buildingType: z.enum(["house", "temple", "tower", "workshop", "hall", "courtyard", "megabase"]).optional().describe("High-level generator family for the architectural plan."),
@@ -113,7 +120,7 @@ const buildReferenceSchema = z.union([
     hash: z.string().max(128).optional().describe("Full immutable build hash when the caller has one."),
     input: z.object(buildInputSchema).passthrough().describe("Normalized build input used to deterministically reconstruct and integrity-check the build."),
   }).passthrough(),
-]).describe("A PC-local or authenticated principal-scoped cached build id, or a canonical build summary/record containing normalized input. Uncached deterministic summaries are recompiled and integrity-checked.");
+]).describe("A PC-local build id, a hosted short-lived cacheRef returned with a build summary, or a canonical build summary/record containing normalized input. Hosted cache references are random capabilities; deterministic ids alone never cross a public cache boundary. Uncached summaries are recompiled and integrity-checked.");
 
 const contractClauseInputSchema = z.union([
   z.string().min(1).max(500).describe("Requirement text; hard by default, or prefix with warning: or aesthetic: when appropriate."),
@@ -124,7 +131,7 @@ const contractClauseInputSchema = z.union([
 ]);
 
 const buildContractOverrideSchema = z.object({
-  features: z.array(z.string().min(1).max(500)).max(50).optional().describe("Additional feature requirements; the build's locked features are retained."),
+  features: z.array(z.string().min(1).max(500).describe("One additive contract requirement, hard by default unless prefixed with warning: or aesthetic:.")).optional().describe("Additional feature requirements with no arbitrary item-count cap; the build's locked features are retained."),
   clauses: z.array(contractClauseInputSchema).max(50).optional().describe("Additional hard, warning, or aesthetic clauses; hard clauses fail closed when unsupported."),
 }).describe("Optional additive contract clauses. This cannot erase requirements already locked into the build input.");
 
@@ -256,6 +263,9 @@ const LOCAL_PROJECT_TENANT = "blockwright-local-user";
 const LOCAL_PROJECT_ACTOR = "local-mcp";
 const LOCAL_BUILD_PLACEMENT_CAP = 2_000_000;
 const HOSTED_BUILD_PLACEMENT_CAP = 250_000;
+const HOSTED_BUILD_ATTEMPT_CAP = 2_000_000;
+const HOSTED_BUILD_AXIS_CAP = Object.freeze({ width: 512, depth: 512, height: 256 });
+const HOSTED_BUILD_CHUNK_COLUMN_CAP = 1_024;
 const HOSTED_IMPORT_PLACEMENT_CAP = 100_000;
 const HOSTED_REVISION_PLACEMENT_CAP = 100_000;
 const HOSTED_MCP_AUTH_ERROR = "HOSTED_MCP_AUTH_REQUIRED";
@@ -274,10 +284,30 @@ const HOSTED_ARTIFACT_WORK_PER_TENANT_PER_MINUTE = 4;
 const HOSTED_ARTIFACT_MAX_OUTPUT_BYTES = 3 * 1024 * 1024;
 const HOSTED_ARTIFACT_MAX_IN_FLIGHT = 2;
 const HOSTED_MATERIAL_PAGE_SIZE = 100;
+const HOSTED_BUILD_SUMMARY_MAX_BYTES = 1024 * 1024;
+
+const PUBLIC_CONNECTOR_TOOLS = new Set([
+  "get_supported_versions",
+  "search_blocks",
+  "get_style_profile",
+  "estimate_build",
+  "generate_build_candidates",
+  "compile_build",
+  "validate_build",
+  "validate_build_contract",
+  "audit_build",
+  "review_build",
+  "analyze_world_region",
+  "export_build",
+  "export_bedrock_project",
+  "revise_build",
+  "get_material_list",
+  "get_build_chunk",
+]);
 
 function rememberBuild(build: BuildRecord) {
   assertHostedCompiledBuild(build, "compiled build");
-  if (hostedConfig.enabled) return build;
+  if (boundedRemoteMode) return build;
   buildCache.delete(build.id);
   buildCache.set(build.id, build);
   while (buildCache.size > 32) buildCache.delete(buildCache.keys().next().value!);
@@ -285,7 +315,7 @@ function rememberBuild(build: BuildRecord) {
 }
 
 function asBuild(value: unknown) {
-  if (hostedConfig.enabled) {
+  if (boundedRemoteMode) {
     const cached = cachedHostedBuild(value);
     if (cached) return cached;
   }
@@ -301,8 +331,8 @@ function asBuild(value: unknown) {
   const suppliedHash = "hash" in value && typeof value.hash === "string" ? value.hash : undefined;
   assertHostedBuildWorkload(value.input as BuildInput, "canonical build recompilation");
   consumeHostedBuildWork("canonical build recompilation");
-  const compiled = compileBuild(value.input as BuildInput);
-  if (hostedConfig.enabled && "revision" in value && value.revision && typeof value.revision === "object" && "kind" in value.revision && value.revision.kind === "selected_region") {
+  const compiled = compileBuildForRuntime(value.input as BuildInput);
+  if (boundedRemoteMode && "revision" in value && value.revision && typeof value.revision === "object" && "kind" in value.revision && value.revision.kind === "selected_region") {
     return recompileHostedRegionalBuild(value as Record<string, unknown>, compiled, suppliedId, suppliedHash);
   }
   if (suppliedId && suppliedId !== compiled.id) {
@@ -311,7 +341,7 @@ function asBuild(value: unknown) {
   if (suppliedHash && suppliedHash !== compiled.hash) {
     throw new Error(`Build integrity check failed: supplied hash ${suppliedHash.slice(0, 12)} does not match the deterministic input hash ${compiled.hash.slice(0, 12)}.`);
   }
-  const cached = !hostedConfig.enabled && suppliedId ? buildCache.get(suppliedId) : undefined;
+  const cached = !boundedRemoteMode && suppliedId ? buildCache.get(suppliedId) : undefined;
   if (cached) {
     if (cached.hash !== compiled.hash) {
       throw new Error(`Build integrity check failed: cached build ${cached.hash.slice(0, 12)} does not match supplied input ${compiled.hash.slice(0, 12)}.`);
@@ -319,7 +349,7 @@ function asBuild(value: unknown) {
     return cached;
   }
   const remembered = rememberBuild(compiled);
-  cacheBuildForView(remembered);
+  if (!publicConnectorMode) cacheBuildForView(remembered);
   return remembered;
 }
 
@@ -362,7 +392,7 @@ function recompileHostedRegionalBuild(value: Record<string, unknown>, generatedB
       throw new Error("Build integrity check failed: the selected-region record claims a changed hash without any placement change.");
     }
     const remembered = rememberBuild(generatedBase);
-    cacheBuildForView(remembered);
+    if (!publicConnectorMode) cacheBuildForView(remembered);
     return remembered;
   }
   const region = changedCoordinates.reduce((bounds, coordinate) => ({
@@ -388,7 +418,7 @@ function recompileHostedRegionalBuild(value: Record<string, unknown>, generatedB
     throw new Error("Build integrity check failed: the selected-region id or hash does not match its canonical placement reconstruction.");
   }
   const remembered = rememberBuild(reconstructed);
-  cacheBuildForView(remembered);
+  if (!publicConnectorMode) cacheBuildForView(remembered);
   return remembered;
 }
 
@@ -400,9 +430,33 @@ const fallbackJavaBlocks = Object.values(javaRegistry?.blocksByName ?? {}).map((
   hardness: block.hardness,
   stackSize: block.stackSize,
 }));
-const bedrockBlocks = [...new Set(Object.values(MinecraftBlockTypes))].map((id) => ({ id, displayName: id.replace("minecraft:", "").replaceAll("_", " ") }));
+const exactBedrockRegistry = minecraftData(`bedrock_${BEDROCK_STABLE_VERSION}`);
+if (!exactBedrockRegistry) {
+  throw new Error(`The exact Bedrock minecraft-data registry ${BEDROCK_STABLE_VERSION} is unavailable.`);
+}
+const bedrockBlocks = Object.values(exactBedrockRegistry.blocksByName).map(({ name, displayName }) => ({
+  id: `minecraft:${name}`,
+  displayName,
+}));
 
 const hostedConfig = loadHostedServiceConfig();
+/**
+ * Public connector mode is the deliberately stateless, rate-limited surface used
+ * by the account-level ChatGPT/iPhone connection. It does not enable hosted
+ * accounts, billing, project storage, or any PC-local filesystem tools.
+ */
+const publicConnectorMode = !hostedConfig.enabled && process.env.BLOCKWRIGHT_PUBLIC_CONNECTOR_MODE === "1";
+if (publicConnectorMode && process.env.NODE_ENV === "production" && !/^[0-4]$/.test(process.env.BLOCKWRIGHT_TRUST_PROXY_HOPS?.trim() ?? "")) {
+  throw new Error("Production public connector mode requires an explicit BLOCKWRIGHT_TRUST_PROXY_HOPS value from 0 through 4 so client isolation and quotas bind at the intended ingress boundary.");
+}
+const boundedRemoteMode = hostedConfig.enabled || publicConnectorMode;
+const runtimeCompileLimits = boundedRemoteMode
+  ? { maximumPlacements: HOSTED_BUILD_PLACEMENT_CAP, maximumPlacementAttempts: HOSTED_BUILD_ATTEMPT_CAP }
+  : { maximumPlacements: LOCAL_BUILD_PLACEMENT_CAP, maximumPlacementAttempts: 8_000_000 };
+
+function compileBuildForRuntime(input: BuildInput) {
+  return compileBuild(input, runtimeCompileLimits);
+}
 let hostedStore: HostedServiceStore | undefined;
 let hostedStartupIssue: string | undefined;
 if (hostedConfig.ready) {
@@ -456,10 +510,37 @@ function hostedCachePrincipal() {
   return principal;
 }
 
+const PUBLIC_CACHE_REFERENCE_PATTERN = /^bwc_([A-Za-z0-9_-]{32})\.(bw_[a-f0-9]{12})$/;
+
+function createPublicCacheReference(build: BuildRecord) {
+  return `bwc_${randomBytes(24).toString("base64url")}.${build.id}`;
+}
+
+function publicCacheLocation(value: unknown) {
+  const cacheRef = typeof value === "string"
+    ? value
+    : value && typeof value === "object" && "cacheRef" in value && typeof value.cacheRef === "string"
+      ? value.cacheRef
+      : undefined;
+  const match = cacheRef ? PUBLIC_CACHE_REFERENCE_PATTERN.exec(cacheRef) : undefined;
+  if (!match) return undefined;
+  return {
+    cacheRef,
+    buildId: match[2],
+    principal: { tenantId: "public_cache_capability", userId: `public_cache_${match[1]}` },
+  };
+}
+
 function cachedHostedBuild(value: unknown) {
-  const principal = hostedCachePrincipal();
+  const publicLocation = publicConnectorMode ? publicCacheLocation(value) : undefined;
+  if (publicConnectorMode && typeof value === "string" && !publicLocation) {
+    throw new Error("VIEW_BUILD_CACHE_MISS: public cached builds require the short-lived cacheRef returned by the originating build tool.");
+  }
+  if (publicConnectorMode && value && typeof value === "object" && !publicLocation) return undefined;
+  const principal = publicLocation?.principal ?? hostedCachePrincipal();
   if (typeof value === "string") {
-    const cached = hostedBuildViewCache.get(principal, value);
+    const lookupId = publicConnectorMode ? publicLocation?.buildId : value;
+    const cached = lookupId ? hostedBuildViewCache.get(principal, lookupId) : undefined;
     if (!cached) throw new Error("VIEW_BUILD_CACHE_MISS: this build is no longer available in your bounded build cache. Rerun the originating build tool to reopen it.");
     return cached;
   }
@@ -467,7 +548,10 @@ function cachedHostedBuild(value: unknown) {
   const suppliedId = "id" in value && typeof value.id === "string" ? value.id : undefined;
   const suppliedHash = "hash" in value && typeof value.hash === "string" ? value.hash : undefined;
   if (!suppliedId || !suppliedHash) return undefined;
-  const cached = hostedBuildViewCache.get(principal, suppliedId);
+  if (publicLocation && publicLocation.buildId !== suppliedId) {
+    throw new Error("Build integrity check failed: the hosted cache reference does not match the supplied deterministic build id.");
+  }
+  const cached = hostedBuildViewCache.get(principal, publicLocation?.buildId ?? suppliedId);
   if (!cached) return undefined;
   if (cached.hash !== suppliedHash) {
     throw new Error("Build integrity check failed: the supplied build hash does not match the authenticated cached build.");
@@ -476,33 +560,42 @@ function cachedHostedBuild(value: unknown) {
 }
 
 function cacheBuildForView(build: BuildRecord) {
-  if (!hostedConfig.enabled) return;
+  if (!boundedRemoteMode) return build.id;
+  const summaryBytes = Buffer.byteLength(JSON.stringify(summarizeBuild(build)));
   const cardinalities = {
-    materials: Object.keys(build.materialCounts).length,
     layers: Object.keys(build.layerCounts).length,
     phases: build.phases.length,
     regions: build.regions.length,
     validationIssues: build.validation.issues.length,
   };
-  if (cardinalities.materials > 256 || cardinalities.layers > 1_024 || cardinalities.phases > 128 || cardinalities.regions > 1_024 || cardinalities.validationIssues > 256) {
+  if (summaryBytes > HOSTED_BUILD_SUMMARY_MAX_BYTES) {
+    throw new Error(`HOSTED_BUILD_SUMMARY_OUTPUT_LIMIT_EXCEEDED: this build's normalized summary is ${summaryBytes.toLocaleString()} bytes; hosted MCP permits at most ${HOSTED_BUILD_SUMMARY_MAX_BYTES.toLocaleString()} bytes. Reduce descriptive payload size or split the design, or use the local app.`);
+  }
+  if (cardinalities.layers > 1_024 || cardinalities.phases > 128 || cardinalities.regions > 1_024 || cardinalities.validationIssues > 256) {
     throw new Error("HOSTED_BUILD_SUMMARY_LIMIT_EXCEEDED: this build's summary cardinality exceeds the bounded hosted response envelope. Simplify or split the build, or use the local app.");
   }
-  const principal = hostedCachePrincipal();
+  const cacheRef = publicConnectorMode ? createPublicCacheReference(build) : build.id;
+  const principal = publicConnectorMode ? publicCacheLocation(cacheRef)!.principal : hostedCachePrincipal();
   if (!hostedBuildViewCache.set(principal, build)) {
     throw new Error("HOSTED_VIEW_BUILD_TOO_LARGE: this build cannot fit in the bounded view cache. Simplify or split the build, or use the local app.");
   }
+  return cacheRef;
 }
 
 function cachedBuildForView(value: unknown) {
-  const suppliedId = typeof value === "string"
+  const publicLocation = publicConnectorMode ? publicCacheLocation(value) : undefined;
+  if (publicConnectorMode && !publicLocation) {
+    throw new Error("VIEW_BUILD_CACHE_MISS: public placement pages require the short-lived cacheRef returned by review_build.");
+  }
+  const suppliedId = publicLocation?.buildId ?? (typeof value === "string"
     ? value
     : value && typeof value === "object" && "id" in value && typeof value.id === "string"
       ? value.id
-      : undefined;
+      : undefined);
   const suppliedHash = value && typeof value === "object" && "hash" in value && typeof value.hash === "string" ? value.hash : undefined;
-  if (!suppliedId) throw new Error("VIEW_BUILD_ID_REQUIRED: placement pages require the build id returned by compile_build or review_build.");
-  const build = hostedConfig.enabled
-    ? hostedBuildViewCache.get(hostedCachePrincipal(), suppliedId)
+  if (!suppliedId) throw new Error("VIEW_BUILD_ID_REQUIRED: hosted placement pages require the cacheRef returned by review_build; local pages use the stable build id.");
+  const build = boundedRemoteMode
+    ? hostedBuildViewCache.get(publicLocation?.principal ?? hostedCachePrincipal(), suppliedId)
     : buildCache.get(suppliedId);
   if (!build) {
     throw new Error("VIEW_BUILD_CACHE_MISS: this build is no longer available in the bounded view cache. Rerun compile_build or review_build to reopen it.");
@@ -511,26 +604,36 @@ function cachedBuildForView(value: unknown) {
   return build;
 }
 
-function buildViewMetadata(build: BuildRecord) {
-  return { buildSummary: summarizeBuild(build), buildPage: createInitialBuildPlacementPage(build) };
+function buildSummaryForClient(build: BuildRecord, cacheRef: string) {
+  return { ...summarizeBuild(build), ...(publicConnectorMode ? { cacheRef } : {}) };
+}
+
+function buildViewMetadata(build: BuildRecord, cacheRef = cacheBuildForView(build)) {
+  const buildPage = createInitialBuildPlacementPage(build);
+  buildPage.buildId = cacheRef;
+  return { buildSummary: buildSummaryForClient(build, cacheRef), buildPage };
 }
 
 function assertLocalOperation(operation: string) {
-  if (hostedConfig.enabled) {
+  if (boundedRemoteMode) {
     throw new Error(`LOCAL_OPERATION_UNAVAILABLE: ${operation} is available only from a PC-local Blockwright instance.`);
   }
 }
 
 function assertHostedBuildWorkload(input: BuildInput, operation: string) {
-  if (!hostedConfig.enabled) return;
+  if (!boundedRemoteMode) return;
   const preflight = estimateBuild(input);
-  if (preflight.totalVolume > HOSTED_BUILD_PLACEMENT_CAP || preflight.estimatedOccupiedBlocks > HOSTED_BUILD_PLACEMENT_CAP) {
-    throw new Error(`HOSTED_BUILD_LIMIT_EXCEEDED: ${operation} has a ${preflight.totalVolume.toLocaleString()}-block envelope and estimates ${preflight.estimatedOccupiedBlocks.toLocaleString()} occupied blocks; hosted MCP requires both values at or below ${HOSTED_BUILD_PLACEMENT_CAP.toLocaleString()}. Simplify or split the build, or use the local app.`);
+  const { width, depth, height } = preflight.dimensions;
+  if (width > HOSTED_BUILD_AXIS_CAP.width || depth > HOSTED_BUILD_AXIS_CAP.depth || height > HOSTED_BUILD_AXIS_CAP.height || preflight.chunksTouched > HOSTED_BUILD_CHUNK_COLUMN_CAP) {
+    throw new Error(`HOSTED_BUILD_SPAN_LIMIT_EXCEEDED: ${operation} spans ${width}×${depth}×${height} blocks and ${preflight.chunksTouched.toLocaleString()} chunk columns; the remote connector permits at most ${HOSTED_BUILD_AXIS_CAP.width}×${HOSTED_BUILD_AXIS_CAP.depth}×${HOSTED_BUILD_AXIS_CAP.height} and ${HOSTED_BUILD_CHUNK_COLUMN_CAP.toLocaleString()} chunk columns.`);
+  }
+  if (preflight.estimatedPlacementAttempts > HOSTED_BUILD_ATTEMPT_CAP) {
+    throw new Error(`HOSTED_BUILD_WORK_LIMIT_EXCEEDED: ${operation} may attempt ${preflight.estimatedPlacementAttempts.toLocaleString()} coordinate operations; the remote connector permits at most ${HOSTED_BUILD_ATTEMPT_CAP.toLocaleString()}. Simplify repeated or overlapping design operations.`);
   }
 }
 
 function consumeHostedBuildWork(operation: string, explicitPrincipal?: HostedPrincipal) {
-  if (!hostedConfig.enabled) return;
+  if (!boundedRemoteMode) return;
   const principal = explicitPrincipal ?? hostedRequestContext.getStore();
   if (!principal) throw new Error("HOSTED_MCP_AUTH_REQUIRED: hosted build work requires an authenticated request context.");
   const tenantLimit = hostedTenantBuildWorkLimiter.consume(principal.tenantId);
@@ -544,7 +647,7 @@ function consumeHostedBuildWork(operation: string, explicitPrincipal?: HostedPri
 }
 
 function beginHostedImportWork() {
-  if (!hostedConfig.enabled) return () => undefined;
+  if (!boundedRemoteMode) return () => undefined;
   const principal = hostedRequestContext.getStore();
   if (!principal) throw new Error("HOSTED_MCP_AUTH_REQUIRED: hosted import work requires an authenticated request context.");
   const tenantLimit = hostedTenantImportWorkLimiter.consume(principal.tenantId);
@@ -566,7 +669,7 @@ function beginHostedImportWork() {
 }
 
 function beginHostedArtifactWork() {
-  if (!hostedConfig.enabled) return () => undefined;
+  if (!boundedRemoteMode) return () => undefined;
   const principal = hostedRequestContext.getStore();
   if (!principal) throw new Error("HOSTED_MCP_AUTH_REQUIRED: hosted artifact work requires an authenticated request context.");
   const tenantLimit = hostedTenantArtifactWorkLimiter.consume(principal.tenantId);
@@ -592,13 +695,13 @@ function beginHostedArtifactWork() {
 }
 
 function assertHostedArtifactOutputSize(byteLength: number) {
-  if (hostedConfig.enabled && byteLength > HOSTED_ARTIFACT_MAX_OUTPUT_BYTES) {
+  if (boundedRemoteMode && byteLength > HOSTED_ARTIFACT_MAX_OUTPUT_BYTES) {
     throw new Error(`HOSTED_ARTIFACT_OUTPUT_LIMIT_EXCEEDED: hosted MCP artifacts are limited to ${HOSTED_ARTIFACT_MAX_OUTPUT_BYTES.toLocaleString()} bytes. Use the local app for this export.`);
   }
 }
 
 function consumeHostedJavaUpdateWork() {
-  if (!hostedConfig.enabled) return;
+  if (!boundedRemoteMode) return;
   const principal = hostedRequestContext.getStore();
   if (!principal) throw new Error("HOSTED_MCP_AUTH_REQUIRED: hosted Java update checks require an authenticated request context.");
   const limit = hostedTenantJavaUpdateWorkLimiter.consume(principal.tenantId);
@@ -608,13 +711,13 @@ function consumeHostedJavaUpdateWork() {
 }
 
 function assertHostedCompiledBuild(build: BuildRecord, operation: string) {
-  if (hostedConfig.enabled && build.placements.length > HOSTED_BUILD_PLACEMENT_CAP) {
+  if (boundedRemoteMode && build.placements.length > HOSTED_BUILD_PLACEMENT_CAP) {
     throw new Error(`HOSTED_BUILD_LIMIT_EXCEEDED: ${operation} produced ${build.placements.length.toLocaleString()} placements; hosted MCP is capped at ${HOSTED_BUILD_PLACEMENT_CAP.toLocaleString()}.`);
   }
 }
 
 function assertHostedRegionRevision(base: BuildRecord, requestedRegion: { min: { x: number; y: number; z: number }; max: { x: number; y: number; z: number } }, replacements: Placement[]) {
-  if (!hostedConfig.enabled) return;
+  if (!boundedRemoteMode) return;
   const region = {
     min: {
       x: Math.min(requestedRegion.min.x, requestedRegion.max.x),
@@ -652,9 +755,14 @@ function assertHostedRegionRevision(base: BuildRecord, requestedRegion: { min: {
     minX = Math.min(minX, placement.x); minY = Math.min(minY, placement.y); minZ = Math.min(minZ, placement.z);
     maxX = Math.max(maxX, placement.x); maxY = Math.max(maxY, placement.y); maxZ = Math.max(maxZ, placement.z);
   }
-  const projectedVolume = (maxX - minX + 1) * (maxY - minY + 1) * (maxZ - minZ + 1);
-  if (!Number.isSafeInteger(projectedVolume) || projectedVolume > HOSTED_BUILD_PLACEMENT_CAP) {
-    throw new Error(`HOSTED_REVISION_LIMIT_EXCEEDED: selected-region revision would span a ${Number.isFinite(projectedVolume) ? projectedVolume.toLocaleString() : "non-finite"}-block envelope; hosted builds are capped at ${HOSTED_BUILD_PLACEMENT_CAP.toLocaleString()}.`);
+  const projectedDimensions = { width: maxX - minX + 1, height: maxY - minY + 1, depth: maxZ - minZ + 1 };
+  const projectedChunkColumns = Math.ceil(projectedDimensions.width / 16) * Math.ceil(projectedDimensions.depth / 16);
+  if (!Object.values(projectedDimensions).every(Number.isSafeInteger)
+    || projectedDimensions.width > HOSTED_BUILD_AXIS_CAP.width
+    || projectedDimensions.depth > HOSTED_BUILD_AXIS_CAP.depth
+    || projectedDimensions.height > HOSTED_BUILD_AXIS_CAP.height
+    || projectedChunkColumns > HOSTED_BUILD_CHUNK_COLUMN_CAP) {
+    throw new Error(`HOSTED_REVISION_SPAN_LIMIT_EXCEEDED: selected-region revision would span ${projectedDimensions.width}×${projectedDimensions.depth}×${projectedDimensions.height} blocks and ${projectedChunkColumns} chunk columns.`);
   }
 }
 
@@ -682,13 +790,13 @@ function assertReplacementStateSemantics(base: BuildRecord, replacements: Placem
 }
 
 function assertHostedImportedPlacements(count: number, format: string) {
-  if (hostedConfig.enabled && count > HOSTED_IMPORT_PLACEMENT_CAP) {
+  if (boundedRemoteMode && count > HOSTED_IMPORT_PLACEMENT_CAP) {
     throw new Error(`HOSTED_IMPORT_LIMIT_EXCEEDED: ${format} contains ${count.toLocaleString()} occupied placements; hosted imports are capped at ${HOSTED_IMPORT_PLACEMENT_CAP.toLocaleString()}.`);
   }
 }
 
 function hostedImportLimitError(error: unknown, format: string) {
-  if (!hostedConfig.enabled || !(error instanceof Error) || !/volume.*limit|occupied placements.*cap/i.test(error.message)) return undefined;
+  if (!boundedRemoteMode || !(error instanceof Error) || !/volume.*limit|occupied placements.*cap/i.test(error.message)) return undefined;
   return new Error(`HOSTED_IMPORT_LIMIT_EXCEEDED: ${format} exceeds the hosted ${HOSTED_IMPORT_PLACEMENT_CAP.toLocaleString()}-block import envelope.`);
 }
 
@@ -764,6 +872,32 @@ function hostedMcpClientAddress(request: Pick<McpHttpRequest, "ip" | "socket">) 
     || "unknown";
 }
 
+function publicConnectorPrincipal(request: McpHttpRequest): HostedPrincipal {
+  const sessionHeader = request.headers["mcp-session-id"];
+  const session = Array.isArray(sessionHeader) ? sessionHeader[0] : sessionHeader;
+  const address = hostedMcpClientAddress(request);
+  // The MCP session id is supplied by the caller, so it must never define an
+  // authorization or quota boundary on its own. Public work remains address-
+  // bound; hosted build-cache access is separately protected by an unguessable,
+  // short-lived capability generated by cacheBuildForView.
+  const addressDigest = createHash("sha256")
+    .update("blockwright-public-address\0")
+    .update(address)
+    .digest("hex")
+    .slice(0, 24);
+  const scope = `${address}\0${session?.trim() || "no-session"}`;
+  const digest = createHash("sha256").update("blockwright-public-connector\0").update(scope).digest("hex").slice(0, 24);
+  return {
+    userId: `public_user_${digest}`,
+    tenantId: `public_tenant_${addressDigest}`,
+    email: `public-${digest}@invalid.example`,
+    tenantName: "Public connector",
+    role: "member",
+    plan: "public",
+    sessionExpiresAt: new Date(Date.now() + HOSTED_BUILD_VIEW_CACHE_TTL_MS).toISOString(),
+  };
+}
+
 function hostedMcpRateError(limit: ReturnType<FixedWindowRateLimiter["consume"]>) {
   const error = new Error("Too many hosted MCP requests. Try again after the rate-limit reset time.") as Error & {
     code: string;
@@ -776,7 +910,7 @@ function hostedMcpRateError(limit: ReturnType<FixedWindowRateLimiter["consume"]>
 
 function verifyHostedMcpBeforeJson(request: McpHttpRequest) {
   const path = request.originalUrl ?? request.url ?? "";
-  if (!hostedConfig.enabled) return;
+  if (!boundedRemoteMode) return;
   const disposition = mcpRequestTargetDisposition(path);
   if (disposition === "other") return;
   if (disposition === "invalid") {
@@ -788,6 +922,14 @@ function verifyHostedMcpBeforeJson(request: McpHttpRequest) {
   const preAuthLimit = hostedMcpPreAuthLimiter.consume(hostedMcpClientAddress(request));
   request.blockwrightHostedPreAuthRateLimit = preAuthLimit;
   if (!preAuthLimit.allowed) throw hostedMcpRateError(preAuthLimit);
+  if (publicConnectorMode) {
+    const principal = publicConnectorPrincipal(request);
+    const limit = hostedMcpLimiter.consume(`public:${hostedMcpClientAddress(request)}`);
+    if (!limit.allowed) throw hostedMcpRateError(limit);
+    request.blockwrightHostedPrincipal = principal;
+    request.blockwrightHostedRateLimit = limit;
+    return;
+  }
   const principal = authenticateHostedMcp(request);
   if (!principal) {
     const limit = hostedMcpAuthLimiter.consume(hostedMcpClientAddress(request));
@@ -950,9 +1092,19 @@ const server = new McpServer(
     },
     async ({ query, edition, version, limit }) => {
       const needle = query.toLowerCase().replaceAll(" ", "_");
+      if (edition === "bedrock" && version && !/^(?:stable|latest)$/i.test(version) && version !== BEDROCK_STABLE_VERSION) {
+        throw new Error(`BEDROCK_REGISTRY_VERSION_UNAVAILABLE: search is synchronized to exact minecraft-data ${BEDROCK_STABLE_VERSION}; requested ${version}.`);
+      }
       const source = edition === "java"
         ? javaBlocksFor(version)
-        : { blocks: bedrockBlocks, coverage: { ...REGISTRY_META.bedrock, requestedVersion: version ?? REGISTRY_META.bedrock.requestedVersion } };
+        : {
+            blocks: bedrockBlocks,
+            coverage: {
+              ...REGISTRY_META.bedrock,
+              requestedVersion: version ?? REGISTRY_META.bedrock.requestedVersion,
+              resolvedVersion: BEDROCK_STABLE_VERSION,
+            },
+          };
       const matches = source.blocks.filter((block) => block.id.includes(needle) || block.displayName.toLowerCase().includes(query.toLowerCase())).slice(0, limit);
       const coverage = source.coverage;
       return { structuredContent: { edition, requestedVersion: version, coverage, matches }, content: [{ type: "text", text: `Found ${matches.length} ${edition} block identifiers matching “${query}”.` }] };
@@ -1124,20 +1276,20 @@ const server = new McpServer(
     async (input) => {
       const { candidateCount, recentPlans, ...buildInput } = input;
       assertHostedBuildWorkload(buildInput as BuildInput, "candidate generation");
-      if (hostedConfig.enabled && candidateCount > 1) {
+      if (boundedRemoteMode && candidateCount > 1) {
         throw new Error("HOSTED_CANDIDATE_LIMIT_EXCEEDED: hosted MCP can generate at most 1 candidate per request. Use the local app for broader searches.");
       }
       consumeHostedBuildWork("candidate generation");
-      const candidates = generateBuildCandidates(buildInput as BuildInput, candidateCount, (recentPlans ?? []) as ArchitecturalPlan[]);
-      candidates.forEach(({ build }) => {
+      const candidates = generateBuildCandidates(buildInput as BuildInput, candidateCount, (recentPlans ?? []) as ArchitecturalPlan[], runtimeCompileLimits);
+      const cachedCandidates = candidates.map(({ build, ...candidate }) => {
         rememberBuild(build);
-        cacheBuildForView(build);
+        return { build, ...candidate, cacheRef: cacheBuildForView(build) };
       });
-      const summaries = candidates.map(({ build, candidate, maximumSimilarity }) => ({ candidate, maximumSimilarity, build: summarizeBuild(build), plan: build.plan }));
+      const summaries = cachedCandidates.map(({ build, candidate, maximumSimilarity, cacheRef }) => ({ candidate, maximumSimilarity, build: buildSummaryForClient(build, cacheRef), plan: build.plan }));
       return {
         structuredContent: { candidates: summaries },
         content: [{ type: "text", text: `Generated ${summaries.length} structurally compared candidate(s).` }],
-        _meta: { candidates: candidates.map(({ build }) => buildViewMetadata(build)) },
+        _meta: { candidates: cachedCandidates.map(({ build, cacheRef }) => buildViewMetadata(build, cacheRef)) },
       };
     },
   )
@@ -1145,28 +1297,27 @@ const server = new McpServer(
     {
       ...toolPresentation("Compile Exact Build", "Compiling exact placements…", "Exact build compiled"),
       name: "compile_build",
-      description: "Compile a build specification into one exact deterministic Minecraft voxel record and open the Blockwright workbench.",
+      description: "Compile one exact deterministic Minecraft voxel record. Complex or large briefs must include the complete sourceBrief plus a generic design program whose hard requirements map to generated elements. Unsupported or omitted coverage is rejected; no generic shell is substituted. This tool returns data only and never opens a webpage or 3D viewer. Call review_build once only when the user explicitly requests visual review.",
       inputSchema: buildInputSchema,
       outputSchema: { build: buildSummaryOutputSchema.describe("Immutable build summary with hash, bounds, plan, counts, validation, and registry provenance.") },
       annotations: { title: "Compile Exact Build", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
-      view: { component: "compile-build", description: "Interactive exact-block workbench with 3D inspection, layers, validation, and downloads." },
     },
     async (input) => {
       assertHostedBuildWorkload(input as BuildInput, "build compilation");
       consumeHostedBuildWork("build compilation");
-      const build = rememberBuild(compileBuild(input as BuildInput));
-      cacheBuildForView(build);
+      const build = rememberBuild(compileBuildForRuntime(input as BuildInput));
+      const cacheRef = cacheBuildForView(build);
       const contractStatus = build.contract.status === "valid"
         ? `Contract valid: ${build.contract.summary.passed} hard requirement(s) passed.`
         : `Contract invalid: ${build.contract.summary.failed} failed, ${build.contract.summary.unsupported} unsupported, ${build.contract.summary.unevaluated} unevaluated.`;
-      return { structuredContent: { build: summarizeBuild(build) }, content: [{ type: "text", text: `${build.input.name} compiled to ${build.placements.length.toLocaleString()} exact placements. ${contractStatus} Hash: ${build.hash.slice(0, 12)}.` }], _meta: buildViewMetadata(build) };
+      return { structuredContent: { build: buildSummaryForClient(build, cacheRef) }, content: [{ type: "text", text: `${build.input.name} compiled to ${build.placements.length.toLocaleString()} exact placements. ${contractStatus} Hash: ${build.hash.slice(0, 12)}. No viewer was opened.` }] };
     },
   )
   .registerTool(
     {
       ...toolPresentation("Validate Exact Build", "Validating build integrity…", "Build validation complete"),
       name: "validate_build",
-      description: "Recompile and validate a canonical Blockwright build record, or use its cached build id from a prior response, for deterministic integrity, bounds, collisions, and budget status.",
+      description: "Recompile and validate a canonical Blockwright build record, or use its short-lived hosted cacheRef from a prior response, for deterministic integrity, bounds, collisions, and budget status.",
       inputSchema: { build: buildReferenceSchema },
       outputSchema: {
         buildId: z.string().describe("Stable id derived from the deterministic build hash."),
@@ -1186,7 +1337,7 @@ const server = new McpServer(
     {
       ...toolPresentation("Validate Build Contract", "Evaluating hard requirements…", "Contract validation complete"),
       name: "validate_build_contract",
-      description: "Reproduce the hash-bound semantic contract for a canonical or cached build. Every locked hard requirement is evaluated against canonical geometry or returned as unsupported/unevaluated, and any non-pass result makes the aggregate contract invalid. Operational warnings and subjective aesthetic observations remain separate.",
+      description: "Reproduce the hash-bound semantic contract for a canonical build or hosted cacheRef. Every locked hard requirement is evaluated against canonical geometry or returned as unsupported/unevaluated, and any non-pass result makes the aggregate contract invalid. Operational warnings and subjective aesthetic observations remain separate.",
       inputSchema: {
         build: buildReferenceSchema,
         contract: buildContractOverrideSchema.optional(),
@@ -1215,7 +1366,7 @@ const server = new McpServer(
     {
       ...toolPresentation("Audit Build Structure", "Scanning structural defects…", "Structural audit complete"),
       name: "audit_build",
-      description: "Scan the entire canonical build (or its cached build id) for entrances, clearance, spawn safety, room-access evidence, lighting, functional interiors, support/contact, block states, connections, isolation, overlaps, palette legality, exact version, paste origin, and budget. Returns the reproduced semantic contract and a human-readable certificate bound to the immutable build hash.",
+      description: "Scan the entire canonical build (or its hosted cacheRef) for entrances, clearance, spawn safety, room-access evidence, lighting, functional interiors, support/contact, block states, connections, isolation, overlaps, palette legality, exact version, paste origin, and budget. Returns the reproduced semantic contract and a human-readable certificate bound to the immutable build hash.",
       inputSchema: { build: buildReferenceSchema },
       outputSchema: { audit: buildAuditOutputSchema.describe("Whole-build semantic and structural findings, exact totals, bounded coordinate evidence, fail-closed contract, and hash-bound certificate.") },
       annotations: { title: "Audit Build Structure", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
@@ -1233,11 +1384,12 @@ const server = new McpServer(
     {
       ...toolPresentation("Open 3D Build Reviewer", "Preparing 3D review…", "3D reviewer ready"),
       name: "review_build",
-      description: "Open the state-aware 3D build reviewer from a canonical build or cached build id for exact block or region selection, measurements, layer clipping, roof hiding, reusable annotations, review JSON import/export, and whole-build structural audit findings.",
+      description: "Open the state-aware 3D build reviewer from a canonical build or hosted cacheRef for exact block or region selection, measurements, layer clipping, roof hiding, reusable annotations, review JSON import/export, and whole-build structural audit findings.",
       inputSchema: { build: buildReferenceSchema },
       outputSchema: {
         review: z.object({
           buildId: z.string().describe("Stable build id being reviewed."),
+          cacheRef: z.string().optional().describe("Refreshed short-lived hosted cache capability for later review paging or export."),
           hash: z.string().describe("Full immutable build hash that review data must match."),
           name: z.string().describe("Human-readable build name."),
           blockCount: z.number().int().describe("Total exact placements in the build."),
@@ -1250,11 +1402,12 @@ const server = new McpServer(
     async ({ build: value }) => {
       const build = asBuild(value);
       const audit = auditBuild(build);
-      cacheBuildForView(build);
+      const cacheRef = cacheBuildForView(build);
       return {
         structuredContent: {
           review: {
             buildId: build.id,
+            ...(publicConnectorMode ? { cacheRef } : {}),
             hash: build.hash,
             name: build.input.name,
             blockCount: build.placements.length,
@@ -1262,7 +1415,7 @@ const server = new McpServer(
           },
         },
         content: [{ type: "text", text: `Opened the state-aware reviewer for ${build.input.name}. The global audit scanned ${audit.scannedPlacements.toLocaleString()} placements and found ${audit.findings.length} finding categories.` }],
-        _meta: { ...buildViewMetadata(build), audit },
+        _meta: { ...buildViewMetadata(build, cacheRef), audit },
       };
     },
   )
@@ -1322,7 +1475,7 @@ const server = new McpServer(
       const build = asBuild(value);
       const matchingPlacements = layer === undefined ? build.placements : build.placements.filter((p) => p.y === layer);
       const pageOffset = offset ?? 0;
-      const pageLimit = limit ?? (hostedConfig.enabled ? BUILD_VIEW_INITIAL_PAGE_SIZE : matchingPlacements.length);
+      const pageLimit = limit ?? (boundedRemoteMode ? BUILD_VIEW_INITIAL_PAGE_SIZE : matchingPlacements.length);
       const placements = pageOffset === 0 && pageLimit >= matchingPlacements.length
         ? matchingPlacements
         : matchingPlacements.slice(pageOffset, pageOffset + pageLimit);
@@ -1337,26 +1490,31 @@ const server = new McpServer(
     {
       ...toolPresentation("Export Build", "Preparing build export…", "Build export ready"),
       name: "export_build",
-      description: "Export a canonical build as JSON, CSV, Java commands, Bedrock commands, Sponge v3 .schem, Litematica v7 .litematic, a layer blueprint, or a checksummed ZIP bundle. Litematica interoperability remains explicitly unverified until an external client round trip is recorded.",
+      description: "Export diagnostic JSON/CSV/blueprints or a certified construction artifact. Executable commands, schematics, Litematics, Bedrock mcpack structure packs, and bundles require a valid hash-bound contract and the matching edition. The mcpack path uses tiled .mcstructure files rather than one command per block; its package and NBT are internally verified, while exact-version import, activation, placement, and readback on iPhone remain unverified until a client round trip is recorded. For the explicit iPhone download card, use export_bedrock_project with one or more builds.",
       inputSchema: {
         build: buildReferenceSchema,
-        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "blueprint", "schem", "litematic", "bundle"]).describe("Export format to generate from the immutable build record."),
+        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "mcpack", "blueprint", "schem", "litematic", "bundle"]).describe("Export format to generate from the immutable build record; choose mcpack for a Bedrock behavior pack containing tiled structures."),
       },
       outputSchema: {
         buildId: z.string().describe("Stable id of the exported build."),
-        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "blueprint", "schem", "litematic", "bundle"]).describe("Generated export format."),
+        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "mcpack", "blueprint", "schem", "litematic", "bundle"]).describe("Generated export format."),
         filename: z.string().describe("Safe suggested download filename."),
         bytes: z.number().int().describe("Exact byte length of the generated export."),
         dataVersion: z.number().int().optional().describe("Java DataVersion embedded in a schematic export."),
         schematicVersion: z.number().int().optional().describe("Sponge Schematic format version, when applicable."),
         litematicVersion: z.number().int().optional().describe("Litematica format version, when applicable."),
         litematicSubVersion: z.number().int().optional().describe("Litematica sub-version, when applicable."),
+        structureTiles: z.number().int().positive().optional().describe("Number of tiled .mcstructure payloads inside a Bedrock mcpack."),
+        bedrockRegistryVersion: z.string().optional().describe("Exact minecraft-data Bedrock registry version used to encode an mcpack."),
         compatibilityStatus: z.enum(["verified", "unverified"]).optional().describe("External application compatibility status for this artifact."),
       },
       annotations: { title: "Export Build", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     },
     async ({ build: value, format }) => {
       const build = asBuild(value);
+      if (["java_mcfunction", "bedrock_mcfunction", "mcpack", "schem", "litematic", "bundle"].includes(format)) {
+        assertConstructionExportable(build, format as ConstructionExportFormat);
+      }
       const releaseArtifact = beginHostedArtifactWork();
       try {
         const safeName = safeExportName(build.input.name);
@@ -1388,14 +1546,38 @@ const server = new McpServer(
             _meta: { mimeType: "application/octet-stream", base64: Buffer.from(litematic.bytes).toString("base64"), compatibility: litematic.compatibility },
           };
         }
-        const exports: Record<Exclude<ExportFormat, "bundle" | "schem">, { extension: string; mimeType: string; text: string }> = {
-          json: { extension: "json", mimeType: "application/json", text: toJson(build) },
-          csv: { extension: "csv", mimeType: "text/csv", text: toCsv(build) },
-          java_mcfunction: { extension: "java.mcfunction", mimeType: "text/plain", text: toMcfunction(build, "java") },
-          bedrock_mcfunction: { extension: "bedrock.mcfunction", mimeType: "text/plain", text: toMcfunction(build, "bedrock") },
-          blueprint: { extension: "blueprint.txt", mimeType: "text/plain", text: toBlueprint(build) },
+        if (format === "mcpack") {
+          const mcpack = await createBedrockMcpack(build);
+          assertHostedArtifactOutputSize(mcpack.bytes.byteLength);
+          return {
+            structuredContent: {
+              buildId: build.id,
+              format,
+              filename: mcpack.fileName,
+              bytes: mcpack.bytes.byteLength,
+              structureTiles: mcpack.tiles.length,
+              bedrockRegistryVersion: mcpack.compatibility.registryVersion,
+              compatibilityStatus: "unverified" as const,
+            },
+            content: [{ type: "text", text: `Prepared ${mcpack.tiles.length.toLocaleString()}-tile Bedrock mcpack for ${build.input.name}. Internal package checks passed; iPhone client import and placement remain unverified.` }],
+            _meta: {
+              mimeType: "application/zip",
+              base64: Buffer.from(mcpack.bytes).toString("base64"),
+              compatibility: mcpack.compatibility,
+              manifest: mcpack.manifest,
+              metadata: mcpack.metadata,
+            },
+          };
+        }
+        const exports: Record<Exclude<ExportFormat, "bundle" | "schem" | "mcpack">, { extension: string; mimeType: string; render: () => string }> = {
+          json: { extension: "json", mimeType: "application/json", render: () => toJson(build) },
+          csv: { extension: "csv", mimeType: "text/csv", render: () => toCsv(build) },
+          java_mcfunction: { extension: "java.mcfunction", mimeType: "text/plain", render: () => toMcfunction(build, "java") },
+          bedrock_mcfunction: { extension: "bedrock.mcfunction", mimeType: "text/plain", render: () => toMcfunction(build, "bedrock") },
+          blueprint: { extension: "blueprint.txt", mimeType: "text/plain", render: () => toBlueprint(build) },
         };
-        const file = exports[format as Exclude<ExportFormat, "bundle" | "schem">];
+        const selected = exports[format as Exclude<ExportFormat, "bundle" | "schem" | "mcpack">];
+        const file = { ...selected, text: selected.render() };
         const byteLength = Buffer.byteLength(file.text);
         assertHostedArtifactOutputSize(byteLength);
         return { structuredContent: { buildId: build.id, format, filename: `${safeName}.${file.extension}`, bytes: byteLength }, content: [{ type: "text", text: `Prepared ${format} export for ${build.input.name}.` }], _meta: { mimeType: file.mimeType, text: file.text } };
@@ -1406,9 +1588,85 @@ const server = new McpServer(
   )
   .registerTool(
     {
+      ...toolPresentation("Export Bedrock Project", "Packaging Bedrock project…", "Bedrock project ready"),
+      name: "export_bedrock_project",
+      description: "Package one or more non-overlapping, contract-valid Bedrock builds, using each build's hosted cacheRef or canonical summary, into one iPhone-installable .mcpack. Every build is independently edition/contract gated, exact coordinates are retained across sectors, and the pack loads one bounded .mcstructure tile per tick. Package and NBT checks are internal; exact-version iPhone import, activation, placement, and readback remain unverified until a client round trip is recorded. Opens only a lightweight download card, never the 3D reviewer.",
+      inputSchema: {
+        builds: z.array(buildReferenceSchema.describe("Hosted Bedrock cacheRef or canonical normalized build summary to include in this project pack.")).min(1).describe("One or more non-overlapping Bedrock sector builds. Short-lived cacheRef capabilities avoid recompilation; canonical summaries are deterministically recompiled and integrity-checked."),
+        name: z.string().min(1).max(80).describe("Human-readable project and behavior-pack name shown by Minecraft."),
+        description: z.string().min(1).max(256).optional().describe("Optional behavior-pack description shown by Minecraft; defaults to a Blockwright project description."),
+        packId: z.string().min(1).max(256).describe("Stable logical pack identity. Reuse this exact value and increment manifestVersion when replacing an installed pack."),
+        manifestVersion: z.tuple([
+          z.number().int().min(0).max(65_535).describe("Manifest major version."),
+          z.number().int().min(0).max(65_535).describe("Manifest minor version."),
+          z.number().int().min(0).max(65_535).describe("Manifest patch version."),
+        ]).default([1, 0, 0]).describe("Three-part Bedrock manifest version. Increase it when publishing an update with the same stable packId."),
+      },
+      outputSchema: {
+        projectName: z.string().describe("Human-readable name embedded in the Bedrock behavior pack."),
+        packId: z.string().describe("Stable logical identity used to derive deterministic manifest UUIDs."),
+        manifestVersion: z.tuple([z.number().int(), z.number().int(), z.number().int()]).describe("Three-part version embedded in the pack manifest."),
+        format: z.literal("mcpack").describe("Generated Bedrock behavior-pack container format."),
+        filename: z.string().describe("Safe suggested .mcpack download filename."),
+        bytes: z.number().int().positive().describe("Exact compressed artifact size in bytes."),
+        buildIds: z.array(z.string()).describe("Stable ids of every canonical sector build included in the pack."),
+        buildHashes: z.array(z.string()).describe("Immutable hashes of every canonical sector build included in the pack."),
+        structureTiles: z.number().int().positive().describe("Total tiled .mcstructure payload count across all included builds."),
+        bedrockRegistryVersion: z.string().describe("Exact minecraft-data Bedrock registry version used for NBT encoding."),
+        compatibilityStatus: z.literal("unverified").describe("External iPhone client compatibility status; internal package validation alone does not count as a client round trip."),
+      },
+      annotations: { title: "Export Bedrock Project", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+      view: { component: "export-bedrock-project", description: "Lightweight Bedrock .mcpack download card with package size, structure-tile count, compatibility status, explicit device handoff, and close control.", prefersBorder: true },
+    },
+    async ({ builds: values, name, description, packId, manifestVersion }) => {
+      const builds = values.map((value) => asBuild(value));
+      builds.forEach((build) => assertConstructionExportable(build, "mcpack"));
+      const releaseArtifact = beginHostedArtifactWork();
+      try {
+        const mcpack = await createBedrockMcpack({
+          schemaVersion: 1,
+          name,
+          ...(description ? { description } : {}),
+          packId,
+          builds,
+        }, { manifestVersion });
+        assertHostedArtifactOutputSize(mcpack.bytes.byteLength);
+        return {
+          structuredContent: {
+            projectName: mcpack.metadata.pack.name,
+            packId: mcpack.metadata.pack.id,
+            manifestVersion: mcpack.metadata.pack.manifestVersion,
+            format: "mcpack" as const,
+            filename: mcpack.fileName,
+            bytes: mcpack.bytes.byteLength,
+            buildIds: mcpack.metadata.builds.map((build) => build.id),
+            buildHashes: mcpack.metadata.builds.map((build) => build.hash),
+            structureTiles: mcpack.tiles.length,
+            bedrockRegistryVersion: mcpack.compatibility.registryVersion,
+            compatibilityStatus: "unverified" as const,
+          },
+          content: [{
+            type: "text",
+            text: `Prepared one Bedrock mcpack containing ${builds.length.toLocaleString()} non-overlapping build(s) and ${mcpack.tiles.length.toLocaleString()} structure tile(s). Internal checks passed; iPhone client import and placement remain unverified.`,
+          }],
+          _meta: {
+            mimeType: "application/zip",
+            base64: Buffer.from(mcpack.bytes).toString("base64"),
+            compatibility: mcpack.compatibility,
+            manifest: mcpack.manifest,
+            metadata: mcpack.metadata,
+          },
+        };
+      } finally {
+        releaseArtifact();
+      }
+    },
+  )
+  .registerTool(
+    {
       ...toolPresentation("Export WorldEdit Schematic", "Building schematic file…", "Schematic export ready"),
       name: "export_schematic",
-      description: "Export a Java build as a real GZip-compressed Sponge Schematic v3 file with DataVersion, block-state palette, varint data, offset, transforms, replacements, and supported block entities.",
+      description: "Export a contract-valid Java build as a real GZip-compressed Sponge Schematic v3 file with DataVersion, block-state palette, varint data, offset, transforms, replacements, and supported block entities. Invalid, uncertified, and Bedrock builds fail closed.",
       inputSchema: {
         build: buildReferenceSchema,
         name: z.string().max(120).optional().describe("Optional schematic display name and filename stem."),
@@ -1437,6 +1695,7 @@ const server = new McpServer(
     },
     async ({ build: value, name, author, offset, rotation, mirror, includeAir, replacements }) => {
       const build = asBuild(value);
+      assertConstructionExportable(build, "schem");
       const releaseArtifact = beginHostedArtifactWork();
       try {
         const schematic = exportSchematic(build, { name, author, offset, rotation, mirror, includeAir, replacements });
@@ -1482,9 +1741,9 @@ const server = new McpServer(
       const limits = {
         maximumCompressedBytes: hostedConfig.maxUploadBytes,
         maximumExpandedBytes: hostedConfig.maxExpandedBytes,
-        maximumVolume: hostedConfig.enabled ? HOSTED_IMPORT_PLACEMENT_CAP : LOCAL_BUILD_PLACEMENT_CAP,
+        maximumVolume: boundedRemoteMode ? HOSTED_IMPORT_PLACEMENT_CAP : LOCAL_BUILD_PLACEMENT_CAP,
       };
-      if (hostedConfig.enabled) {
+      if (boundedRemoteMode) {
         const releaseImport = beginHostedImportWork();
         try {
           let imported;
@@ -1561,11 +1820,11 @@ const server = new McpServer(
               compatibilityStatus: imported.compatibility.status,
               unsupportedEntities: imported.unsupportedContent.entities,
               unsupportedPendingTicks: imported.unsupportedContent.pendingTicks,
-              placementsIncluded: !hostedConfig.enabled,
+              placementsIncluded: !boundedRemoteMode,
             },
             content: [{ type: "text", text: `Imported Litematica v${imported.version} with ${imported.placements.length.toLocaleString()} occupied blocks across ${imported.regions.length} region(s). Compatibility remains unverified: ${imported.compatibility.note}` }],
             _meta: {
-              ...(hostedConfig.enabled
+              ...(boundedRemoteMode
                 ? { placementsOmitted: true, placementCount: imported.placements.length }
                 : { placements: imported.placements }),
               metadata: imported.metadata,
@@ -1593,11 +1852,11 @@ const server = new McpServer(
             offset: imported.offset,
             paletteSize: imported.paletteSize,
             blockCount: imported.placements.length,
-            placementsIncluded: !hostedConfig.enabled,
+            placementsIncluded: !boundedRemoteMode,
           },
           content: [{ type: "text", text: `Imported Sponge v3 schematic with ${imported.placements.length.toLocaleString()} occupied blocks.` }],
           _meta: {
-            ...(hostedConfig.enabled
+            ...(boundedRemoteMode
               ? { placementsOmitted: true, placementCount: imported.placements.length }
               : { placements: imported.placements }),
             metadata: imported.metadata,
@@ -1687,6 +1946,7 @@ const server = new McpServer(
     async ({ build: value, worldId, canonicalWorldPath, targetFolder, name, confirmed, overwrite, dimension, anchor, region, rotation, mirror, offset, includeAir, replacements }) => {
       assertLocalOperation("WorldEdit schematic installation");
       const build = asBuild(value);
+      assertConstructionExportable(build, "schem");
       const result = await installWorldEditSchematic({ worldId, canonicalWorldPath, targetFolder, name, build, confirmed, overwrite, dimension, anchor, region: region as WorldRegion | undefined, includeAir, schematicOptions: { rotation, mirror, offset, replacements } });
       const text = result.status === "installed"
         ? `Installed and re-read ${result.installedPath}. In game: ${result.instructions.join(" then ")}.`
@@ -1728,12 +1988,12 @@ const server = new McpServer(
         consumeHostedBuildWork("selected-region revision");
         const result = reviseSelectedRegion(current, region, replacementPlacements as Placement[]);
         const next = rememberBuild(result.build);
-        cacheBuildForView(next);
+        const cacheRef = cacheBuildForView(next);
         const diff = buildDiffSummary(result.diff);
         return {
-          structuredContent: { mode: "selected_region" as const, previousHash: current.hash, build: summarizeBuild(next), region: result.region, preservedOutsideCount: result.preservedOutsideCount, diff },
+          structuredContent: { mode: "selected_region" as const, previousHash: current.hash, build: buildSummaryForClient(next, cacheRef), region: result.region, preservedOutsideCount: result.preservedOutsideCount, diff },
           content: [{ type: "text", text: `Revised the inclusive selected region while preserving ${result.preservedOutsideCount.toLocaleString()} placements outside it. New hash: ${next.hash.slice(0, 12)}; contract ${next.contract.status}.` }],
-          _meta: { ...buildViewMetadata(next), diff },
+          _meta: { ...buildViewMetadata(next, cacheRef), diff },
         };
       }
       if (changes === undefined) throw new Error("REVISION_MODE_INVALID: provide changes, or provide both region and replacementPlacements.");
@@ -1741,12 +2001,12 @@ const server = new McpServer(
       const nextInput = { ...current.input, ...patch, dimensions: { ...current.input.dimensions, ...(patch.dimensions ?? {}) } };
       assertHostedBuildWorkload(nextInput, "whole-build revision");
       consumeHostedBuildWork("whole-build revision");
-      const next = rememberBuild(compileBuild(nextInput));
-      cacheBuildForView(next);
+      const next = rememberBuild(compileBuildForRuntime(nextInput));
+      const cacheRef = cacheBuildForView(next);
       return {
-        structuredContent: { mode: "whole_build" as const, previousHash: current.hash, build: summarizeBuild(next) },
+        structuredContent: { mode: "whole_build" as const, previousHash: current.hash, build: buildSummaryForClient(next, cacheRef) },
         content: [{ type: "text", text: `Revised ${current.input.name}. New hash: ${next.hash.slice(0, 12)}.` }],
-        _meta: buildViewMetadata(next),
+        _meta: buildViewMetadata(next, cacheRef),
       };
     },
   )
@@ -1963,7 +2223,7 @@ const server = new McpServer(
         structuredContent: summary,
         content: [{ type: "text", text: `Counted ${summary.totalBlocks.toLocaleString()} exact blocks across ${summary.uniqueBlockStates} canonical states. Stack and shulker values are planning aids and assume 64-item stacks.` }],
         _meta: {
-          materialList: hostedConfig.enabled
+          materialList: boundedRemoteMode
             ? {
                 ...materialList,
                 lines: materialList.lines.slice(0, HOSTED_MATERIAL_PAGE_SIZE),
@@ -2080,7 +2340,21 @@ const server = new McpServer(
     },
   );
 
-if (hostedConfig.enabled) {
+server.mcpMiddleware("tools/list", async (_request, _extra, next) => {
+  const result = await next();
+  if (!publicConnectorMode) return result;
+  return { ...result, tools: result.tools.filter(({ name }) => PUBLIC_CONNECTOR_TOOLS.has(name)) };
+});
+
+server.mcpMiddleware("tools/call", async (request, _extra, next) => {
+  if (!publicConnectorMode || PUBLIC_CONNECTOR_TOOLS.has(request.params.name)) return next();
+  return {
+    isError: true,
+    content: [{ type: "text", text: `PUBLIC_CONNECTOR_TOOL_UNAVAILABLE: ${request.params.name} is not available on the stateless public connector.` }],
+  };
+});
+
+if (boundedRemoteMode) {
   (server.express as unknown as { set(name: string, value: number): void }).set("trust proxy", hostedConfig.trustProxyHops);
 }
 
@@ -2098,12 +2372,39 @@ server.use("/mcp", async (request: McpHttpRequest, response: JsonResponse, next:
     response.status(404).json({ ok: false, error: "The Blockwright MCP endpoint is available only at /mcp." });
     return;
   }
-  if (!hostedConfig.enabled) {
+  if (!boundedRemoteMode) {
     next();
     return;
   }
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-content-type-options", "nosniff");
+  if (publicConnectorMode) {
+    const preAuthLimit = request.blockwrightHostedPreAuthRateLimit
+      ?? hostedMcpPreAuthLimiter.consume(hostedMcpClientAddress(request));
+    request.blockwrightHostedPreAuthRateLimit = preAuthLimit;
+    if (!preAuthLimit.allowed) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(preAuthLimit.resetAt) - Date.now()) / 1000));
+      response.setHeader("retry-after", String(retryAfterSeconds));
+      response.status(429).json({ ok: false, error: "Too many public connector requests. Try again after the rate-limit reset time.", resetAt: preAuthLimit.resetAt });
+      return;
+    }
+    const principal = request.blockwrightHostedPrincipal ?? publicConnectorPrincipal(request);
+    const limit = request.blockwrightHostedRateLimit
+      ?? hostedMcpLimiter.consume(`public:${hostedMcpClientAddress(request)}`);
+    request.blockwrightHostedPrincipal = principal;
+    request.blockwrightHostedRateLimit = limit;
+    response.setHeader("ratelimit-limit", String(limit.limit));
+    response.setHeader("ratelimit-remaining", String(limit.remaining));
+    response.setHeader("ratelimit-reset", limit.resetAt);
+    if (!limit.allowed) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(limit.resetAt) - Date.now()) / 1000));
+      response.setHeader("retry-after", String(retryAfterSeconds));
+      response.status(429).json({ ok: false, error: "Too many public connector requests. Try again after the rate-limit reset time.", resetAt: limit.resetAt });
+      return;
+    }
+    hostedRequestContext.run(principal, next);
+    return;
+  }
   if (!hostedStore) {
     response.setHeader("www-authenticate", "Bearer realm=\"Blockwright\"");
     response.status(401).json({ ok: false, error: "Hosted MCP authentication is unavailable until hosted identity storage is configured." });
@@ -2165,19 +2466,19 @@ server.use("/mcp", async (request: McpHttpRequest, response: JsonResponse, next:
 });
 
 server.useOnError("/mcp", (error: unknown, _request: unknown, response: JsonResponse, next: (error?: unknown) => void) => {
-  if (hostedConfig.enabled && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_PATH_ERROR) {
+  if (boundedRemoteMode && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_PATH_ERROR) {
     response.setHeader("cache-control", "no-store");
     response.setHeader("x-content-type-options", "nosniff");
     response.status(404).json({ ok: false, error: error.message });
     return;
   }
-  if (hostedConfig.enabled && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_PAYMENT_ERROR) {
+  if (boundedRemoteMode && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_PAYMENT_ERROR) {
     response.setHeader("cache-control", "no-store");
     response.setHeader("x-content-type-options", "nosniff");
     response.status(402).json({ ok: false, error: error.message });
     return;
   }
-  if (hostedConfig.enabled && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_RATE_ERROR) {
+  if (boundedRemoteMode && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_RATE_ERROR) {
     const limit = (error as Error & { limit: ReturnType<FixedWindowRateLimiter["consume"]> }).limit;
     const retryAfterSeconds = Math.max(1, Math.ceil((Date.parse(limit.resetAt) - Date.now()) / 1000));
     response.setHeader("cache-control", "no-store");
@@ -2189,7 +2490,7 @@ server.useOnError("/mcp", (error: unknown, _request: unknown, response: JsonResp
     response.status(429).json({ ok: false, error: error.message, resetAt: limit.resetAt });
     return;
   }
-  if (hostedConfig.enabled && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_AUTH_ERROR) {
+  if (boundedRemoteMode && error instanceof Error && (error as Error & { code?: string }).code === HOSTED_MCP_AUTH_ERROR) {
     response.setHeader("cache-control", "no-store");
     response.setHeader("x-content-type-options", "nosniff");
     response.setHeader("www-authenticate", "Bearer realm=\"Blockwright\"");
@@ -2275,7 +2576,7 @@ server.express.get("/ready", (_request: unknown, response: JsonResponse) => {
 });
 
 export default await runBlockwrightRuntime(server, {
-  hostedMode: hostedConfig.enabled,
+  hostedMode: boundedRemoteMode,
   maximumJsonBodyBytes: Math.ceil(hostedConfig.maxUploadBytes * 4 / 3 + 1024 * 1024),
   maximumConcurrentJsonBodies: 8,
   maximumJsonBodiesPerMinute: 240,

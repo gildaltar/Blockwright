@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { request as requestHttp } from "node:http";
 import { connect as connectSocket, createServer } from "node:net";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -640,7 +641,7 @@ describe("Blockwright stdio bridge helpers", () => {
         body: JSON.stringify({ jsonrpc: "2.0", id: "loopback-runtime-test", method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "loopback-runtime-test", version: "1" } } }),
       });
       expect(authenticatedMcp.status).toBe(200);
-      expect(await authenticatedMcp.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.6.0" } } });
+      expect(await authenticatedMcp.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.7.0" } } });
 
       for (let attempt = 0; attempt < 70; attempt += 1) {
         const unguarded = await fetch(`http://127.0.0.1:${port}/not-an-ingress-route`, {
@@ -1000,6 +1001,309 @@ describe("Blockwright stdio bridge helpers", () => {
     }
   }, 25_000);
 
+  it("exposes only the bounded unauthenticated public connector and rejects excessive design work before generation", async () => {
+    const temporary = mkdtempSync(join(tmpdir(), "Blockwright public connector "));
+    const port = await unusedPort();
+    let processHandle: ReturnType<typeof spawn> | undefined;
+    let stderr = "";
+    try {
+      cpSync(resolve(bridgeRoot, "dist"), resolve(temporary, "dist"), { recursive: true });
+      symlinkSync(resolve(bridgeRoot, "node_modules"), resolve(temporary, "node_modules"), "junction");
+      processHandle = spawn(process.execPath, [resolve(temporary, "dist", "__entry.js")], {
+        cwd: temporary,
+        env: {
+          ...process.env,
+          NODE_ENV: "production",
+          BLOCKWRIGHT_HOSTED_MODE: "0",
+          BLOCKWRIGHT_PUBLIC_CONNECTOR_MODE: "1",
+          BLOCKWRIGHT_TRUST_PROXY_HOPS: "0",
+          BLOCKWRIGHT_LOCAL_MCP_TOKEN: "",
+          BLOCKWRIGHT_PROJECT_ROOT: resolve(temporary, "project-state"),
+          BLOCKWRIGHT_DATA_DIR: resolve(bridgeRoot, "data", "java"),
+          BLOCKWRIGHT_RATE_REQUESTS: "100",
+          BLOCKWRIGHT_AUTH_RATE_REQUESTS: "100",
+          BLOCKWRIGHT_RATE_WINDOW_MS: "60000",
+          __PORT: String(port),
+          PORT: String(port),
+        },
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      processHandle.stderr?.on("data", (chunk) => { stderr += chunk; });
+      let listening = false;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        if (processHandle.exitCode !== null) throw new Error(`Public connector exited early (${processHandle.exitCode}): ${stderr}`);
+        try {
+          const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(250) });
+          if (response.ok) {
+            listening = true;
+            break;
+          }
+        } catch {
+          // Startup probing is expected to fail until the listener binds.
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+      }
+      expect(listening, `Public connector did not become ready.\n${stderr}`).toBe(true);
+
+      const mcpHeaders = { "content-type": "application/json", accept: "application/json, text/event-stream" };
+      const postMcp = (body: unknown, headers: Record<string, string> = {}) => fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers: { ...mcpHeaders, ...headers },
+        body: JSON.stringify(body),
+      });
+      const postMcpFromLocalAddress = (body: unknown, localAddress: string, headers: Record<string, string> = {}) => new Promise<Response>((resolveResponse, rejectResponse) => {
+        const payload = JSON.stringify(body);
+        const request = requestHttp({
+          hostname: "127.0.0.1",
+          port,
+          path: "/mcp",
+          method: "POST",
+          localAddress,
+          headers: { ...mcpHeaders, ...headers, "content-length": Buffer.byteLength(payload) },
+        }, (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          response.once("error", rejectResponse);
+          response.once("end", () => {
+            const responseHeaders = new Headers();
+            for (const [name, value] of Object.entries(response.headers)) {
+              for (const item of Array.isArray(value) ? value : value === undefined ? [] : [value]) responseHeaders.append(name, item);
+            }
+            resolveResponse(new Response(Buffer.concat(chunks), { status: response.statusCode ?? 500, headers: responseHeaders }));
+          });
+        });
+        request.once("error", rejectResponse);
+        request.end(payload);
+      });
+      const expectPublicResponseHeaders = (response: Response) => {
+        expect(response.headers.get("cache-control")).toMatch(/(?:^|,)\s*no-store\s*(?:,|$)/i);
+        expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(response.headers.get("ratelimit-limit")).toMatch(/^\d+$/);
+        expect(response.headers.get("ratelimit-remaining")).toMatch(/^\d+$/);
+        expect(response.headers.get("ratelimit-reset")).toEqual(expect.any(String));
+      };
+      const callTool = async (id: string, name: string, arguments_: Record<string, unknown>, headers: Record<string, string> = {}) => {
+        const response = await postMcp({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: arguments_ } }, headers);
+        expect(response.status, `${id}: ${await response.clone().text()}`).toBe(200);
+        expectPublicResponseHeaders(response);
+        return response.json() as Promise<any>;
+      };
+
+      const initialized = await postMcp({
+        jsonrpc: "2.0",
+        id: "public-connector-init",
+        method: "initialize",
+        params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "public-connector-test", version: "1.0.0" } },
+      });
+      expect(initialized.status).toBe(200);
+      expectPublicResponseHeaders(initialized);
+      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.7.0" } } });
+
+      const listed = await postMcp({ jsonrpc: "2.0", id: "public-connector-tools", method: "tools/list", params: {} });
+      expect(listed.status).toBe(200);
+      expectPublicResponseHeaders(listed);
+      const listedPayload = await listed.json() as any;
+      const listedNames = (listedPayload.result?.tools ?? []).map(({ name }: { name: string }) => name).sort();
+      const explicitPublicAllowlist = [
+        "analyze_world_region",
+        "audit_build",
+        "compile_build",
+        "estimate_build",
+        "export_bedrock_project",
+        "export_build",
+        "generate_build_candidates",
+        "get_build_chunk",
+        "get_material_list",
+        "get_style_profile",
+        "get_supported_versions",
+        "review_build",
+        "revise_build",
+        "search_blocks",
+        "validate_build",
+        "validate_build_contract",
+      ];
+      const expectedVisibleNames = explicitPublicAllowlist
+        .filter((name) => name !== "get_build_chunk" || listedNames.includes(name))
+        .sort();
+      expect(listedNames).toEqual(expectedVisibleNames);
+      for (const unavailable of [
+        "check_java_updates",
+        "create_delivery_bundle",
+        "create_project",
+        "delete_project",
+        "discover_worlds",
+        "import_schematic",
+        "install_worldedit_schematic",
+        "list_palettes",
+        "render_build",
+        "save_palette",
+        "save_project_version",
+        "sync_java_version",
+      ]) {
+        expect(listedNames, `${unavailable} must not be advertised by the public connector`).not.toContain(unavailable);
+      }
+
+      // Invalid arguments prove the method allowlist runs before the omitted
+      // handler's schema or any project-store mutation can execute.
+      const omitted = await callTool("public-connector-omitted", "create_project", {});
+      expect(omitted.result?.isError).toBe(true);
+      expect(JSON.stringify(omitted)).toMatch(/PUBLIC_CONNECTOR_TOOL_UNAVAILABLE.*create_project/);
+      expect(JSON.stringify(omitted)).not.toMatch(/required|expected string/i);
+
+      const sparseRequirement = "A thin platform spans the site";
+      const sparseSpan = { start: 0, end: sparseRequirement.length, text: sparseRequirement };
+      const sharedSessionHeaders = { "mcp-session-id": "caller-supplied-shared-session" };
+      const sparseCompiled = await callTool("public-connector-sparse", "compile_build", {
+        name: "Sparse Large Envelope",
+        edition: "java",
+        version: "26.2",
+        style: "unfamiliar sparse geometry",
+        sourceBrief: sparseRequirement,
+        dimensions: { width: 256, depth: 32, height: 64 },
+        features: [sparseRequirement],
+        blockBudget: 20_000,
+        seed: "public-connector-sparse",
+        materialLibrary: { platform: "minecraft:stone" },
+        design: {
+          schemaVersion: 1,
+          description: "A sparse generic operation inside an envelope whose volume exceeds the hosted placement cap.",
+          requirements: [{
+            id: "sparse-platform",
+            text: sparseRequirement,
+            elementIds: ["platform-surface"],
+            claims: [{ id: "sparse-platform-extent", sourceSpan: sparseSpan, predicate: "extent", status: "asserted" }],
+            assertions: [
+              { claimId: "sparse-platform-extent", sourceSpan: sparseSpan, elementIds: ["platform-surface"], kind: "axis_span", axis: "x", minimum: 256 },
+              { claimId: "sparse-platform-extent", sourceSpan: sparseSpan, elementIds: ["platform-surface"], kind: "axis_span", axis: "z", minimum: 32 },
+            ],
+          }],
+          elements: [{
+            id: "platform-surface",
+            kind: "fill",
+            intent: sparseRequirement,
+            requirementIds: ["sparse-platform"],
+            min: { x: 0, y: 0, z: 0 },
+            max: { x: 255, y: 0, z: 31 },
+            material: "platform",
+          }],
+        },
+      }, sharedSessionHeaders);
+      expect(sparseCompiled.result?.isError, JSON.stringify(sparseCompiled)).not.toBe(true);
+      const sparseBuild = sparseCompiled.result?.structuredContent?.build;
+      expect(256 * 32 * 64).toBeGreaterThan(250_000);
+      expect(sparseBuild).toMatchObject({
+        cacheRef: expect.stringMatching(/^bwc_[A-Za-z0-9_-]{32}\.bw_[a-f0-9]{12}$/),
+        blockCount: 8_192,
+        input: { dimensions: { width: 256, depth: 32, height: 64 } },
+        preflight: { totalVolume: 524_288, estimatedPlacementAttempts: 8_192 },
+      });
+
+      // Trust-proxy=0 must ignore a caller-controlled forwarding header. The
+      // cached id therefore resolves under the same synthetic request principal.
+      const cachedValidation = await callTool(
+        "public-connector-cached-build",
+        "validate_build",
+        { build: sparseBuild.cacheRef },
+        { ...sharedSessionHeaders, "x-forwarded-for": "203.0.113.77" },
+      );
+      expect(cachedValidation.result?.isError, JSON.stringify(cachedValidation)).not.toBe(true);
+      expect(cachedValidation.result?.structuredContent).toMatchObject({ buildId: sparseBuild.id, hash: sparseBuild.hash });
+
+      // Hosted proxies may terminate the external MCP session and use different
+      // origin connections. The random cache capability—not a proxy address or
+      // caller-controlled session header—therefore carries the bounded build.
+      const crossIngress = await postMcpFromLocalAddress({
+        jsonrpc: "2.0",
+        id: "public-connector-cross-ingress",
+        method: "tools/call",
+        params: { name: "validate_build", arguments: { build: sparseBuild.cacheRef } },
+      }, "127.0.0.2", sharedSessionHeaders);
+      expect(crossIngress.status).toBe(200);
+      expectPublicResponseHeaders(crossIngress);
+      const crossIngressPayload = await crossIngress.json() as any;
+      expect(crossIngressPayload.result?.isError, JSON.stringify(crossIngressPayload)).not.toBe(true);
+      expect(crossIngressPayload.result?.structuredContent).toMatchObject({ buildId: sparseBuild.id, hash: sparseBuild.hash });
+
+      // A deterministic build id is not a public cache capability, even when a
+      // different client guesses it or supplies its own MCP session header.
+      const crossSession = await callTool(
+        "public-connector-cross-session",
+        "validate_build",
+        { build: sparseBuild.id },
+        { "mcp-session-id": "different-caller-session" },
+      );
+      expect(crossSession.result?.isError).toBe(true);
+      expect(JSON.stringify(crossSession)).toMatch(/VIEW_BUILD_CACHE_MISS/);
+
+      const excessiveRequirement = "A dense volume occupies the site";
+      const excessiveSpan = { start: 0, end: excessiveRequirement.length, text: excessiveRequirement };
+      const rejectedAtPreflight = await callTool("public-connector-excessive-design", "compile_build", {
+        name: "Excessive Generic Operation",
+        edition: "java",
+        version: "26.2",
+        style: "unfamiliar dense geometry",
+        sourceBrief: excessiveRequirement,
+        dimensions: { width: 300, depth: 300, height: 50 },
+        features: [excessiveRequirement],
+        seed: "public-connector-excessive-design",
+        materialLibrary: { volume: "minecraft:stone" },
+        design: {
+          schemaVersion: 1,
+          description: "A valid generic request whose conservative coordinate-operation estimate exceeds the public runtime cap.",
+          requirements: [{
+            id: "dense-volume",
+            text: excessiveRequirement,
+            elementIds: ["dense-fill"],
+            claims: [{ id: "dense-volume-extent", sourceSpan: excessiveSpan, predicate: "extent", status: "asserted" }],
+            assertions: [
+              { claimId: "dense-volume-extent", sourceSpan: excessiveSpan, elementIds: ["dense-fill"], kind: "axis_span", axis: "x", minimum: 300 },
+              { claimId: "dense-volume-extent", sourceSpan: excessiveSpan, elementIds: ["dense-fill"], kind: "axis_span", axis: "y", minimum: 50 },
+              { claimId: "dense-volume-extent", sourceSpan: excessiveSpan, elementIds: ["dense-fill"], kind: "axis_span", axis: "z", minimum: 300 },
+            ],
+          }],
+          elements: [{
+            id: "dense-fill",
+            kind: "fill",
+            intent: excessiveRequirement,
+            requirementIds: ["dense-volume"],
+            min: { x: 0, y: 0, z: 0 },
+            max: { x: 299, y: 49, z: 299 },
+            material: "volume",
+          }],
+        },
+      });
+      expect(rejectedAtPreflight.result?.isError).toBe(true);
+      expect(JSON.stringify(rejectedAtPreflight)).toMatch(/HOSTED_BUILD_WORK_LIMIT_EXCEEDED.*4,500,000 coordinate operations/);
+      expect(JSON.stringify(rejectedAtPreflight)).not.toMatch(/BUILD_PLACEMENT_LIMIT_EXCEEDED|generic design exceeded/);
+
+      // Cache access is capability-scoped, but public work quotas remain
+      // address-scoped so rotating an untrusted session header cannot evade
+      // the ten-build tenant budget. The sparse compile above used unit one.
+      for (let unit = 2; unit <= 11; unit += 1) {
+        const rotated = await callTool(`public-connector-rotated-quota-${unit}`, "compile_build", {
+          name: `Rotated Public Quota ${unit}`,
+          edition: "java",
+          version: "26.2",
+          style: "nordic",
+          dimensions: { width: 5, depth: 5, height: 5 },
+          seed: `public-connector-rotated-quota-${unit}`,
+        }, { "mcp-session-id": `rotated-caller-session-${unit}` });
+        if (unit <= 10) expect(rotated.result?.isError, JSON.stringify(rotated)).not.toBe(true);
+        else {
+          expect(rotated.result?.isError).toBe(true);
+          expect(JSON.stringify(rotated)).toMatch(/HOSTED_TENANT_BUILD_WORK_RATE_LIMITED/);
+        }
+      }
+    } catch (error) {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}\nPublic connector stderr:\n${stderr}`);
+    } finally {
+      if (processHandle?.exitCode === null) processHandle.kill("SIGTERM");
+      if (processHandle) await waitForExit(processHandle).catch(() => processHandle?.kill("SIGKILL"));
+      rmSync(temporary, { recursive: true, force: true });
+    }
+  }, 30_000);
+
   it("authenticates, rate-limits, and bounds work before hosted MCP dispatch", async () => {
     const temporary = mkdtempSync(join(tmpdir(), "Blockwright hosted MCP guard "));
     const port = await unusedPort();
@@ -1119,7 +1423,7 @@ describe("Blockwright stdio bridge helpers", () => {
 
       const initialized = await postMcp(initializeBody);
       expect(initialized.status).toBe(200);
-      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.6.0" } } });
+      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.7.0" } } });
 
       const excessiveCandidates = await postMcp({
         jsonrpc: "2.0",
@@ -1153,10 +1457,10 @@ describe("Blockwright stdio bridge helpers", () => {
         jsonrpc: "2.0",
         id: "hosted-build-cap",
         method: "tools/call",
-        params: { name: "compile_build", arguments: { name: "Excessive Hosted Build", edition: "java", version: "26.2", style: "nordic", dimensions: { width: 100, depth: 100, height: 30 } } },
+        params: { name: "compile_build", arguments: { name: "Excessive Hosted Span", edition: "java", version: "26.2", style: "nordic", dimensions: { width: 513, depth: 5, height: 5 } } },
       });
       expect(excessiveBuild.status).toBe(200);
-      expect(JSON.stringify(await excessiveBuild.json())).toMatch(/HOSTED_BUILD_LIMIT_EXCEEDED/);
+      expect(JSON.stringify(await excessiveBuild.json())).toMatch(/HOSTED_BUILD_SPAN_LIMIT_EXCEEDED/);
 
       const localPalette = await postMcp({ jsonrpc: "2.0", id: "hosted-local-palette", method: "tools/call", params: { name: "list_palettes", arguments: {} } });
       expect(localPalette.status).toBe(200);
@@ -1165,23 +1469,60 @@ describe("Blockwright stdio bridge helpers", () => {
       expect(localProjectMutation.status).toBe(200);
       expect(JSON.stringify(await localProjectMutation.json())).toMatch(/LOCAL_OPERATION_UNAVAILABLE/);
 
-      const compileHostedBuild = async (id: string, name: string, dimensions: { width: number; depth: number; height: number }) => {
+      const compileHostedBuild = async (
+        id: string,
+        name: string,
+        dimensions: { width: number; depth: number; height: number },
+        overrides: Record<string, unknown> = {},
+      ) => {
         const response = await postMcp({
           jsonrpc: "2.0",
           id,
           method: "tools/call",
-          params: { name: "compile_build", arguments: { name, edition: "java", version: "26.2", style: "nordic", dimensions, seed: id } },
+          params: { name: "compile_build", arguments: { name, edition: "java", version: "26.2", style: "nordic", dimensions, seed: id, ...overrides } },
         });
         expect(response.status, `${id}: ${await response.clone().text()}`).toBe(200);
         return response.json() as Promise<any>;
       };
-      const largeCompiled = await compileHostedBuild("hosted-large-import-compile", "Hosted Import Envelope", { width: 100, depth: 100, height: 25 });
+      const largeRequirement = "Retain a canonical volume to exercise the hosted import placement limit";
+      const largeCompiled = await compileHostedBuild(
+        "hosted-large-import-compile",
+        "Hosted Import Envelope",
+        { width: 100, depth: 100, height: 25 },
+        {
+          sourceBrief: largeRequirement,
+          blockBudget: 150_000,
+          materialLibrary: { canonical_volume: "minecraft:stone" },
+          design: {
+            schemaVersion: 1,
+            description: "Explicit generic geometry fixture; a large legacy shell request must still fail closed.",
+            requirements: [{
+              id: "large-canonical-volume",
+              text: largeRequirement,
+              elementIds: ["large-canonical-fill"],
+              claims: [{ id: "large-canonical-volume-claim", sourceSpan: { start: 0, end: largeRequirement.length, text: largeRequirement }, predicate: "extent", status: "asserted" }],
+              assertions: [
+                { claimId: "large-canonical-volume-claim", sourceSpan: { start: 0, end: largeRequirement.length, text: largeRequirement }, elementIds: ["large-canonical-fill"], kind: "placement_count", minimum: 100_001 },
+                { claimId: "large-canonical-volume-claim", sourceSpan: { start: 0, end: largeRequirement.length, text: largeRequirement }, elementIds: ["large-canonical-fill"], kind: "axis_span", axis: "x", minimum: 16 },
+                { claimId: "large-canonical-volume-claim", sourceSpan: { start: 0, end: largeRequirement.length, text: largeRequirement }, elementIds: ["large-canonical-fill"], kind: "axis_span", axis: "z", minimum: 16 },
+              ],
+            }],
+            elements: [{
+              id: "large-canonical-fill",
+              kind: "fill",
+              intent: largeRequirement,
+              requirementIds: ["large-canonical-volume"],
+              min: { x: 0, y: 0, z: 0 },
+              max: { x: 99, y: 10, z: 99 },
+              material: "canonical_volume",
+            }],
+          },
+        },
+      );
       expect(largeCompiled.result?.isError, JSON.stringify(largeCompiled)).not.toBe(true);
       const largeBuildSummary = largeCompiled.result?.structuredContent?.build;
-      expect(largeCompiled.result?._meta?.build).toBeUndefined();
-      expect(largeCompiled.result?._meta?.buildSummary).toMatchObject({ id: largeBuildSummary.id, hash: largeBuildSummary.hash, blockCount: largeBuildSummary.blockCount });
-      expect(largeCompiled.result?._meta?.buildPage).toMatchObject({ buildId: largeBuildSummary.id, offset: 0, total: largeBuildSummary.blockCount, returned: expect.any(Number) });
-      expect(largeCompiled.result?._meta?.buildPage?.returned).toBeLessThanOrEqual(500);
+      expect(largeBuildSummary.blockCount).toBe(110_000);
+      expect(largeCompiled.result?._meta).toBeUndefined();
       const hostedBuildPage = await callHostedTool("hosted-build-page", "get_build_chunk", { build: largeBuildSummary.id, offset: 0, limit: 5_000 });
       expect(hostedBuildPage.result?.isError, JSON.stringify(hostedBuildPage)).not.toBe(true);
       expect(hostedBuildPage.result?.structuredContent).toMatchObject({ buildId: largeBuildSummary.id, offset: 0, total: largeBuildSummary.blockCount });
@@ -1195,7 +1536,7 @@ describe("Blockwright stdio bridge helpers", () => {
       expect(hostedRenderPage.result?._meta?.placements).toHaveLength(17);
       const oversizedHostedArtifact = await callHostedTool("hosted-artifact-output-cap", "export_build", { build: largeBuildSummary.id, format: "json" });
       expect(oversizedHostedArtifact.result?.isError).toBe(true);
-      expect(JSON.stringify(oversizedHostedArtifact)).toMatch(/HOSTED_ARTIFACT_OUTPUT_LIMIT_EXCEEDED/);
+      expect(JSON.stringify(oversizedHostedArtifact), JSON.stringify(oversizedHostedArtifact)).toMatch(/HOSTED_ARTIFACT_OUTPUT_LIMIT_EXCEEDED/);
       const largeExport = await callHostedTool("hosted-large-import-export", "export_build", { build: largeBuildSummary, format: "litematic" });
       expect(largeExport.result?.isError, JSON.stringify(largeExport)).not.toBe(true);
       const largeImport = await callHostedTool("hosted-large-import-reject", "import_schematic", { base64: largeExport.result?._meta?.base64, format: "litematic" });
@@ -1236,9 +1577,9 @@ describe("Blockwright stdio bridge helpers", () => {
       authenticatedHeaders = primaryAuthenticatedHeaders;
       const smallCompiled = await compileHostedBuild("hosted-small-import-compile", "Hosted Summary Import", { width: 9, depth: 9, height: 9 });
       expect(smallCompiled.result?.isError, JSON.stringify(smallCompiled)).not.toBe(true);
-      expect(smallCompiled.result?._meta?.build).toBeUndefined();
+      expect(smallCompiled.result?._meta).toBeUndefined();
       const smallBuildSummary = smallCompiled.result?.structuredContent?.build;
-      const smallBuildPlacements = [...smallCompiled.result?._meta?.buildPage?.placements ?? []];
+      const smallBuildPlacements: any[] = [];
       while (smallBuildPlacements.length < smallBuildSummary.blockCount) {
         const offset = smallBuildPlacements.length;
         const page = await callHostedTool(`hosted-small-build-page-${offset}`, "get_build_chunk", { build: smallBuildSummary.id, offset, limit: 5_000 });
@@ -1403,7 +1744,7 @@ describe("Blockwright stdio bridge helpers", () => {
       processHandle.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
       processHandle.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: "tools-test", method: "tools/list", params: {} })}\n`);
       const tools = await waitForMessage(messages, ({ id }) => id === "tools-test");
-      expect(tools.result?.tools).toHaveLength(37);
+      expect(tools.result?.tools).toHaveLength(38);
       expect(tools.result?.tools).toEqual(expect.arrayContaining([
         expect.objectContaining({
           name: "validate_build_contract",
@@ -1477,6 +1818,38 @@ describe("Blockwright stdio bridge helpers", () => {
       const deliveryInputProperties = tools.result?.tools.find((candidate: any) => candidate.name === "create_delivery_bundle")?.inputSchema?.properties;
       expect(deliveryInputProperties).toEqual(expect.objectContaining({ reviewToken: expect.any(Object) }));
       expect(deliveryInputProperties?.reviewApproval).toBeUndefined();
+      const compileTool = tools.result?.tools.find((candidate: any) => candidate.name === "compile_build");
+      const reviewTool = tools.result?.tools.find((candidate: any) => candidate.name === "review_build");
+      const exportTool = tools.result?.tools.find((candidate: any) => candidate.name === "export_build");
+      const bedrockProjectTool = tools.result?.tools.find((candidate: any) => candidate.name === "export_bedrock_project");
+      expect(compileTool?.description).toMatch(/never opens a webpage or 3D viewer/i);
+      expect(compileTool?._meta?.["ui/resourceUri"]).toBeUndefined();
+      expect(compileTool?._meta?.ui?.resourceUri).toBeUndefined();
+      expect(reviewTool?._meta?.["ui/resourceUri"]).toEqual(expect.stringContaining("review-build"));
+      expect(reviewTool?._meta?.ui?.resourceUri).toEqual(expect.stringContaining("review-build"));
+      expect(bedrockProjectTool?.description).toMatch(/one or more non-overlapping.*\.mcpack/i);
+      expect(exportTool?._meta?.["ui/resourceUri"]).toBeUndefined();
+      expect(exportTool?._meta?.ui?.resourceUri).toBeUndefined();
+      expect(bedrockProjectTool?._meta?.["ui/resourceUri"]).toEqual(expect.stringContaining("export-bedrock-project"));
+      expect(bedrockProjectTool?._meta?.ui?.resourceUri).toEqual(bedrockProjectTool?._meta?.["ui/resourceUri"]);
+      processHandle.stdin?.write(`${JSON.stringify({
+        jsonrpc: "2.0",
+        id: "bedrock-download-view-resource",
+        method: "resources/read",
+        params: { uri: bedrockProjectTool?._meta?.ui?.resourceUri },
+      })}\n`);
+      const bedrockDownloadView = await waitForMessage(messages, ({ id }) => id === "bedrock-download-view-resource");
+      expect(bedrockDownloadView.result?.contents?.[0]).toMatchObject({
+        uri: bedrockProjectTool?._meta?.ui?.resourceUri,
+        mimeType: "text/html;profile=mcp-app",
+        text: expect.stringContaining("export-bedrock-project"),
+        _meta: expect.objectContaining({
+          ui: expect.objectContaining({
+            description: expect.stringMatching(/\.mcpack download card/i),
+            prefersBorder: true,
+          }),
+        }),
+      });
       const callTool = async (id: string, name: string, arguments_: Record<string, unknown>) => {
         processHandle?.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: arguments_ } })}\n`);
         return waitForMessage(messages, (message) => message.id === id);
@@ -1502,19 +1875,15 @@ describe("Blockwright stdio bridge helpers", () => {
       const build = compiled.result?.structuredContent?.build;
       expect(compiled.result?.isError).not.toBe(true);
       expect(build?.input?.style).toBe("japanese");
-      expect(compiled.result?._meta?.build).toBeUndefined();
-      expect(compiled.result?._meta?.buildSummary).toMatchObject({ id: build.id, hash: build.hash, blockCount: build.blockCount });
-      const initialBuildPage = compiled.result?._meta?.buildPage;
-      expect(initialBuildPage).toMatchObject({ buildId: build.id, offset: 0, total: build.blockCount, returned: expect.any(Number) });
-      expect(initialBuildPage.placements).toHaveLength(initialBuildPage.returned);
-      expect(initialBuildPage.returned).toBeLessThanOrEqual(500);
+      expect(compiled.result?._meta).toBeUndefined();
+      expect(JSON.stringify(compiled)).not.toMatch(/viewUUID/);
 
       const chunkProbe = await callTool("build-chunk-probe", "get_build_chunk", { build: build.id, offset: 0, limit: 7 });
       expect(chunkProbe.result?.isError).not.toBe(true);
       expect(chunkProbe.result?.structuredContent).toMatchObject({ buildId: build.id, offset: 0, total: build.blockCount, returned: Math.min(7, build.blockCount) });
       expect(chunkProbe.result?._meta?.placements).toHaveLength(Math.min(7, build.blockCount));
 
-      const canonicalPlacements = [...initialBuildPage.placements];
+      const canonicalPlacements: any[] = [];
       while (canonicalPlacements.length < build.blockCount) {
         const offset = canonicalPlacements.length;
         const page = await callTool(`build-chunk-${offset}`, "get_build_chunk", { build: build.id, offset, limit: 5_000 });
@@ -1528,10 +1897,122 @@ describe("Blockwright stdio bridge helpers", () => {
 
       const reviewed = await callTool("review-build-page-metadata", "review_build", { build: build.id });
       expect(reviewed.result?.isError).not.toBe(true);
+      expect(reviewed.result?._meta?.viewUUID).toEqual(expect.any(String));
       expect(reviewed.result?._meta?.build).toBeUndefined();
       expect(reviewed.result?._meta?.buildSummary).toMatchObject({ id: build.id, hash: build.hash, blockCount: build.blockCount });
       expect(reviewed.result?._meta?.buildPage).toMatchObject({ buildId: build.id, offset: 0, total: build.blockCount });
       expect(reviewed.result?._meta?.audit).toMatchObject({ buildId: build.id, hash: build.hash });
+
+      const customRequirement = "Create an unfamiliar kinetic canopy from exact generic geometry";
+      const largeMaterialLibrary = Object.fromEntries(Array.from({ length: 120 }, (_, index) => [`bespoke_material_${index}`, "minecraft:stone"]));
+      const customCompiled = await callTool("custom-generic-design", "compile_build", {
+        name: "Uncatalogued Kinetic Canopy",
+        edition: "java",
+        version: "26.2",
+        style: "uncatalogued kinetic solarpunk",
+        sourceBrief: customRequirement,
+        dimensions: { width: 9, depth: 9, height: 9 },
+        palette: Array.from({ length: 120 }, () => "minecraft:stone"),
+        materialLibrary: largeMaterialLibrary,
+        features: [customRequirement],
+        seed: "uncatalogued-kinetic-canopy",
+        design: {
+          schemaVersion: 1,
+          description: "A domain-independent filled canopy test that is not represented by a building-type catalog.",
+          requirements: [{
+            id: "custom-form",
+            text: customRequirement,
+            elementIds: ["canopy-form"],
+            claims: [{ id: "custom-form-claim", sourceSpan: { start: 0, end: customRequirement.length, text: customRequirement }, predicate: "surface", status: "asserted" }],
+            assertions: [
+              { claimId: "custom-form-claim", sourceSpan: { start: 0, end: customRequirement.length, text: customRequirement }, elementIds: ["canopy-form"], kind: "element_kind", elementKind: "fill", minimum: 1 },
+              { claimId: "custom-form-claim", sourceSpan: { start: 0, end: customRequirement.length, text: customRequirement }, elementIds: ["canopy-form"], kind: "axis_span", axis: "x", minimum: 7 },
+            ],
+          }],
+          elements: [{
+            id: "canopy-form",
+            kind: "fill",
+            intent: customRequirement,
+            requirementIds: ["custom-form"],
+            min: { x: 1, y: 1, z: 1 },
+            max: { x: 7, y: 1, z: 7 },
+            material: "bespoke_material_119",
+          }],
+        },
+      });
+      expect(customCompiled.result?.isError, JSON.stringify(customCompiled)).not.toBe(true);
+      expect(customCompiled.result?._meta).toBeUndefined();
+      expect(customCompiled.result?.structuredContent?.build?.input?.style).toBe("uncatalogued kinetic solarpunk");
+      expect(customCompiled.result?.structuredContent?.build?.input?.palette).toHaveLength(120);
+      expect(Object.keys(customCompiled.result?.structuredContent?.build?.input?.materialLibrary ?? {})).toHaveLength(120);
+      expect(customCompiled.result?.structuredContent?.build?.input?.design?.elements?.[0]).toMatchObject({ id: "canopy-form", kind: "fill", material: "bespoke_material_119" });
+      const customRecompiled = await callTool("custom-generic-recompile", "validate_build", { build: customCompiled.result?.structuredContent?.build });
+      expect(customRecompiled.result?.isError, JSON.stringify(customRecompiled)).not.toBe(true);
+      expect(customRecompiled.result?.structuredContent).toMatchObject({
+        buildId: customCompiled.result?.structuredContent?.build?.id,
+        hash: customCompiled.result?.structuredContent?.build?.hash,
+      });
+      const uncappedFeatureOverrides = await callTool("uncapped-feature-overrides", "validate_build_contract", {
+        build: customCompiled.result?.structuredContent?.build?.id,
+        contract: { features: Array.from({ length: 120 }, (_, index) => `warning: open ended material note ${index}`) },
+      });
+      expect(uncappedFeatureOverrides.result?.isError, JSON.stringify(uncappedFeatureOverrides)).not.toBe(true);
+      expect(uncappedFeatureOverrides.result?.structuredContent?.contract?.warnings
+        ?.filter((result: any) => /open ended material note/.test(result.requirement))).toHaveLength(120);
+
+      const firstBedrockSector = await callTool("bedrock-project-sector-a", "compile_build", {
+        name: "Project Sector A",
+        edition: "bedrock",
+        version: "stable",
+        style: "modern",
+        dimensions: { width: 9, depth: 9, height: 9 },
+        origin: { x: 0, y: 64, z: 0 },
+        seed: "bedrock-project-sector-a",
+      });
+      const secondBedrockSector = await callTool("bedrock-project-sector-b", "compile_build", {
+        name: "Project Sector B",
+        edition: "bedrock",
+        version: "stable",
+        style: "modern",
+        dimensions: { width: 9, depth: 9, height: 9 },
+        origin: { x: 20, y: 64, z: 0 },
+        seed: "bedrock-project-sector-b",
+      });
+      expect(firstBedrockSector.result?.isError, JSON.stringify(firstBedrockSector)).not.toBe(true);
+      expect(secondBedrockSector.result?.isError, JSON.stringify(secondBedrockSector)).not.toBe(true);
+      const firstBedrockBuild = firstBedrockSector.result?.structuredContent?.build;
+      const secondBedrockBuild = secondBedrockSector.result?.structuredContent?.build;
+      expect(firstBedrockBuild.contract.status).toBe("valid");
+      expect(secondBedrockBuild.contract.status).toBe("valid");
+      expect(firstBedrockBuild.bounds.max.x).toBeLessThan(secondBedrockBuild.bounds.min.x);
+
+      const bedrockProject = await callTool("bedrock-project-export", "export_bedrock_project", {
+        builds: [firstBedrockBuild.id, secondBedrockBuild.id],
+        name: "Two Sector MCP Project",
+        description: "Two exact non-overlapping cached Bedrock sectors in one pack.",
+        packId: "blockwright:mcp-regression:two-sector-project",
+        manifestVersion: [1, 2, 3],
+      });
+      expect(bedrockProject.result?.isError, JSON.stringify(bedrockProject)).not.toBe(true);
+      expect(bedrockProject.result?.structuredContent).toMatchObject({
+        projectName: "Two Sector MCP Project",
+        packId: "blockwright:mcp-regression:two-sector-project",
+        manifestVersion: [1, 2, 3],
+        format: "mcpack",
+        filename: "two_sector_mcp_project.mcpack",
+        buildIds: [firstBedrockBuild.id, secondBedrockBuild.id],
+        buildHashes: [firstBedrockBuild.hash, secondBedrockBuild.hash],
+        structureTiles: 2,
+        bedrockRegistryVersion: expect.any(String),
+        compatibilityStatus: "unverified",
+      });
+      expect(bedrockProject.result?._meta?.viewUUID).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(bedrockProject.result?._meta?.base64).toEqual(expect.any(String));
+      expect(Buffer.from(bedrockProject.result._meta.base64, "base64").subarray(0, 2).toString("ascii")).toBe("PK");
+      expect(bedrockProject.result?._meta?.metadata?.builds).toEqual([
+        expect.objectContaining({ id: firstBedrockBuild.id, hash: firstBedrockBuild.hash }),
+        expect.objectContaining({ id: secondBedrockBuild.id, hash: secondBedrockBuild.hash }),
+      ]);
 
       const createdProject = await callTool("project-create-test", "create_project", {
         name: "Professional Workflow Project",

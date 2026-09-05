@@ -1,13 +1,21 @@
 export default {
-  "_cuboid-jN_xaVN8.js": {
-    "file": "assets/cuboid-jN_xaVN8.js",
-    "name": "cuboid",
+  "_circle-check-r6gchvZf.js": {
+    "file": "assets/circle-check-r6gchvZf.js",
+    "name": "circle-check",
     "imports": [
-      "_helpers-DGW9OV4V.js"
+      "_v4-BJmWi5kg.js",
+      "_helpers-z9v0JHte.js"
     ]
   },
-  "_helpers-DGW9OV4V.js": {
-    "file": "assets/helpers-DGW9OV4V.js",
+  "_cuboid-DFs2KV0E.js": {
+    "file": "assets/cuboid-DFs2KV0E.js",
+    "name": "cuboid",
+    "imports": [
+      "_helpers-z9v0JHte.js"
+    ]
+  },
+  "_helpers-z9v0JHte.js": {
+    "file": "assets/helpers-z9v0JHte.js",
     "name": "helpers",
     "imports": [
       "_v4-BJmWi5kg.js"
@@ -20,81 +28,125 @@ export default {
       "assets/style-atlas-CgePg_Ow.png"
     ]
   },
-  "_resource-pack-D9rEeToN.js": {
-    "file": "assets/resource-pack-D9rEeToN.js",
+  "_maximize-2-mOkU6x6e.js": {
+    "file": "assets/maximize-2-mOkU6x6e.js",
+    "name": "maximize-2",
+    "imports": [
+      "_v4-BJmWi5kg.js",
+      "_helpers-z9v0JHte.js"
+    ]
+  },
+  "_resource-pack-B4c4fQQK.js": {
+    "file": "assets/resource-pack-B4c4fQQK.js",
     "name": "resource-pack",
     "imports": [
       "_v4-BJmWi5kg.js",
-      "_helpers-DGW9OV4V.js"
+      "_helpers-z9v0JHte.js"
     ]
   },
-  "_use-paged-build-BlcNcz0L.js": {
-    "file": "assets/use-paged-build-BlcNcz0L.js",
+  "_shield-check-DYfChXpE.js": {
+    "file": "assets/shield-check-DYfChXpE.js",
+    "name": "shield-check",
+    "imports": [
+      "_helpers-z9v0JHte.js"
+    ]
+  },
+  "_use-paged-build-DwX-ilMD.js": {
+    "file": "assets/use-paged-build-DwX-ilMD.js",
     "name": "use-paged-build",
     "imports": [
       "_v4-BJmWi5kg.js",
-      "_helpers-DGW9OV4V.js"
+      "_helpers-z9v0JHte.js"
     ]
   },
   "_v4-BJmWi5kg.js": {
     "file": "assets/v4-BJmWi5kg.js",
     "name": "v4"
   },
+  "_x-De2f5xR8.js": {
+    "file": "assets/x-De2f5xR8.js",
+    "name": "x",
+    "imports": [
+      "_v4-BJmWi5kg.js",
+      "_helpers-z9v0JHte.js"
+    ]
+  },
   "node_modules/skybridge/dist/web/components/modal-provider.js": {
-    "file": "assets/modal-provider-C4G058_V.js",
+    "file": "assets/modal-provider-Cld5h_Mg.js",
     "name": "modal-provider",
     "src": "node_modules/skybridge/dist/web/components/modal-provider.js",
     "isDynamicEntry": true,
     "imports": [
       "_v4-BJmWi5kg.js",
-      "_helpers-DGW9OV4V.js"
+      "_helpers-z9v0JHte.js"
     ]
   },
   "skybridge:view:compile-build": {
-    "file": "assets/compile-build-DkMZOuvd.js",
+    "file": "assets/compile-build-CE9Ez150.js",
     "name": "compile-build",
     "src": "skybridge:view:compile-build",
     "isEntry": true,
     "imports": [
       "_v4-BJmWi5kg.js",
-      "_helpers-DGW9OV4V.js",
-      "_use-paged-build-BlcNcz0L.js",
-      "_resource-pack-D9rEeToN.js",
-      "_cuboid-jN_xaVN8.js"
+      "_helpers-z9v0JHte.js",
+      "_use-paged-build-DwX-ilMD.js",
+      "_maximize-2-mOkU6x6e.js",
+      "_x-De2f5xR8.js",
+      "_resource-pack-B4c4fQQK.js",
+      "_cuboid-DFs2KV0E.js"
+    ]
+  },
+  "skybridge:view:export-bedrock-project": {
+    "file": "assets/export-bedrock-project-CKGRfL3G.js",
+    "name": "export-bedrock-project",
+    "src": "skybridge:view:export-bedrock-project",
+    "isEntry": true,
+    "imports": [
+      "_v4-BJmWi5kg.js",
+      "_helpers-z9v0JHte.js",
+      "_x-De2f5xR8.js",
+      "_circle-check-r6gchvZf.js",
+      "_shield-check-DYfChXpE.js"
     ]
   },
   "skybridge:view:palette-studio": {
-    "file": "assets/palette-studio-CfKgLE7K.js",
+    "file": "assets/palette-studio-CteTSsCR.js",
     "name": "palette-studio",
     "src": "skybridge:view:palette-studio",
     "isEntry": true,
     "imports": [
       "_v4-BJmWi5kg.js",
-      "_helpers-DGW9OV4V.js",
-      "_resource-pack-D9rEeToN.js",
-      "_cuboid-jN_xaVN8.js"
+      "_helpers-z9v0JHte.js",
+      "_maximize-2-mOkU6x6e.js",
+      "_resource-pack-B4c4fQQK.js",
+      "_cuboid-DFs2KV0E.js"
     ]
   },
   "skybridge:view:review-build": {
-    "file": "assets/review-build-bIwrCFjN.js",
+    "file": "assets/review-build-Bk0LqSaR.js",
     "name": "review-build",
     "src": "skybridge:view:review-build",
     "isEntry": true,
     "imports": [
       "_v4-BJmWi5kg.js",
-      "_helpers-DGW9OV4V.js",
-      "_use-paged-build-BlcNcz0L.js",
-      "_resource-pack-D9rEeToN.js"
+      "_helpers-z9v0JHte.js",
+      "_use-paged-build-DwX-ilMD.js",
+      "_maximize-2-mOkU6x6e.js",
+      "_x-De2f5xR8.js",
+      "_circle-check-r6gchvZf.js",
+      "_resource-pack-B4c4fQQK.js"
     ]
   },
   "skybridge:view:world-browser": {
-    "file": "assets/world-browser-vh2zOOd6.js",
+    "file": "assets/world-browser-Cveyyhd3.js",
     "name": "world-browser",
     "src": "skybridge:view:world-browser",
     "isEntry": true,
     "imports": [
       "_v4-BJmWi5kg.js",
-      "_helpers-DGW9OV4V.js"
+      "_helpers-z9v0JHte.js",
+      "_maximize-2-mOkU6x6e.js",
+      "_shield-check-DYfChXpE.js"
     ]
   },
   "src/assets/style-atlas.png": {
@@ -102,7 +154,7 @@ export default {
     "src": "src/assets/style-atlas.png"
   },
   "style.css": {
-    "file": "assets/style--IH6XkZD.css",
+    "file": "assets/style-B_-bC5HY.css",
     "src": "style.css"
   }
 };

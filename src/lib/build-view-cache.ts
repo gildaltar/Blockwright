@@ -1,8 +1,8 @@
 import type { BuildRecord } from "./types.js";
 
-export const HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS = 4;
+export const HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS = 8;
 export const HOSTED_BUILD_VIEW_CACHE_MAX_PLACEMENTS = 500_000;
-export const HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS_PER_PRINCIPAL = 2;
+export const HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS_PER_PRINCIPAL = 8;
 export const HOSTED_BUILD_VIEW_CACHE_TTL_MS = 15 * 60_000;
 
 export type BuildViewPrincipal = {
