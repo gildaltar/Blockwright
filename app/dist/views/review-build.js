@@ -1,6 +1,6 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import "../index.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useThree } from "@react-three/fiber";
 import { Box as DreiBox, Edges, Grid, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
@@ -68,7 +68,7 @@ function InstancePart({ placements, part, block, textures, textureMaps, dimmed, 
         return new THREE.MeshStandardMaterial({ color: url ? "#ffffff" : part.role === "metal" ? "#242a2c" : reviewerBlockColor(block), map, roughness: part.role === "metal" ? .45 : .88, metalness: part.role === "metal" ? .5 : 0, transparent: dimmed || /glass|pane|leaves/.test(block), opacity: dimmed ? .2 : 1, alphaTest: /glass|pane|leaves|door|trapdoor/.test(block) ? .08 : 0, emissive, emissiveIntensity: part.role === "lantern" ? 1.1 : 0 });
     }, [block, dimmed, part.role, textureMaps, textures?.top]);
     useEffect(() => () => { material.dispose(); }, [material]);
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!ref.current)
             return;
         updateReviewerInstanceMesh(ref.current, placements, part, invalidate);

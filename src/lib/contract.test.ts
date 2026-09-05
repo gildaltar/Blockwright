@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { compileBuild, summarizeBuild } from "./compiler.js";
 import { auditBuildSemantics, calculateBuildHash, validateBuildContract } from "./contract.js";
 import { buildAuditOutputSchema, buildContractResultOutputSchema, buildSummaryOutputSchema } from "./output-schemas.js";
-import { auditBuild } from "./reviewer.js";
+import { auditBuild } from "./reviewer-audit.js";
 import type { BuildRecord, Placement } from "./types.js";
 
 const base = {

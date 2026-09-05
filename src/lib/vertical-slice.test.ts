@@ -17,7 +17,7 @@ import {
 } from "./output-schemas.js";
 import { continuePaletteInterview, deletePalette, listPalettes, loadPalette, renamePalette, savePalette, validatePaletteIdentifiers } from "./palette-studio.js";
 import { estimateBuild } from "./preflight.js";
-import { auditBuild } from "./reviewer.js";
+import { auditBuild } from "./reviewer-audit.js";
 import { exportSchematic, importSchematic } from "./schematic.js";
 import { discoverWorlds, installWorldEditSchematic } from "./worlds.js";
 

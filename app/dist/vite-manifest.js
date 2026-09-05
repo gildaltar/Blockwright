@@ -123,7 +123,7 @@ export default {
     ]
   },
   "skybridge:view:review-build": {
-    "file": "assets/review-build-D87cAH2v.js",
+    "file": "assets/review-build-BZaiCFqT.js",
     "name": "review-build",
     "src": "skybridge:view:review-build",
     "isEntry": true,

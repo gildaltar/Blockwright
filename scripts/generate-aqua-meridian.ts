@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { compileBuild } from "../src/lib/compiler.js";
 import { createBedrockMcpack } from "../src/lib/bedrock-structure.js";
 import { preflightConfirmationToken } from "../src/lib/preflight.js";
-import { auditBuild } from "../src/lib/reviewer.js";
+import { auditBuild } from "../src/lib/reviewer-audit.js";
 import type {
   BuildInput,
   BuildRecord,

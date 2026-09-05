@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { compileBuild } from "../src/lib/compiler.js";
-import { auditBuild } from "../src/lib/reviewer.js";
+import { auditBuild } from "../src/lib/reviewer-audit.js";
 import type { BuildingType, BuildInput } from "../src/lib/types.js";
 
 type BenchmarkCase = {

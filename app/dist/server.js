@@ -21,7 +21,7 @@ import { BEDROCK_STABLE_VERSION, createBedrockMcpack } from "./lib/bedrock-struc
 import { exportLitematic, importLitematic } from "./lib/litematic.js";
 import { continuePaletteInterview, deletePalette, listPalettes, loadPalette, renamePalette, savePalette } from "./lib/palette-studio.js";
 import { estimateBuild } from "./lib/preflight.js";
-import { auditBuild } from "./lib/reviewer.js";
+import { auditBuild } from "./lib/reviewer-audit.js";
 import { reviseSelectedRegion } from "./lib/revision.js";
 import { exportSchematic, importSchematic } from "./lib/schematic.js";
 import { discoverWorlds, installWorldEditSchematic } from "./lib/worlds.js";

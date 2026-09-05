@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { compileBuild } from "./compiler.js";
-import { auditBuild } from "./reviewer.js";
+import { auditBuild } from "./reviewer-audit.js";
 import type { BuildRecord, Placement } from "./types.js";
 
 function bedrockDoorFixture() {
