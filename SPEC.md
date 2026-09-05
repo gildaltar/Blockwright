@@ -1,5 +1,9 @@
 # Blockwright — Minecraft Build Architect
 
+## v0.7.0 Bedrock Fidelity Addendum
+
+Version 0.7.0 adds one deliberately bounded Bedrock production workflow: contract-valid waterparks can be exported as throttled, iPhone-importable behavior packs. A Bedrock pack is deliverable only when its exact build contract and certificate are valid; unsupported named features, generic relabeled massing, or invalid registry coverage block export. Mobile packs optimize contiguous stateless placements into `fill` commands, cap work per game tick, preload bounded chunk regions, and embed the build hash and inventory. This addendum does not claim direct LevelDB editing, Marketplace compatibility, or universal free-form attraction generation.
+
 ## v0.6.0 Release Contract
 
 Version 0.6.0 is the first commercially oriented Blockwright release. Its promise is narrower and stronger than “AI Minecraft builder”:

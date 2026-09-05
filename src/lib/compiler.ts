@@ -8,6 +8,18 @@ import { calculateBuildHash, validateBuildContract } from "./contract.js";
 import type { ArchitecturalPlan, BuildInput, BuildRecord, Dimensions, Placement, RolePalette, Vec3 } from "./types.js";
 
 const DEFAULT_ORIGIN: Vec3 = { x: 0, y: 0, z: 0 };
+const WATERPARK_INTRINSIC_BLOCKS = [
+  "minecraft:water",
+  "minecraft:quartz_block",
+  "minecraft:glass",
+  "minecraft:light_blue_concrete",
+  "minecraft:cyan_concrete",
+  "minecraft:blue_concrete",
+  "minecraft:yellow_concrete",
+  "minecraft:orange_concrete",
+  "minecraft:red_concrete",
+  "minecraft:lime_concrete",
+] as const;
 
 function clampDimension(value: number, min: number) {
   return Math.max(min, Math.min(65_535, Math.round(value)));
@@ -16,8 +28,10 @@ function clampDimension(value: number, min: number) {
 export function normalizeInput(input: BuildInput): Required<BuildInput> {
   const style = getStyleProfile(input.style || "nordic");
   const version = input.version.trim() || REGISTRY_META[input.edition].coverageVersion;
+  const buildingType = input.buildingType ?? (style.id === "japanese" ? "temple" : style.id === "medieval" ? "hall" : style.id === "megabase" ? "megabase" : "house");
   const positionalPalette = Object.fromEntries((input.palette ?? []).slice(0, PALETTE_ROLES.length).map((block, index) => [PALETTE_ROLES[index], block]));
   const rolePalette = defaultRolePalette(style.id, input.edition, version, { ...positionalPalette, ...input.rolePalette });
+  const intrinsicBlocks = buildingType === "waterpark" ? WATERPARK_INTRINSIC_BLOCKS : [];
   return {
     name: input.name.trim() || "Untitled Build",
     edition: input.edition,
@@ -28,7 +42,7 @@ export function normalizeInput(input: BuildInput): Required<BuildInput> {
       depth: clampDimension(input.dimensions.depth, 5),
       height: clampDimension(input.dimensions.height, 5),
     },
-    palette: input.palette?.length ? [...input.palette] : [...new Set(Object.values(rolePalette))],
+    palette: [...new Set([...Object.values(rolePalette), ...(input.palette ?? []), ...intrinsicBlocks])],
     rolePalette,
     origin: input.origin ? { ...input.origin } : { ...DEFAULT_ORIGIN },
     // Omitted features mean no feature promise. Inventing attractive defaults here
@@ -36,7 +50,7 @@ export function normalizeInput(input: BuildInput): Required<BuildInput> {
     features: input.features ? [...input.features].sort() : [],
     blockBudget: Math.max(100, Math.round(input.blockBudget ?? 2_000_000)),
     seed: input.seed?.trim() || createHash("sha256").update(JSON.stringify({ name: input.name.trim(), edition: input.edition, version, style: style.id, dimensions: input.dimensions, buildingType: input.buildingType ?? "auto" })).digest("hex").slice(0, 12),
-    buildingType: input.buildingType ?? (style.id === "japanese" ? "temple" : style.id === "medieval" ? "hall" : style.id === "megabase" ? "megabase" : "house"),
+    buildingType,
     confirmationToken: input.confirmationToken ?? "",
   };
 }
@@ -93,9 +107,10 @@ export function createArchitecturalPlan(input: Required<BuildInput>): Architectu
   const style = input.style.toLowerCase();
   const japanese = style === "japanese";
   const modern = style === "modern" || style === "warm-modern" || style === "brutalist";
+  const waterpark = input.buildingType === "waterpark";
   const tower = input.buildingType === "tower" || style === "fantasy";
   const footprint: ArchitecturalPlan["footprint"] = {
-    kind: japanese || input.buildingType === "courtyard" ? "courtyard" : modern ? "interlocking" : tower ? "tower" : "rectangle",
+    kind: waterpark ? "campus" : japanese || input.buildingType === "courtyard" ? "courtyard" : modern ? "interlocking" : tower ? "tower" : "rectangle",
     width, depth, inset: japanese ? Math.max(2, Math.floor(Math.min(width, depth) * (0.22 + random() * 0.08))) : Math.max(1, Math.floor(Math.min(width, depth) * 0.12)),
   };
   const floorHeight = Math.max(4, Math.min(7, 4 + Math.floor(random() * 3)));
@@ -103,7 +118,15 @@ export function createArchitecturalPlan(input: Required<BuildInput>): Architectu
   const asymmetry = Number((0.12 + random() * 0.48).toFixed(3));
   const secondaryWidth = Math.max(3, Math.floor(width * (0.38 + random() * 0.18)));
   const secondaryDepth = Math.max(3, Math.floor(depth * (0.38 + random() * 0.18)));
-  const volumes = footprint.kind === "interlocking"
+  const volumes = footprint.kind === "campus"
+    ? [
+        { id: "arrival", min: { x: Math.floor(width * 0.38), y: 0, z: 0 }, max: { x: Math.ceil(width * 0.62), y: Math.max(5, Math.floor(height * 0.18)), z: Math.max(7, Math.floor(depth * 0.16)) }, purpose: "arrival pavilion" },
+        { id: "slide-tower", min: { x: Math.floor(width * 0.08), y: 0, z: Math.floor(depth * 0.08) }, max: { x: Math.floor(width * 0.28), y: height - 1, z: Math.floor(depth * 0.32) }, purpose: "multi-slide tower" },
+        { id: "wave-pool", min: { x: Math.floor(width * 0.57), y: 0, z: Math.floor(depth * 0.10) }, max: { x: width - 4, y: Math.max(3, Math.floor(height * 0.10)), z: Math.floor(depth * 0.46) }, purpose: "wave pool" },
+        { id: "family-zone", min: { x: 3, y: 0, z: Math.floor(depth * 0.38) }, max: { x: Math.floor(width * 0.55), y: Math.max(5, Math.floor(height * 0.16)), z: depth - 4 }, purpose: "lazy river and family attractions" },
+        { id: "hospitality", min: { x: Math.floor(width * 0.58), y: 0, z: Math.floor(depth * 0.70) }, max: { x: width - 4, y: Math.max(6, Math.floor(height * 0.20)), z: depth - 4 }, purpose: "locker and food court buildings" },
+      ]
+    : footprint.kind === "interlocking"
     ? [
         { id: "primary", min: { x: 0, y: 0, z: 0 }, max: { x: Math.max(3, width - secondaryWidth), y: Math.max(4, height - floorHeight), z: depth - 1 }, purpose: "main living bar" },
         { id: "cross", min: { x: Math.max(1, width - secondaryWidth - Math.floor(random() * 3)), y: 0, z: Math.max(1, depth - secondaryDepth - Math.floor(random() * 3)) }, max: { x: width - 1, y: height - 1, z: depth - 1 }, purpose: "raised cross volume" },
@@ -114,23 +137,23 @@ export function createArchitecturalPlan(input: Required<BuildInput>): Architectu
           { id: "tower", min: { x: Math.max(0, width - Math.max(5, Math.floor(width * 0.38))), y: 0, z: Math.max(0, depth - Math.max(5, Math.floor(depth * 0.38))) }, max: { x: width - 1, y: height - 1, z: depth - 1 }, purpose: "vertical lookout" },
         ]
       : [{ id: "main", min: { x: 0, y: 0, z: 0 }, max: { x: width - 1, y: height - 1, z: depth - 1 }, purpose: japanese ? "courtyard ring" : "main hall" }];
-  const spaces = japanese ? ["genkan", "main hall", "engawa", "courtyard", "service room"] : modern ? ["entry", "living core", "service spine", "terrace"] : tower ? ["great hall", "stair tower", "lookout", "service room"] : ["entry", "main room", "storage", "loft"];
+  const spaces = waterpark ? ["arrival", "wave pool", "lazy river", "slide tower", "splash pad", "locker rooms", "food court", "lifeguard stations"] : japanese ? ["genkan", "main hall", "engawa", "courtyard", "service room"] : modern ? ["entry", "living core", "service spine", "terrace"] : tower ? ["great hall", "stair tower", "lookout", "service room"] : ["entry", "main room", "storage", "loft"];
   const rooms = spaces.map((purpose, index) => ({ id: `room-${index + 1}`, purpose, floor: Math.min(floors - 1, Math.floor(index / 3)) }));
   const links = rooms.slice(1).map((room, index) => ({ from: rooms[index].id, to: room.id }));
-  const roofType: ArchitecturalPlan["roofGrammar"]["type"] = japanese ? "pagoda" : modern ? "flat" : tower ? "stepped" : "gable";
+  const roofType: ArchitecturalPlan["roofGrammar"]["type"] = waterpark ? "flat" : japanese ? "pagoda" : modern ? "flat" : tower ? "stepped" : "gable";
   const planWithoutFingerprint: Omit<ArchitecturalPlan, "fingerprint"> = {
     schemaVersion: 1, seed: input.seed,
     program: { buildingType: input.buildingType, spaces }, footprint,
     massing: { volumes, asymmetry }, roomGraph: { rooms, links },
-    circulation: { primary: japanese ? "engawa loop around courtyard" : modern ? "linear service spine" : tower ? "hall-to-tower hinge" : "central entry to loft stair", vertical: tower ? "spiral tower stair" : floors > 1 ? "compact stair" : "none", exterior: japanese ? ["covered engawa", "garden threshold"] : modern ? ["terrace"] : ["entry porch"] },
+    circulation: { primary: waterpark ? "central promenade with attraction loop" : japanese ? "engawa loop around courtyard" : modern ? "linear service spine" : tower ? "hall-to-tower hinge" : "central entry to loft stair", vertical: waterpark ? "slide-tower stairs and supported chutes" : tower ? "spiral tower stair" : floors > 1 ? "compact stair" : "none", exterior: waterpark ? ["arrival boulevard", "pool decks", "lazy-river bridges"] : japanese ? ["covered engawa", "garden threshold"] : modern ? ["terrace"] : ["entry porch"] },
     floorHeights: Array.from({ length: floors }, () => floorHeight),
     facadeBays: (["north", "south", "east", "west"] as const).map((side, index) => ({ side, count: Math.max(2, Math.floor((index < 2 ? width : depth) / Math.max(3, 3 + Math.floor(random() * 3)))), rhythm: japanese ? "post-screen-post" : modern ? "solid-glass-solid" : "frame-infill" })),
-    structuralFrame: { system: japanese ? "post-and-beam courtyard ring" : modern ? "interlocking shear volumes" : tower ? "masonry hall with corner tower" : "timber frame over masonry base", bayWidth: Math.max(3, Math.min(7, 3 + Math.floor(random() * 5))), supports: japanese ? ["perimeter posts", "courtyard posts"] : ["corners", "facade bays", "roof ridge"] },
+    structuralFrame: { system: waterpark ? "reinforced attraction campus with supported slide tower" : japanese ? "post-and-beam courtyard ring" : modern ? "interlocking shear volumes" : tower ? "masonry hall with corner tower" : "timber frame over masonry base", bayWidth: Math.max(3, Math.min(7, 3 + Math.floor(random() * 5))), supports: waterpark ? ["slide columns", "canopy posts", "pool walls"] : japanese ? ["perimeter posts", "courtyard posts"] : ["corners", "facade bays", "roof ridge"] },
     roofGrammar: { type: roofType, pitch: modern ? 0 : Number((0.45 + random() * 0.45).toFixed(2)), overhang: japanese ? 2 : modern ? 1 : 1, tiers: japanese ? Math.max(1, Math.min(3, Math.floor(height / 8))) : tower ? 2 : 1 },
-    entrances: [{ side: "south", width: japanese ? 3 : Math.max(1, 1 + Math.floor(random() * 2)), emphasis: japanese ? "recessed genkan" : modern ? "shadow reveal" : "framed threshold" }],
+    entrances: [{ side: "south", width: waterpark ? 5 : japanese ? 3 : Math.max(1, 1 + Math.floor(random() * 2)), emphasis: waterpark ? "illuminated resort gate" : japanese ? "recessed genkan" : modern ? "shadow reveal" : "framed threshold" }],
     windows: { pattern: japanese ? "screen bays facing courtyard" : modern ? "continuous bands at living volume" : tower ? "narrow grouped openings" : "paired bays", sill: japanese ? 2 : 3, height: japanese ? 3 : modern ? 3 : 2 },
-    details: japanese ? ["deep eaves", "engawa", "layered roof edges"] : modern ? ["shadow gaps", "cantilever", "roof terrace"] : tower ? ["battlements", "buttresses", "tower cap"] : ["porch", "chimney", "exposed frame"],
-    landscaping: japanese ? ["courtyard garden", "stepping path", "water or gravel focus"] : modern ? ["terrace", "planter bands"] : ["path", "foundation planting"],
+    details: waterpark ? ["layered pools", "color-coded slide chutes", "shade canopies", "lifeguard sightlines"] : japanese ? ["deep eaves", "engawa", "layered roof edges"] : modern ? ["shadow gaps", "cantilever", "roof terrace"] : tower ? ["battlements", "buttresses", "tower cap"] : ["porch", "chimney", "exposed frame"],
+    landscaping: waterpark ? ["palm planters", "pool decks", "waterfront seating"] : japanese ? ["courtyard garden", "stepping path", "water or gravel focus"] : modern ? ["terrace", "planter bands"] : ["path", "foundation planting"],
   };
   const fingerprint = createHash("sha256").update(planFingerprintPayload(planWithoutFingerprint)).digest("hex");
   return { ...planWithoutFingerprint, fingerprint };
@@ -218,6 +241,148 @@ function generateJapanese(plan: ArchitecturalPlan, dimensions: Dimensions, origi
   return acc;
 }
 
+function generateWaterpark(plan: ArchitecturalPlan, dimensions: Dimensions, origin: Vec3, palette: RolePalette) {
+  const { width: w, depth: d, height: h } = dimensions;
+  if (w < 64 || d < 64 || h < 24) {
+    throw new Error("WATERPARK_MINIMUM_DIMENSIONS: a functional waterpark requires at least 64x64x24 blocks.");
+  }
+  const acc = createAccumulator(origin);
+  const furnishingBay = Math.max(3, plan.structuralFrame.bayWidth);
+  const box = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, block: string, phase: string) => {
+    for (let y = y0; y <= y1; y += 1) for (let z = z0; z <= z1; z += 1) for (let x = x0; x <= x1; x += 1) acc.put(x, y, z, block, phase);
+  };
+  const ellipse = (cx: number, cz: number, rx: number, rz: number) => {
+    const cells: Vec3[] = [];
+    for (let z = Math.floor(cz - rz); z <= Math.ceil(cz + rz); z += 1) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x += 1) {
+      if (((x - cx) / rx) ** 2 + ((z - cz) / rz) ** 2 <= 1) cells.push({ x, y: 0, z });
+    }
+    return cells;
+  };
+  const addPavilion = (x0: number, z0: number, x1: number, z1: number, phase: string) => {
+    box(x0, 0, z0, x1, 0, z1, palette.wall, `${phase} interior floor`);
+    for (const x of [x0, x1]) for (const z of [z0, z1]) box(x, 1, z, x, 6, z, palette.frame, `${phase} structural posts`);
+    box(x0, 6, z0, x1, 6, z1, "minecraft:quartz_block", `${phase} canopy roof`);
+    for (let x = x0 + 2; x < x1 - 1; x += furnishingBay) for (let z = z0 + 2; z < z1 - 1; z += furnishingBay) {
+      acc.put(x, 1, z, palette.accents, `${phase} seating table`);
+      acc.put(x - 1, 1, z, palette.trim, `${phase} seating`);
+      acc.put(x + 1, 1, z, palette.trim, `${phase} seating`);
+    }
+  };
+
+  // One-block site slab provides a predictable paste floor while leaving the park open above it.
+  box(0, 0, 0, w - 1, 0, d - 1, palette.foundation, "waterpark site foundation");
+  for (let x = 0; x < w; x += 1) for (const z of [0, d - 1]) acc.put(x, 1, z, palette.trim, "waterpark perimeter coping");
+  for (let z = 1; z < d - 1; z += 1) for (const x of [0, w - 1]) acc.put(x, 1, z, palette.trim, "waterpark perimeter coping");
+
+  // A five-block promenade makes the overall campus readable and keeps a clear route from the arrival gate.
+  const centerX = Math.floor(w / 2); const centerZ = Math.floor(d / 2);
+  box(centerX - 2, 0, 0, centerX + 2, 0, d - 1, palette.accents, "arrival promenade");
+  box(0, 0, centerZ - 2, w - 1, 0, centerZ + 2, palette.accents, "cross promenade");
+
+  // Wave pool: tapered plan, bright basin, full water surface, and a stepped wave wall.
+  const waveX0 = Math.floor(w * 0.58); const waveX1 = w - 5;
+  const waveZ0 = Math.floor(d * 0.10); const waveZ1 = Math.floor(d * 0.43);
+  for (let z = waveZ0; z <= waveZ1; z += 1) {
+    const progress = (z - waveZ0) / Math.max(1, waveZ1 - waveZ0);
+    const inset = Math.floor((1 - progress) * Math.max(2, Math.floor((waveX1 - waveX0) * 0.16)));
+    for (let x = waveX0 + inset; x <= waveX1 - inset; x += 1) {
+      acc.put(x, 0, z, "minecraft:light_blue_concrete", "wave pool basin");
+      acc.put(x, 1, z, "minecraft:water", "wave pool water");
+    }
+  }
+  for (let x = waveX0; x <= waveX1; x += 1) {
+    acc.put(x, 1, waveZ1 + 1, "minecraft:quartz_block", "wave pool coping");
+    if (x % 3 === 0) for (let y = 2; y <= 4; y += 1) acc.put(x, y, waveZ1 + 1, "minecraft:blue_concrete", "wave pool wave wall");
+  }
+
+  // Lazy river: a real elliptical water channel rather than a labeled empty volume.
+  const riverCx = Math.floor(w * 0.28); const riverCz = Math.floor(d * 0.67);
+  const riverRx = Math.max(12, Math.floor(w * 0.22)); const riverRz = Math.max(12, Math.floor(d * 0.24));
+  const innerRx = Math.max(5, riverRx - Math.max(4, Math.floor(Math.min(w, d) * 0.045)));
+  const innerRz = Math.max(5, riverRz - Math.max(4, Math.floor(Math.min(w, d) * 0.045)));
+  const riverCells = new Set<string>();
+  for (const point of ellipse(riverCx, riverCz, riverRx, riverRz)) {
+    const insideInner = ((point.x - riverCx) / innerRx) ** 2 + ((point.z - riverCz) / innerRz) ** 2 < 1;
+    if (!insideInner) riverCells.add(`${point.x},${point.z}`);
+  }
+  for (const key of riverCells) {
+    const [x, z] = key.split(",").map(Number);
+    acc.put(x, 0, z, "minecraft:cyan_concrete", "lazy river basin");
+    const boundary = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => !riverCells.has(`${x + dx},${z + dz}`));
+    acc.put(x, 1, z, boundary ? "minecraft:quartz_block" : "minecraft:water", boundary ? "lazy river coping" : "lazy river water channel");
+  }
+
+  // Slide tower and three independently colored, water-filled descending chutes.
+  const towerX = Math.floor(w * 0.20); const towerZ = Math.floor(d * 0.24); const towerRadius = 4;
+  for (const dx of [-towerRadius, towerRadius]) for (const dz of [-towerRadius, towerRadius]) box(towerX + dx, 1, towerZ + dz, towerX + dx, h - 1, towerZ + dz, palette.frame, "water slide tower supports");
+  for (let y = 5; y < h - 1; y += 6) box(towerX - towerRadius, y, towerZ - towerRadius, towerX + towerRadius, y, towerZ + towerRadius, "minecraft:quartz_block", "water slide tower platforms");
+  const slideColors = ["minecraft:red_concrete", "minecraft:orange_concrete", "minecraft:yellow_concrete"];
+  for (let slide = 0; slide < slideColors.length; slide += 1) {
+    const radius = Math.max(7, Math.floor(Math.min(w, d) * (0.075 + slide * 0.018)));
+    const steps = Math.max(96, h * 3); const turns = 1.65 + slide * 0.35;
+    for (let step = 0; step < steps; step += 1) {
+      const t = step / (steps - 1); const angle = slide * 2.05 + t * Math.PI * 2 * turns;
+      const x = Math.max(2, Math.min(w - 3, Math.round(towerX + Math.cos(angle) * radius)));
+      const z = Math.max(2, Math.min(d - 3, Math.round(towerZ + Math.sin(angle) * radius)));
+      const y = Math.max(3, Math.min(h - 3, Math.round(h - 3 - t * (h - 7))));
+      const sideAngle = angle + Math.PI / 2;
+      const sideX = Math.abs(Math.cos(sideAngle)) >= Math.abs(Math.sin(sideAngle)) ? Math.sign(Math.cos(sideAngle)) : 0;
+      const sideZ = sideX === 0 ? Math.sign(Math.sin(sideAngle)) : 0;
+      acc.put(x, y, z, slideColors[slide], `water slide ${slide + 1} chute`);
+      acc.put(x, y + 1, z, "minecraft:water", `water slide ${slide + 1} water`);
+      acc.put(x + sideX, y + 1, z + sideZ, "minecraft:glass", `water slide ${slide + 1} rail`);
+      acc.put(x - sideX, y + 1, z - sideZ, "minecraft:glass", `water slide ${slide + 1} rail`);
+      if (step % 18 === 0) box(x, 1, z, x, Math.max(1, y - 1), z, palette.frame, `water slide ${slide + 1} supports`);
+    }
+  }
+
+  // Splash pad with a patterned non-slip surface and multiple visible water jets.
+  const splashCx = Math.floor(w * 0.76); const splashCz = Math.floor(d * 0.60); const splashR = Math.max(7, Math.floor(Math.min(w, d) * 0.075));
+  for (const point of ellipse(splashCx, splashCz, splashR, splashR)) {
+    const checker = (point.x + point.z) % 2 === 0;
+    acc.put(point.x, 0, point.z, checker ? "minecraft:lime_concrete" : "minecraft:light_blue_concrete", "splash pad surface");
+  }
+  for (const [dx, dz, jetHeight] of [[0, 0, 5], [4, 0, 3], [-4, 0, 3], [0, 4, 3], [0, -4, 3]] as const) {
+    for (let y = 1; y <= jetHeight; y += 1) acc.put(splashCx + dx, y, splashCz + dz, "minecraft:water", "splash pad water jets");
+  }
+
+  const serviceX0 = Math.floor(w * 0.58); const serviceX1 = w - 5; const serviceZ0 = Math.floor(d * 0.76); const serviceZ1 = d - 5;
+  const serviceMid = Math.floor((serviceX0 + serviceX1) / 2);
+  addPavilion(serviceX0, serviceZ0, serviceMid - 2, serviceZ1, "locker room");
+  addPavilion(serviceMid + 2, serviceZ0, serviceX1, serviceZ1, "food court");
+
+  // Four sightline stations, shade umbrellas, and quadrant lighting make the campus operationally legible.
+  const stations = [[waveX0 - 3, waveZ0], [waveX1, waveZ1 + 3], [riverCx - riverRx, riverCz], [riverCx + riverRx, riverCz]];
+  for (const [x, z] of stations) {
+    box(x, 1, z, x, 3, z, palette.frame, "lifeguard station supports");
+    box(x - 1, 4, z - 1, x + 1, 4, z + 1, "minecraft:yellow_concrete", "lifeguard station platform");
+    acc.put(x, 5, z, "minecraft:red_concrete", "lifeguard station marker");
+  }
+  for (const [x, z, color] of [[Math.floor(w * 0.47), Math.floor(d * 0.27), "minecraft:cyan_concrete"], [Math.floor(w * 0.47), Math.floor(d * 0.72), "minecraft:orange_concrete"], [Math.floor(w * 0.82), Math.floor(d * 0.50), "minecraft:lime_concrete"]] as const) {
+    box(x, 1, z, x, 4, z, palette.frame, "shade canopy posts");
+    box(x - 2, 5, z, x + 2, 5, z, color, "shade canopy");
+    box(x, 5, z - 2, x, 5, z + 2, color, "shade canopy");
+  }
+  for (const [x, z] of [[Math.floor(w * 0.2), Math.floor(d * 0.2)], [Math.floor(w * 0.8), Math.floor(d * 0.2)], [Math.floor(w * 0.2), Math.floor(d * 0.8)], [Math.floor(w * 0.8), Math.floor(d * 0.8)], [centerX, Math.floor(d * 0.2)], [centerX, Math.floor(d * 0.8)]]) {
+    acc.put(x, 0, z, palette.lighting, "distributed waterpark lighting");
+  }
+
+  // Central safe spawn and four boundary gates are applied last so attractions cannot obstruct them.
+  for (let x = centerX - 2; x <= centerX + 2; x += 1) for (let z = centerZ - 2; z <= centerZ + 2; z += 1) {
+    acc.put(x, 0, z, palette.lighting, "central spawn pedestal");
+    for (let y = 1; y <= 3; y += 1) acc.remove(x, y, z);
+  }
+  carveDoor(acc, centerX - 1, 0, "south", palette, 3);
+  carveDoor(acc, centerX - 1, d - 1, "north", palette, 3);
+  for (let dz = -1; dz <= 1; dz += 1) {
+    acc.put(0, 2, centerZ + dz, palette.doors, "west waterpark gate", { half: "lower", facing: "west", hinge: dz % 2 ? "right" : "left", open: false, powered: false });
+    acc.put(0, 3, centerZ + dz, palette.doors, "west waterpark gate", { half: "upper", facing: "west", hinge: dz % 2 ? "right" : "left", open: false, powered: false });
+    acc.put(w - 1, 2, centerZ + dz, palette.doors, "east waterpark gate", { half: "lower", facing: "east", hinge: dz % 2 ? "right" : "left", open: false, powered: false });
+    acc.put(w - 1, 3, centerZ + dz, palette.doors, "east waterpark gate", { half: "upper", facing: "east", hinge: dz % 2 ? "right" : "left", open: false, powered: false });
+  }
+  return acc;
+}
+
 function generateModern(plan: ArchitecturalPlan, dimensions: Dimensions, origin: Vec3, palette: RolePalette) {
   const acc = createAccumulator(origin);
   for (const volume of plan.massing.volumes) shellBox(acc, volume.min, volume.max, palette, volume.id, true);
@@ -240,6 +405,7 @@ function generateTower(plan: ArchitecturalPlan, dimensions: Dimensions, origin: 
 }
 
 function generateFromPlan(plan: ArchitecturalPlan, dimensions: Dimensions, origin: Vec3, palette: RolePalette) {
+  if (plan.program.buildingType === "waterpark") return generateWaterpark(plan, dimensions, origin, palette);
   if (plan.footprint.kind === "courtyard") return generateJapanese(plan, dimensions, origin, palette);
   if (plan.footprint.kind === "interlocking") return generateModern(plan, dimensions, origin, palette);
   if (plan.footprint.kind === "tower") return generateTower(plan, dimensions, origin, palette);
@@ -335,7 +501,7 @@ export function compileBuild(rawInput: BuildInput): BuildRecord {
   const exactJavaRegistry = input.edition === "java" ? registryMetadata(input.version) : undefined;
   const coverageGap = input.edition === "java" && !exactJavaRegistry
     ? `Java ${input.version} is not synchronized locally. Available fallback coverage is ${staticRegistry.coverageVersion}; run check_java_updates and sync_java_version before relying on identifiers added after that coverage.`
-    : input.version !== staticRegistry.coverageVersion
+    : input.edition === "bedrock" && input.version !== staticRegistry.requestedVersion && input.version !== staticRegistry.coverageVersion
       ? `Requested ${input.edition} ${input.version}; packaged coverage is ${staticRegistry.coverageVersion}.`
       : undefined;
   const registry = exactJavaRegistry ?? { ...staticRegistry, ...(coverageGap ? { note: coverageGap } : {}) };

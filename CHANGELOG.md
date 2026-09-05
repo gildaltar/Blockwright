@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 - 2026-09-05
+
+- Added a real waterpark generator with a campus plan, wave pool, lazy river, three supported water slides, splash pad, locker building, food court, lifeguard stations, shade structures, safe spawn, four gates, and distributed lighting.
+- Added executable feature-contract evidence for waterpark attractions so named amenities must exist in canonical geometry and, where applicable, include water placements.
+- Added an iPhone-importable Bedrock `.mcpack` exporter with deterministic manifests, optimized `fill` commands, bounded commands per tick, chunk preloading, pause/restart/cleanup functions, and an embedded contract-bound inventory.
+- Fixed Bedrock `stable` registry validation, which previously compared the stable channel token to the `@minecraft/vanilla-data` package label and rejected valid Bedrock builds.
+- Translated common Java placement states to their Bedrock equivalents for stairs, doors, trapdoors, slabs, lanterns, and pillar blocks.
+- Made the MCP export boundary fail closed: invalid or uncertified builds can still be reviewed and revised, but cannot be downloaded as misleading construction artifacts.
+
 ## 0.6.0 - 2026-09-05
 
 - Added normalized build contracts and deterministic, full-hash certificates. Hard requirements now fail closed when they fail, are unsupported, or cannot be evaluated; semantic auditing covers entrances, clearance, spawn safety, requested spaces, explicit lighting, interiors, support, palette, version, origin, and budget.

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 const paletteRoleNames = ["foundation", "wall", "frame", "roof", "trim", "glazing", "lighting", "doors", "railings", "accents", "landscaping"] as const;
-const buildingTypes = ["house", "temple", "tower", "workshop", "hall", "courtyard", "megabase"] as const;
+const buildingTypes = ["house", "temple", "tower", "workshop", "hall", "courtyard", "megabase", "waterpark"] as const;
 const interviewTopics = ["buildType", "architecturalDirection", "biome", "mood", "interpretation", "constraints", "dominantMaterials", "contrast", "weathering", "landscaping", "avoidBlocks", "resourcePack"] as const;
 const riskLevels = ["green", "amber", "red"] as const;
 const nonNegativeInteger = z.number().int().nonnegative();
@@ -61,7 +61,7 @@ export const architecturalPlanOutputSchema = z.object({
     spaces: z.array(z.string()).describe("Named rooms or functional spaces required by the plan."),
   }).describe("Functional building program used to organize the plan."),
   footprint: z.object({
-    kind: z.enum(["rectangle", "courtyard", "interlocking", "tower"]).describe("Primary footprint topology."),
+    kind: z.enum(["rectangle", "courtyard", "interlocking", "tower", "campus"]).describe("Primary footprint topology."),
     width: z.number().int().positive().describe("Plan width in blocks."),
     depth: z.number().int().positive().describe("Plan depth in blocks."),
     inset: nonNegativeInteger.describe("Inset distance used by courtyard or stepped footprints."),

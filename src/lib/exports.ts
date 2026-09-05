@@ -3,13 +3,82 @@ import { createHash } from "node:crypto";
 import { exportSchematic } from "./schematic.js";
 import type { BuildRecord, Placement } from "./types.js";
 
-export type ExportFormat = "json" | "csv" | "java_mcfunction" | "bedrock_mcfunction" | "blueprint" | "schem" | "bundle";
+export type ExportFormat = "json" | "csv" | "java_mcfunction" | "bedrock_mcfunction" | "bedrock_mcpack" | "blueprint" | "schem" | "litematic" | "bundle";
 
-function serializeState(placement: Placement, edition: "java" | "bedrock") {
+function serializeJavaState(placement: Placement) {
   const entries = Object.entries(placement.state ?? {});
   if (!entries.length) return "";
-  if (edition === "java") return `[${entries.map(([key, value]) => `${key}=${String(value)}`).join(",")}]`;
+  return `[${entries.map(([key, value]) => `${key}=${String(value)}`).join(",")}]`;
+}
+
+function bedrockStateEntries(placement: Placement) {
+  const state = placement.state ?? {};
+  const entries: Array<[string, string | number | boolean]> = [];
+  const doorDirection: Record<string, number> = { south: 0, west: 1, north: 2, east: 3 };
+  const stairDirection: Record<string, number> = { east: 0, west: 1, south: 2, north: 3 };
+  if (placement.block.endsWith("_stairs")) {
+    entries.push(["upside_down_bit", state.half === "top"]);
+    entries.push(["weirdo_direction", stairDirection[String(state.facing ?? "north")] ?? 3]);
+  } else if (placement.block.endsWith("_door") && !placement.block.endsWith("_trapdoor")) {
+    entries.push(["direction", doorDirection[String(state.facing ?? "north")] ?? 2]);
+    entries.push(["door_hinge_bit", state.hinge === "right"]);
+    entries.push(["open_bit", Boolean(state.open)]);
+    entries.push(["upper_block_bit", state.half === "upper"]);
+  } else if (placement.block.endsWith("_trapdoor")) {
+    entries.push(["direction", doorDirection[String(state.facing ?? "north")] ?? 2]);
+    entries.push(["open_bit", Boolean(state.open)]);
+    entries.push(["upside_down_bit", state.half === "top"]);
+  } else if (placement.block.endsWith("_slab")) {
+    entries.push(["minecraft:vertical_half", state.type === "top" ? "top" : "bottom"]);
+  } else if (/(^|:)lantern$|soul_lantern$/.test(placement.block)) {
+    entries.push(["hanging_bit", Boolean(state.hanging)]);
+  } else if (typeof state.axis === "string") {
+    entries.push(["pillar_axis", state.axis]);
+  }
+  return entries;
+}
+
+function serializeBedrockState(placement: Placement) {
+  const entries = bedrockStateEntries(placement);
+  if (!entries.length) return "";
   return ` [${entries.map(([key, value]) => `\"${key}\"=${typeof value === "string" ? `\"${value}\"` : value}`).join(",")}]`;
+}
+
+export function bedrockPlacementCommand(placement: Placement) {
+  return `setblock ${placement.x} ${placement.y} ${placement.z} ${placement.block}${serializeBedrockState(placement)} replace`;
+}
+
+export function optimizedBedrockCommands(build: BuildRecord) {
+  const byRow = new Map<string, Placement[]>();
+  for (const placement of build.placements) {
+    const stateKey = serializeBedrockState(placement);
+    const key = `${placement.y}|${placement.z}|${placement.block}|${stateKey}`;
+    const row = byRow.get(key) ?? [];
+    row.push(placement);
+    byRow.set(key, row);
+  }
+  const commands: string[] = [];
+  for (const row of [...byRow.values()].sort((a, b) => a[0].y - b[0].y || a[0].z - b[0].z || a[0].block.localeCompare(b[0].block))) {
+    row.sort((a, b) => a.x - b.x);
+    let start = row[0]; let previous = row[0];
+    const flush = () => {
+      const length = previous.x - start.x + 1;
+      const stateText = serializeBedrockState(start);
+      if (length >= 3 && !stateText) for (let x = start.x; x <= previous.x; x += 64) {
+        const endX = Math.min(previous.x, x + 63);
+        if (endX - x + 1 >= 3) commands.push(`fill ${x} ${start.y} ${start.z} ${endX} ${previous.y} ${previous.z} ${start.block} replace`);
+        else for (let exactX = x; exactX <= endX; exactX += 1) commands.push(bedrockPlacementCommand({ ...start, x: exactX }));
+      }
+      else for (let x = start.x; x <= previous.x; x += 1) commands.push(bedrockPlacementCommand({ ...start, x }));
+    };
+    for (let index = 1; index < row.length; index += 1) {
+      const placement = row[index];
+      if (placement.x === previous.x + 1) previous = placement;
+      else { flush(); start = placement; previous = placement; }
+    }
+    flush();
+  }
+  return commands;
 }
 
 export function toJson(build: BuildRecord) {
@@ -30,7 +99,9 @@ export function toCsv(build: BuildRecord) {
 }
 
 export function toMcfunction(build: BuildRecord, edition: "java" | "bedrock") {
-  return build.placements.map((p) => `setblock ${p.x} ${p.y} ${p.z} ${p.block}${serializeState(p, edition)} replace`).join("\n");
+  return build.placements.map((p) => edition === "java"
+    ? `setblock ${p.x} ${p.y} ${p.z} ${p.block}${serializeJavaState(p)} replace`
+    : bedrockPlacementCommand(p)).join("\n");
 }
 
 export function chunkMcfunction(build: BuildRecord, edition: "java" | "bedrock", chunkSize = 8000) {
