@@ -12,7 +12,7 @@ export type Placement = Vec3 & {
   blockEntity?: { id: string; data?: Record<string, unknown> };
 };
 
-export type BuildingType = "house" | "temple" | "tower" | "workshop" | "hall" | "courtyard" | "megabase";
+export type BuildingType = "house" | "temple" | "tower" | "workshop" | "hall" | "courtyard" | "megabase" | "waterpark";
 
 export type BuildInput = {
   name: string;
@@ -115,7 +115,7 @@ export type ArchitecturalPlan = {
   schemaVersion: 1;
   seed: string;
   program: { buildingType: BuildingType; spaces: string[] };
-  footprint: { kind: "rectangle" | "courtyard" | "interlocking" | "tower"; width: number; depth: number; inset: number };
+  footprint: { kind: "rectangle" | "courtyard" | "interlocking" | "tower" | "campus"; width: number; depth: number; inset: number };
   massing: { volumes: { id: string; min: Vec3; max: Vec3; purpose: string }[]; asymmetry: number };
   roomGraph: { rooms: { id: string; purpose: string; floor: number }[]; links: { from: string; to: string }[] };
   circulation: { primary: string; vertical: string; exterior: string[] };

@@ -13,7 +13,7 @@ type BenchmarkCase = {
 };
 
 const styles = ["nordic", "japanese", "modern", "medieval", "fantasy"];
-const buildingTypes: BuildingType[] = ["house", "temple", "tower", "workshop", "hall", "courtyard", "megabase"];
+const buildingTypes: BuildingType[] = ["house", "temple", "tower", "workshop", "hall", "courtyard", "megabase", "waterpark"];
 
 function baseBrief(index: number, name: string): BuildInput {
   return {

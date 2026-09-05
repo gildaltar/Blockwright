@@ -9,6 +9,7 @@ import { REGISTRY_META } from "./data/registry-meta.js";
 import { STYLE_PROFILES, getStyleProfile } from "./data/styles.js";
 import { compileBuild, generateBuildCandidates, summarizeBuild } from "./lib/compiler.js";
 import { createBundle, toBlueprint, toCsv, toJson, toMcfunction, type ExportFormat } from "./lib/exports.js";
+import { createBedrockMcpack } from "./lib/bedrock-pack.js";
 import { listJavaRegistries, readJavaRegistry, registryMetadata } from "./lib/java-registry.js";
 import { checkJavaUpdates, syncJavaVersion } from "./lib/java-version-sync.js";
 import {
@@ -53,7 +54,7 @@ import { mcpRequestTargetDisposition, runBlockwrightRuntime } from "./lib/runtim
 import type { ArchitecturalPlan, BuildInput, BuildRecord, Placement, WorldRegion } from "./lib/types.js";
 
 const APP_NAME = "blockwright";
-const APP_VERSION = "0.6.0";
+const APP_VERSION = "0.7.0";
 const startedAt = Date.now();
 type JsonResponse = {
   setHeader(name: string, value: string): void;
@@ -102,7 +103,7 @@ const buildInputSchema = {
   features: z.array(z.string().min(1).max(256)).max(12).optional().describe("Requested rooms, amenities, terrain elements, or construction features."),
   blockBudget: z.number().int().min(100).max(2000000).optional().describe("Maximum occupied-block count allowed for compilation."),
   seed: z.string().min(1).max(120).optional().describe("Visible deterministic seed; reuse it to reproduce the same normalized plan."),
-  buildingType: z.enum(["house", "temple", "tower", "workshop", "hall", "courtyard", "megabase"]).optional().describe("High-level generator family for the architectural plan."),
+  buildingType: z.enum(["house", "temple", "tower", "workshop", "hall", "courtyard", "megabase", "waterpark"]).optional().describe("High-level generator family for the architectural plan."),
   confirmationToken: z.string().max(256).optional().describe("Exact token returned by a red-risk preflight; never invent or paraphrase it."),
 };
 
@@ -1337,16 +1338,20 @@ const server = new McpServer(
     {
       ...toolPresentation("Export Build", "Preparing build export…", "Build export ready"),
       name: "export_build",
-      description: "Export a canonical build as JSON, CSV, Java commands, Bedrock commands, Sponge v3 .schem, Litematica v7 .litematic, a layer blueprint, or a checksummed ZIP bundle. Litematica interoperability remains explicitly unverified until an external client round trip is recorded.",
+      description: "Use this when the user wants to download a contract-valid canonical build as JSON, CSV, Java commands, Bedrock commands, an iPhone-importable Bedrock .mcpack, Sponge v3 .schem, Litematica v7 .litematic, a layer blueprint, or a checksummed ZIP bundle. Invalid or uncertified builds fail closed instead of producing misleading files.",
       inputSchema: {
         build: buildReferenceSchema,
-        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "blueprint", "schem", "litematic", "bundle"]).describe("Export format to generate from the immutable build record."),
+        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "bedrock_mcpack", "blueprint", "schem", "litematic", "bundle"]).describe("Export format to generate from the immutable build record."),
       },
       outputSchema: {
         buildId: z.string().describe("Stable id of the exported build."),
-        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "blueprint", "schem", "litematic", "bundle"]).describe("Generated export format."),
+        format: z.enum(["json", "csv", "java_mcfunction", "bedrock_mcfunction", "bedrock_mcpack", "blueprint", "schem", "litematic", "bundle"]).describe("Generated export format."),
         filename: z.string().describe("Safe suggested download filename."),
         bytes: z.number().int().describe("Exact byte length of the generated export."),
+        placements: z.number().int().optional().describe("Canonical placement count represented by a Bedrock mobile pack."),
+        commands: z.number().int().optional().describe("Optimized command count used by a Bedrock mobile pack."),
+        commandsPerTick: z.number().int().optional().describe("Maximum scheduled commands per game tick in a Bedrock mobile pack."),
+        estimatedMaximumBlockChangesPerTick: z.number().int().optional().describe("Conservative upper bound on scheduled block changes per game tick in a Bedrock mobile pack."),
         dataVersion: z.number().int().optional().describe("Java DataVersion embedded in a schematic export."),
         schematicVersion: z.number().int().optional().describe("Sponge Schematic format version, when applicable."),
         litematicVersion: z.number().int().optional().describe("Litematica format version, when applicable."),
@@ -1357,6 +1362,9 @@ const server = new McpServer(
     },
     async ({ build: value, format }) => {
       const build = asBuild(value);
+      if (!build.validation.valid || build.contract.status !== "valid" || build.certificate.status !== "valid") {
+        throw new Error("BUILD_NOT_DELIVERABLE: export requires a valid hash-bound build contract and certificate. Review validation issues and revise the build first.");
+      }
       const releaseArtifact = beginHostedArtifactWork();
       try {
         const safeName = safeExportName(build.input.name);
@@ -1364,6 +1372,24 @@ const server = new McpServer(
           const bytes = await createBundle(build);
           assertHostedArtifactOutputSize(bytes.byteLength);
           return { structuredContent: { buildId: build.id, format, filename: `${safeName}.zip`, bytes: bytes.byteLength }, content: [{ type: "text", text: `Prepared checksummed ZIP bundle for ${build.input.name}.` }], _meta: { mimeType: "application/zip", base64: Buffer.from(bytes).toString("base64") } };
+        }
+        if (format === "bedrock_mcpack") {
+          const pack = await createBedrockMcpack(build);
+          assertHostedArtifactOutputSize(pack.bytes.byteLength);
+          return {
+            structuredContent: {
+              buildId: build.id,
+              format,
+              filename: `${safeName}.mcpack`,
+              bytes: pack.bytes.byteLength,
+              placements: pack.inventory.placementCount,
+              commands: pack.inventory.commandCount,
+              commandsPerTick: pack.inventory.commandsPerTick,
+              estimatedMaximumBlockChangesPerTick: pack.inventory.estimatedMaximumBlockChangesPerTick,
+            },
+            content: [{ type: "text", text: `Prepared a contract-verified, mobile-throttled Bedrock .mcpack for ${build.input.name}.` }],
+            _meta: { mimeType: "application/zip", base64: Buffer.from(pack.bytes).toString("base64"), inventory: pack.inventory },
+          };
         }
         if (format === "schem") {
           const schematic = exportSchematic(build);
@@ -1388,14 +1414,14 @@ const server = new McpServer(
             _meta: { mimeType: "application/octet-stream", base64: Buffer.from(litematic.bytes).toString("base64"), compatibility: litematic.compatibility },
           };
         }
-        const exports: Record<Exclude<ExportFormat, "bundle" | "schem">, { extension: string; mimeType: string; text: string }> = {
+        const exports: Record<Exclude<ExportFormat, "bundle" | "schem" | "litematic" | "bedrock_mcpack">, { extension: string; mimeType: string; text: string }> = {
           json: { extension: "json", mimeType: "application/json", text: toJson(build) },
           csv: { extension: "csv", mimeType: "text/csv", text: toCsv(build) },
           java_mcfunction: { extension: "java.mcfunction", mimeType: "text/plain", text: toMcfunction(build, "java") },
           bedrock_mcfunction: { extension: "bedrock.mcfunction", mimeType: "text/plain", text: toMcfunction(build, "bedrock") },
           blueprint: { extension: "blueprint.txt", mimeType: "text/plain", text: toBlueprint(build) },
         };
-        const file = exports[format as Exclude<ExportFormat, "bundle" | "schem">];
+        const file = exports[format as Exclude<ExportFormat, "bundle" | "schem" | "litematic" | "bedrock_mcpack">];
         const byteLength = Buffer.byteLength(file.text);
         assertHostedArtifactOutputSize(byteLength);
         return { structuredContent: { buildId: build.id, format, filename: `${safeName}.${file.extension}`, bytes: byteLength }, content: [{ type: "text", text: `Prepared ${format} export for ${build.input.name}.` }], _meta: { mimeType: file.mimeType, text: file.text } };

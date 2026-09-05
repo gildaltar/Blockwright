@@ -46,7 +46,7 @@ export function estimateBuild(input: BuildInput, overrides: Partial<RiskThreshol
   if (!Number.isSafeInteger(totalVolume)) throw new Error("Requested dimensions exceed safe numeric limits.");
   const perimeter = Math.max(0, 2 * width + 2 * depth - 4);
   const occupiedShell = width * depth * 2 + perimeter * Math.max(3, Math.floor(height * 0.55)) + width * depth * 1.25;
-  const complexity = input.buildingType === "megabase" ? 1.35 : input.style.toLowerCase().includes("organic") ? 1.22 : 1;
+  const complexity = input.buildingType === "megabase" ? 1.35 : input.buildingType === "waterpark" ? 1.18 : input.style.toLowerCase().includes("organic") ? 1.22 : 1;
   const estimatedOccupiedBlocks = Math.max(1, Math.min(totalVolume, Math.ceil(occupiedShell * complexity)));
   const chunkColumns = Math.ceil(width / 16) * Math.ceil(depth / 16);
   const estimatedUniqueMaterials = Math.max(6, Math.min(16, input.rolePalette ? Object.keys(input.rolePalette).length : input.palette?.length ?? 11));

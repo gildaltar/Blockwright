@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import JSZip from "jszip";
 import { compileBuild } from "./compiler.js";
-import { chunkMcfunction, createBundle, toCsv, toMcfunction } from "./exports.js";
+import { createBedrockMcpack } from "./bedrock-pack.js";
+import { chunkMcfunction, createBundle, optimizedBedrockCommands, toCsv, toMcfunction } from "./exports.js";
 
 const input = {
   name: "Nordic Hearth Lodge",
@@ -50,6 +52,38 @@ describe("compileBuild", () => {
     expect(build.validation.valid).toBe(false);
     expect(build.validation.issues.some((issue) => issue.code === "BLOCK_BUDGET_EXCEEDED")).toBe(true);
   });
+
+  it("treats the Bedrock stable registry token as exact synchronized coverage", () => {
+    const build = compileBuild({ ...input, edition: "bedrock", version: "stable" });
+    expect(build.registry.requestedVersion).toBe("stable");
+    expect(build.validation.issues.some((issue) => issue.code === "REGISTRY_COVERAGE_GAP")).toBe(false);
+    expect(build.contract.hardResults.find(({ evaluator }) => evaluator === "exact-version")?.status).toBe("pass");
+  });
+
+  it("constructs and certifies requested waterpark attractions instead of relabeling generic massing", () => {
+    const build = compileBuild({
+      name: "Aqua Meridian Regression",
+      edition: "bedrock",
+      version: "stable",
+      style: "modern",
+      buildingType: "waterpark",
+      dimensions: { width: 96, depth: 96, height: 36 },
+      origin: { x: 0, y: 64, z: 0 },
+      blockBudget: 500_000,
+      seed: "aqua-meridian-regression",
+      features: ["wave pool", "lazy river", "three water slides", "splash pad", "locker rooms", "food court", "lifeguard stations", "functional interiors", "distributed lighting"],
+    });
+    expect(build.validation.valid).toBe(true);
+    expect(build.contract.status).toBe("valid");
+    expect(build.plan.footprint.kind).toBe("campus");
+    expect(build.materialCounts["minecraft:water"]).toBeGreaterThan(500);
+    expect(Object.keys(build.materialCounts).length).toBeGreaterThan(10);
+    for (const token of ["wave pool", "lazy river", "water slide", "splash pad", "locker room", "food court", "lifeguard station"]) {
+      expect(build.placements.some(({ phase }) => phase.includes(token)), token).toBe(true);
+    }
+    expect(build.contract.hardResults.filter(({ clauseId }) => clauseId.startsWith("feature-")).every(({ status }) => status === "pass")).toBe(true);
+    expect(build.contract.hardResults.find(({ requirement }) => requirement === "constructed water slide chute")?.actual).toContain("3 distinct features");
+  });
 });
 
 describe("exports", () => {
@@ -68,6 +102,8 @@ describe("exports", () => {
     const build = compileBuild(input);
     expect(toMcfunction(build, "java")).toContain("setblock -8 64 20 minecraft:stone_bricks replace");
     expect(toMcfunction(build, "bedrock")).toContain("setblock -8 64 20 minecraft:stone_bricks replace");
+    expect(toMcfunction(build, "bedrock")).not.toContain('"facing"=');
+    expect(toMcfunction(build, "bedrock")).toContain('"direction"=');
   });
 
   it("chunks large command output without dropping commands", () => {
@@ -80,5 +116,49 @@ describe("exports", () => {
     const build = compileBuild(input);
     const bytes = await createBundle(build);
     expect(bytes.byteLength).toBeGreaterThan(1000);
+  });
+
+  it("creates an importable, throttled Bedrock mcpack with optimized commands", async () => {
+    const build = compileBuild({
+      name: "Aqua Meridian Mobile",
+      edition: "bedrock",
+      version: "stable",
+      style: "modern",
+      buildingType: "waterpark",
+      dimensions: { width: 96, depth: 96, height: 36 },
+      origin: { x: 0, y: 64, z: 0 },
+      blockBudget: 500_000,
+      seed: "aqua-meridian-mobile",
+      features: ["wave pool", "lazy river", "three water slides", "splash pad", "locker rooms", "food court", "lifeguard stations"],
+    });
+    const result = await createBedrockMcpack(build, 64);
+    const zip = await JSZip.loadAsync(result.bytes);
+    const manifest = JSON.parse(await zip.file("manifest.json")!.async("string"));
+    const inventory = JSON.parse(await zip.file("blockwright-inventory.json")!.async("string"));
+    const partNames = Object.keys(zip.files).filter((name) => /\/part_\d+\.mcfunction$/.test(name));
+    expect(manifest.format_version).toBe(2);
+    expect(manifest.modules[0].type).toBe("data");
+    expect(inventory.contractStatus).toBe("valid");
+    expect(inventory.commandCount).toBe(optimizedBedrockCommands(build).length);
+    expect(inventory.commandCount).toBeLessThan(build.placements.length * 0.5);
+    expect(partNames).toHaveLength(inventory.parts);
+    for (const name of partNames) expect((await zip.file(name)!.async("string")).split("\n").length).toBeLessThanOrEqual(66);
+    expect(zip.file(`functions/${result.namespace}/load_site.mcfunction`)).not.toBeNull();
+    expect(zip.file(`functions/${result.namespace}/cleanup.mcfunction`)).not.toBeNull();
+  });
+
+  it("refuses to package a mislabeled unsupported waterpark shell", async () => {
+    const invalid = compileBuild({
+      name: "Not Actually A Waterpark",
+      edition: "bedrock",
+      version: "stable",
+      style: "modern",
+      buildingType: "megabase",
+      dimensions: { width: 80, depth: 80, height: 32 },
+      blockBudget: 500_000,
+      features: ["wave pool"],
+    });
+    expect(invalid.contract.status).toBe("invalid");
+    await expect(createBedrockMcpack(invalid)).rejects.toThrow(/BUILD_NOT_DELIVERABLE/);
   });
 });

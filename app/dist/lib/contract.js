@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-export const CONTRACT_EVALUATOR_VERSION = "blockwright-contract/0.6.0";
+export const CONTRACT_EVALUATOR_VERSION = "blockwright-contract/0.7.0";
 const cardinalSides = ["north", "south", "east", "west"];
 const coordinateKey = ({ x, y, z }) => `${x},${y},${z}`;
 const boundedCoordinates = (coordinates) => coordinates.slice(0, 250).map(({ x, y, z }) => ({ x, y, z }));
@@ -37,7 +37,8 @@ function normalizeText(value) {
     return value.normalize("NFKC").trim().toLowerCase().replace(/[–—]/g, "-").replace(/\s+/g, " ");
 }
 const understoodWords = new Set([
-    "a", "an", "the", "with", "and", "on", "at", "of", "to", "for", "from", "in", "each", "every", "all", "four",
+    "a", "an", "the", "with", "and", "on", "at", "of", "to", "for", "from", "in", "each", "every", "all",
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
     "cardinal", "side", "sides", "north", "northern", "south", "southern", "east", "eastern", "west", "western",
     "way", "compass", "direction", "directions", "exactly",
     "entrance", "entrances", "exit", "exits", "door", "doors", "doorway", "doorways", "minimum", "least", "block", "blocks",
@@ -46,6 +47,9 @@ const understoodWords = new Set([
     "lighting", "illuminated", "well", "throughout", "interior", "interiors", "functional", "furnished", "usable", "room", "rooms",
     "accessible", "access", "support", "supported", "contact", "structural", "roof", "roofs", "covered", "porch", "hearth",
     "fireplace", "storage", "loft", "sea", "lantern", "lanterns", "glowstone", "torch", "torches", "minecraft", "x",
+    "water", "waters", "wave", "pool", "pools", "lazy", "river", "rivers", "slide", "slides", "splash", "pad", "pads",
+    "locker", "lockers", "food", "court", "courts", "concession", "concessions", "lifeguard", "lifeguards", "station", "stations",
+    "distributed", "multi", "chute", "chutes", "tower", "towers", "park", "waterpark",
 ]);
 function unknownWords(value) {
     return normalizeText(value)
@@ -71,6 +75,13 @@ function requestedWidth(text, subject) {
     const after = text.match(new RegExp(`${noun}\\s*(?:(?:with|of|at\\s+least|minimum)\\s*)?(\\d+)[-\\s]*(?:blocks?[-\\s]*)?wide`));
     return Number(before?.[1] ?? after?.[1] ?? 1);
 }
+function requestedCount(text) {
+    const words = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+    const match = text.match(/\b(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\b/);
+    if (!match)
+        return undefined;
+    return /^\d+$/.test(match[1]) ? Number(match[1]) : words[match[1]];
+}
 function parseFeature(candidate, source, sourceIndex) {
     const input = typeof candidate === "string" ? candidate : candidate.requirement;
     const parsed = featureSeverity(input, typeof candidate === "string" ? undefined : candidate.severity);
@@ -89,6 +100,20 @@ function parseFeature(candidate, source, sourceIndex) {
         return [clause(prefix, "hard", text, source, input, undefined, { unrecognized: [...new Set(unrecognized)].sort() })];
     }
     const clauses = [];
+    const constructedFeatures = [
+        { pattern: /\bwave pools?\b/, token: "wave pool", requirement: "constructed, water-filled wave pool", minimum: 64, requiredBlock: "minecraft:water" },
+        { pattern: /\blazy rivers?\b/, token: "lazy river", requirement: "constructed, water-filled lazy river channel", minimum: 64, requiredBlock: "minecraft:water" },
+        { pattern: /\bwater slides?\b|\bslide chutes?\b/, token: "water slide", requirement: "constructed water slide chute", minimum: 24, requiredBlock: "minecraft:water" },
+        { pattern: /\bsplash pads?\b/, token: "splash pad", requirement: "constructed splash pad with water features", minimum: 16, requiredBlock: "minecraft:water" },
+        { pattern: /\blocker rooms?\b/, token: "locker room", requirement: "constructed locker-room interior", minimum: 16 },
+        { pattern: /\bfood courts?\b|\bconcessions?\b/, token: "food court", requirement: "constructed food-court seating and shelter", minimum: 16 },
+        { pattern: /\blifeguard stations?\b/, token: "lifeguard station", requirement: "constructed lifeguard stations", minimum: 8 },
+    ];
+    for (const feature of constructedFeatures)
+        if (feature.pattern.test(text)) {
+            const featureCount = feature.token === "water slide" ? requestedCount(text) : undefined;
+            clauses.push(clause(`${prefix}-${feature.token.replaceAll(" ", "-")}`, "hard", feature.requirement, source, input, "constructed-feature", { phaseToken: feature.token, minimumPlacements: feature.minimum, ...(feature.requiredBlock ? { requiredBlock: feature.requiredBlock } : {}), ...(featureCount ? { featureCount } : {}) }));
+        }
     const entranceWords = /\b(entrances?|exits?|doors?|doorways?)\b/;
     if (entranceWords.test(text)) {
         const allFour = /\b(?:four|4)\b|\ball\s+(?:(?:four|4)\s+)?(?:cardinal\s+)?sides?\b|\bfour\s+(?:compass\s+)?directions\b/.test(text)
@@ -113,7 +138,7 @@ function parseFeature(candidate, source, sourceIndex) {
     if (/\b(lit|lights?|lighting|illuminated|lanterns?|torches?)\b/.test(text)) {
         const explicitCount = text.match(/(\d+)\s+(?:interior\s+)?(?:lights?|lanterns?|torches?)\b/);
         const spawnScoped = /\bspawn\b|\bpedestal\b/.test(text);
-        clauses.push(clause(`${prefix}-lighting`, "hard", spawnScoped ? "lighting at the central spawn" : "distributed interior lighting", source, input, "lighting", { minimumCount: Number(explicitCount?.[1] ?? 1), scope: spawnScoped ? "spawn" : "interior", distributed: /\b(well|throughout)\b/.test(text) }));
+        clauses.push(clause(`${prefix}-lighting`, "hard", spawnScoped ? "lighting at the central spawn" : "distributed interior lighting", source, input, "lighting", { minimumCount: Number(explicitCount?.[1] ?? 1), scope: spawnScoped ? "spawn" : "interior", distributed: /\b(distributed|well|throughout)\b/.test(text) }));
     }
     if (/\bcovered porch\b/.test(text))
         clauses.push(clause(`${prefix}-covered-porch`, "hard", "covered porch", source, input, "covered-porch"));
@@ -294,7 +319,10 @@ export function auditBuildSemantics(build) {
             functionalCoordinates.push({ x: placement.x, y: placement.y, z: placement.z });
     }
     const unsupported = supportFailures(build, byCoordinate);
-    const palette = new Set(Object.values(build.input.rolePalette).filter((value) => typeof value === "string"));
+    const palette = new Set([
+        ...Object.values(build.input.rolePalette).filter((value) => typeof value === "string"),
+        ...build.input.palette,
+    ]);
     let illegalPaletteTotal = 0;
     const illegalPaletteCoordinates = [];
     for (const placement of build.placements) {
@@ -309,9 +337,11 @@ export function auditBuildSemantics(build) {
     const allInteger = build.placements.every(({ x, y, z }) => [x, y, z].every(Number.isSafeInteger));
     const allInside = build.placements.every((point) => isInsideEnvelope(point, envelope));
     const originMatches = build.bounds.min.x === envelope.min.x && build.bounds.min.y === envelope.min.y && build.bounds.min.z === envelope.min.z;
+    const requestedVersionMatches = build.input.edition === "java"
+        ? build.registry.requestedVersion === build.input.version && build.registry.coverageVersion === build.input.version
+        : build.input.version === build.registry.requestedVersion || build.input.version === build.registry.coverageVersion;
     const exactVersion = build.registry.edition === build.input.edition
-        && build.registry.requestedVersion === build.input.version
-        && (build.input.edition !== "java" || build.registry.coverageVersion === build.input.version)
+        && requestedVersionMatches
         && !build.registry.note;
     const checks = [
         {
@@ -529,6 +559,21 @@ function evaluateHardClause(build, clause, audit) {
         case "corridor-clearance": return corridorResult(build, clause);
         case "spawn-pedestal": return pedestalResult(build, clause);
         case "lighting": return lightingResult(build, clause);
+        case "constructed-feature": {
+            const phaseToken = String(clause.parameters.phaseToken ?? "").toLowerCase();
+            const minimum = Math.max(1, Number(clause.parameters.minimumPlacements ?? 1));
+            const requiredBlock = typeof clause.parameters.requiredBlock === "string" ? clause.parameters.requiredBlock : undefined;
+            const featureCount = Math.max(0, Number(clause.parameters.featureCount ?? 0));
+            const phaseMatches = build.placements.filter((placement) => placement.phase.toLowerCase().includes(phaseToken));
+            const materialMatches = requiredBlock ? phaseMatches.filter((placement) => placement.block === requiredBlock) : phaseMatches;
+            const representedFeatures = featureCount
+                ? new Set(phaseMatches.flatMap(({ phase }) => phase.toLowerCase().match(new RegExp(`${phaseToken}\\s+(\\d+)`))?.[1] ?? [])).size
+                : 0;
+            const pass = phaseMatches.length >= minimum
+                && (!requiredBlock || materialMatches.length >= Math.max(1, Math.floor(minimum / 4)))
+                && (!featureCount || representedFeatures >= featureCount);
+            return hardResult(clause, pass ? "pass" : "fail", pass ? "Canonical placements and required materials prove this requested feature." : "The named feature is not backed by enough canonical geometry and required material evidence.", `>=${minimum} phase placements${requiredBlock ? ` including ${requiredBlock}` : ""}${featureCount ? ` across ${featureCount} distinct features` : ""}`, `${phaseMatches.length} phase placements${requiredBlock ? `; ${materialMatches.length} ${requiredBlock}` : ""}${featureCount ? `; ${representedFeatures} distinct features` : ""}`, phaseMatches);
+        }
         case "covered-porch": {
             const porch = build.placements.filter((placement) => /porch/i.test(placement.phase));
             const byColumn = new Set(build.placements.filter((placement) => /roof|cover|eave/i.test(placement.phase)).map(({ x, z }) => `${x},${z}`));
