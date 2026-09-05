@@ -1,7 +1,7 @@
 import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
 import "../index.css";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Box as DreiBox, Edges, Grid, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import { AlertTriangle, Box as BoxIcon, BoxSelect, Check, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Circle, Clipboard, Crosshair, Download, Edit3, Eye, FileInput, Focus, HelpCircle, Layers3, LocateFixed, Maximize2, MousePointer2, Orbit, RotateCcw, Ruler, Search, Trash2, Undo2, Upload, X, } from "lucide-react";
@@ -11,7 +11,7 @@ import {} from "../lib/build-view-paging.js";
 import { loadResourcePack, placementTextureKey } from "../lib/resource-pack.js";
 import { countPlacementsWithin, getReviewStateBuildStatus, getReviewBoundsMetrics, getReviewMeasurement, isRoofPlacement, MAX_REVIEW_ANNOTATIONS, MAX_REVIEW_IMPORT_BYTES, MAX_REVIEW_NOTE_LENGTH, MIN_REVIEW_TEXT_SEARCH_LENGTH, parseReviewCoordinate, prependReviewAnnotation, REVIEW_CATEGORIES, searchReviewPlacements, validateReviewDocument, } from "../lib/reviewer.js";
 import { createReviewerLease, isForeignReviewerLease, REVIEWER_LEASE_CHANNEL, REVIEWER_LEASE_STORAGE_KEY, reviewer3dEnabled, summarizeReviewerMaterials, } from "../lib/reviewer-lifecycle.js";
-import { reviewerBlockColor, reviewerGeometryParts, } from "../lib/reviewer-rendering.js";
+import { reviewerBlockColor, reviewerGeometryParts, updateReviewerInstanceMesh, } from "../lib/reviewer-rendering.js";
 import { usePagedBuild } from "../use-paged-build.js";
 const COLORS = {
     change: "#e9ad4f", fix: "#ef6b5b", remove: "#c74f76", liked: "#5ec6a7",
@@ -60,6 +60,7 @@ function useResourcePackTextures(texturePack) {
 }
 function InstancePart({ placements, part, block, textures, textureMaps, dimmed, onPick }) {
     const ref = useRef(null);
+    const invalidate = useThree((state) => state.invalidate);
     const material = useMemo(() => {
         const url = textures?.top;
         const map = url ? textureMaps.get(url) : undefined;
@@ -70,14 +71,8 @@ function InstancePart({ placements, part, block, textures, textureMaps, dimmed, 
     useEffect(() => {
         if (!ref.current)
             return;
-        const matrix = new THREE.Matrix4();
-        const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, part.rotationY ?? 0, 0));
-        placements.forEach((placement, index) => {
-            matrix.compose(new THREE.Vector3(placement.x + part.offset[0], placement.y + part.offset[1], placement.z + part.offset[2]), quaternion, new THREE.Vector3(...part.size));
-            ref.current.setMatrixAt(index, matrix);
-        });
-        ref.current.instanceMatrix.needsUpdate = true;
-    }, [placements, part]);
+        updateReviewerInstanceMesh(ref.current, placements, part, invalidate);
+    }, [invalidate, placements, part]);
     return _jsx("instancedMesh", { ref: ref, args: [undefined, undefined, placements.length], material: material, frustumCulled: true, onClick: (event) => { event.stopPropagation(); if (event.instanceId !== undefined)
             onPick(placements[event.instanceId]); }, children: _jsx("boxGeometry", { args: [1, 1, 1] }) });
 }

@@ -1,3 +1,4 @@
+import * as THREE from "three";
 import type { Edition, Placement } from "./types.js";
 
 export type ReviewerShapePart = {
@@ -33,6 +34,33 @@ const directionRotations: Record<ReviewerCardinalDirection, number> = {
   south: Math.PI,
   west: Math.PI / 2,
 };
+
+/**
+ * Populate an instanced reviewer mesh after React mounts it. Demand-rendered
+ * canvases need both fresh instance bounds (for frustum culling) and an
+ * explicit frame request after this imperative GPU-buffer update.
+ */
+export function updateReviewerInstanceMesh(
+  mesh: THREE.InstancedMesh,
+  placements: Placement[],
+  part: ReviewerShapePart,
+  invalidate: () => void,
+) {
+  const matrix = new THREE.Matrix4();
+  const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, part.rotationY ?? 0, 0));
+  for (let index = 0; index < placements.length; index += 1) {
+    const placement = placements[index];
+    matrix.compose(
+      new THREE.Vector3(placement.x + part.offset[0], placement.y + part.offset[1], placement.z + part.offset[2]),
+      quaternion,
+      new THREE.Vector3(...part.size),
+    );
+    mesh.setMatrixAt(index, matrix);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingSphere();
+  invalidate();
+}
 
 const DYE_COLORS = {
   white: "#f0f1ec",

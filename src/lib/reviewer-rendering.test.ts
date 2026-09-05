@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
+import * as THREE from "three";
 import type { Placement } from "./types.js";
 import {
   resolveReviewerPlacementState,
   reviewerBlockColor,
   reviewerGeometryParts,
+  updateReviewerInstanceMesh,
 } from "./reviewer-rendering.js";
 
 const placement = (block: string, state?: Placement["state"]): Placement => ({
@@ -16,6 +18,27 @@ const placement = (block: string, state?: Placement["state"]): Placement => ({
 });
 
 describe("edition-aware reviewer geometry", () => {
+  it("refreshes instanced bounds and schedules a frame for demand-rendered canvases", () => {
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const material = new THREE.MeshBasicMaterial();
+    const mesh = new THREE.InstancedMesh(geometry, material, 2);
+    mesh.computeBoundingSphere();
+    expect(mesh.boundingSphere?.center.x).toBe(0);
+    let invalidations = 0;
+
+    updateReviewerInstanceMesh(mesh, [
+      { ...placement("minecraft:cyan_concrete"), x: 80, z: 100 },
+      { ...placement("minecraft:yellow_concrete"), x: 82, z: 100 },
+    ], { size: [1, 1, 1], offset: [0, 0, 0] }, () => { invalidations += 1; });
+
+    expect(mesh.boundingSphere?.center.x).toBeCloseTo(81);
+    expect(mesh.boundingSphere?.center.z).toBeCloseTo(100);
+    expect(mesh.boundingSphere?.radius).toBeGreaterThan(1);
+    expect(invalidations).toBe(1);
+    geometry.dispose();
+    material.dispose();
+  });
+
   it("maps native Bedrock stair direction and upside-down state to Java-equivalent geometry", () => {
     const bedrock = placement("minecraft:quartz_stairs", { weirdo_direction: 0, upside_down_bit: true });
     const java = placement("minecraft:quartz_stairs", { facing: "east", half: "top" });

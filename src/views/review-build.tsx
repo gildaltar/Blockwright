@@ -1,6 +1,6 @@
 import "../index.css";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Canvas } from "@react-three/fiber";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
 import { Box as DreiBox, Edges, Grid, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import {
@@ -45,6 +45,7 @@ import {
 import {
   reviewerBlockColor,
   reviewerGeometryParts,
+  updateReviewerInstanceMesh,
   type ReviewerShapePart,
 } from "../lib/reviewer-rendering.js";
 import type { BuildRecord, Placement, Vec3 } from "../lib/types.js";
@@ -108,6 +109,7 @@ function useResourcePackTextures(texturePack: LoadedResourcePack | null) {
 
 function InstancePart({ placements, part, block, textures, textureMaps, dimmed, onPick }: { placements: Placement[]; part: ShapePart; block: string; textures?: FaceTextures; textureMaps: Map<string, THREE.Texture>; dimmed: boolean; onPick: (placement: Placement) => void }) {
   const ref = useRef<THREE.InstancedMesh>(null);
+  const invalidate = useThree((state) => state.invalidate);
   const material = useMemo(() => {
     const url = textures?.top;
     const map = url ? textureMaps.get(url) : undefined;
@@ -115,16 +117,10 @@ function InstancePart({ placements, part, block, textures, textureMaps, dimmed, 
     return new THREE.MeshStandardMaterial({ color: url ? "#ffffff" : part.role === "metal" ? "#242a2c" : reviewerBlockColor(block), map, roughness: part.role === "metal" ? .45 : .88, metalness: part.role === "metal" ? .5 : 0, transparent: dimmed || /glass|pane|leaves/.test(block), opacity: dimmed ? .2 : 1, alphaTest: /glass|pane|leaves|door|trapdoor/.test(block) ? .08 : 0, emissive, emissiveIntensity: part.role === "lantern" ? 1.1 : 0 });
   }, [block, dimmed, part.role, textureMaps, textures?.top]);
   useEffect(() => () => { material.dispose(); }, [material]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ref.current) return;
-    const matrix = new THREE.Matrix4();
-    const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, part.rotationY ?? 0, 0));
-    placements.forEach((placement, index) => {
-      matrix.compose(new THREE.Vector3(placement.x + part.offset[0], placement.y + part.offset[1], placement.z + part.offset[2]), quaternion, new THREE.Vector3(...part.size));
-      ref.current!.setMatrixAt(index, matrix);
-    });
-    ref.current.instanceMatrix.needsUpdate = true;
-  }, [placements, part]);
+    updateReviewerInstanceMesh(ref.current, placements, part, invalidate);
+  }, [invalidate, placements, part]);
   return <instancedMesh ref={ref} args={[undefined, undefined, placements.length]} material={material} frustumCulled onClick={(event) => { event.stopPropagation(); if (event.instanceId !== undefined) onPick(placements[event.instanceId]); }}>
     <boxGeometry args={[1, 1, 1]} />
   </instancedMesh>;
