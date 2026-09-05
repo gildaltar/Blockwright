@@ -12,6 +12,8 @@ $associationTestRoot = "HKCU:\Software\Blockwright Installer Tests\$([guid]::New
 $results = New-Object 'System.Collections.Generic.List[object]'
 $previousStateRoot = $env:BLOCKWRIGHT_STATE_ROOT
 $previousAppData = $env:APPDATA
+$previousTemp = $env:TEMP
+$previousTmp = $env:TMP
 $previousFakeCodexState = $env:BLOCKWRIGHT_FAKE_CODEX_STATE
 $previousFakeCodexGetMode = $env:BLOCKWRIGHT_FAKE_CODEX_GET_MODE
 $previousFakeCodexAddMode = $env:BLOCKWRIGHT_FAKE_CODEX_ADD_MODE
@@ -30,6 +32,28 @@ function Add-Pass {
 function Get-FreePort {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     try { $listener.Start(); return ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port } finally { $listener.Stop() }
+}
+
+if (-not ("Blockwright.WindowsPath" -as [type])) {
+    Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Blockwright {
+    public static class WindowsPath {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern uint GetShortPathName(string longPath, StringBuilder shortPath, uint bufferLength);
+    }
+}
+'@
+}
+
+function Get-WindowsShortPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $buffer = New-Object System.Text.StringBuilder 32768
+    $length = [Blockwright.WindowsPath]::GetShortPathName($Path, $buffer, [uint32]$buffer.Capacity)
+    if ($length -eq 0 -or $length -ge $buffer.Capacity) { return $null }
+    return $buffer.ToString()
 }
 
 try {
@@ -75,11 +99,15 @@ try {
     foreach ($forbiddenPostCopyScript in @("Initialize-Blockwright.ps1", "Register-BlockwrightCodex.ps1", "Set-BlockwrightSchematicAssociation.ps1")) {
         Assert-Condition (-not $runSection.Contains($forbiddenPostCopyScript)) "Installer still launches $forbiddenPostCopyScript from unchecked [Run] processing."
     }
-    foreach ($requiredResultContract in @("RunSetupPowerShellScript", "ssPostInstall", "ResultCode", "RaiseException", "CodexIntegrationStatus := 'failed'", "SchematicAssociationStatus := 'failed'", "installer-status.txt", "SuppressibleMsgBox")) {
+    foreach ($requiredResultContract in @("RunSetupPowerShellScript", "ssPostInstall", "ResultCode", "RaiseException", "CodexIntegrationStatus := 'failed'", "SchematicAssociationStatus := 'failed'", "installer-status.txt", "SuppressibleMsgBox", "RequiredPostInstallFailed", "GetCustomSetupExitCode", "Result := 100")) {
         Assert-Condition ($installerSource.Contains($requiredResultContract)) "Installer post-install result contract is missing: $requiredResultContract"
     }
+    foreach ($requiredLifecycleCanonicalization in @("GetShortName(LifecycleParent)", "GetShortName(TemporaryRoot)", "CompareText(LifecycleParent, TemporaryRoot)", "CompareText(CanonicalLifecycleParent, CanonicalTemporaryRoot)")) {
+        Assert-Condition ($installerSource.Contains($requiredLifecycleCanonicalization)) "Installer lifecycle temp-path alias handling is missing: $requiredLifecycleCanonicalization"
+    }
     Assert-Condition ($installerSource.Contains("'Configuring Blockwright', True")) "Required initialization is not wired as a checked, setup-failing post-install action."
-    Add-Pass "installer-postinstall-results" "Required initialization checks its launch and exit status; selected optional integrations record failures and surface an actionable warning instead of silently reporting success."
+    Add-Pass "installer-postinstall-results" "Required initialization checks its launch and exit status and forces a nonzero setup result after a post-install exception; selected optional integrations record failures and surface an actionable warning."
+    Add-Pass "installer-lifecycle-temp-alias" "Lifecycle-only roots retain the exact random immediate-child boundary while treating the long and 8.3 spellings of the same Windows temp directory as equivalent."
 
     $installerCiSource = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\..\.github\workflows\windows-installer-ci.yml"))
     Assert-Condition ($installerCiSource.Contains('Join-Path (Resolve-Path ".\release\windows\.work").Path "fixtures"')) "Prior-version CI fixture output is not isolated beneath release/windows/.work."
@@ -136,6 +164,21 @@ try {
     $validLifecycleRoaming = Join-Path ([System.IO.Path]::GetTempPath()) "Blockwright Installer Lifecycle 0123456789abcdef0123456789abcdef\roaming"
     Assert-Condition (Test-BlockwrightInstalledStateRoot -Candidate $validLifecycleState) "Narrow disposable installer lifecycle state root was not accepted."
     Assert-Condition (Test-BlockwrightInstalledRoamingRoot -Candidate $validLifecycleRoaming) "Narrow disposable installer lifecycle roaming root was not accepted."
+    $nestedLifecycleState = Join-Path $testRoot "Blockwright Installer Lifecycle 0123456789abcdef0123456789abcdef\state"
+    Assert-Condition (-not (Test-BlockwrightInstalledStateRoot -Candidate $nestedLifecycleState)) "A nested lifecycle fixture outside the exact immediate temp-child boundary was accepted."
+    $longAliasParent = [System.IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)).TrimEnd('\')
+    $shortAliasParent = Get-WindowsShortPath -Path $longAliasParent
+    Assert-Condition (-not [string]::IsNullOrWhiteSpace($shortAliasParent)) "Windows did not provide a short-path alias for the lifecycle canonicalization regression."
+    Assert-Condition (-not $shortAliasParent.Equals($longAliasParent, [StringComparison]::OrdinalIgnoreCase)) "Windows short-path regression did not produce an alternate spelling."
+    try {
+        $env:TEMP = $shortAliasParent
+        $env:TMP = $shortAliasParent
+        $longAliasLifecycleState = Join-Path $longAliasParent "Blockwright Installer Lifecycle 0123456789abcdef0123456789abcdef\state"
+        Assert-Condition (Test-BlockwrightInstalledStateRoot -Candidate $longAliasLifecycleState) "Equivalent long and 8.3 lifecycle temp-parent spellings were rejected."
+    } finally {
+        $env:TEMP = $previousTemp
+        $env:TMP = $previousTmp
+    }
     Assert-Condition (-not (Test-BlockwrightInstalledStateRoot -Candidate $stateRoot)) "An arbitrary environment-selected state root was accepted as installed application state."
     $port = Get-FreePort
     $initialization = & (Join-Path $PSScriptRoot "Initialize-Blockwright.ps1") -InstallRoot $installRoot -StateRoot $stateRoot -Port $port -PassThru
@@ -376,6 +419,8 @@ exit 2
 } finally {
     $env:BLOCKWRIGHT_STATE_ROOT = $previousStateRoot
     $env:APPDATA = $previousAppData
+    $env:TEMP = $previousTemp
+    $env:TMP = $previousTmp
     if ([string]::IsNullOrWhiteSpace($previousFakeCodexState)) { Remove-Item Env:BLOCKWRIGHT_FAKE_CODEX_STATE -ErrorAction SilentlyContinue } else { $env:BLOCKWRIGHT_FAKE_CODEX_STATE = $previousFakeCodexState }
     if ([string]::IsNullOrWhiteSpace($previousFakeCodexGetMode)) { Remove-Item Env:BLOCKWRIGHT_FAKE_CODEX_GET_MODE -ErrorAction SilentlyContinue } else { $env:BLOCKWRIGHT_FAKE_CODEX_GET_MODE = $previousFakeCodexGetMode }
     if ([string]::IsNullOrWhiteSpace($previousFakeCodexAddMode)) { Remove-Item Env:BLOCKWRIGHT_FAKE_CODEX_ADD_MODE -ErrorAction SilentlyContinue } else { $env:BLOCKWRIGHT_FAKE_CODEX_ADD_MODE = $previousFakeCodexAddMode }

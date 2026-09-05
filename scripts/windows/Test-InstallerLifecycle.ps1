@@ -14,6 +14,7 @@ if ($deleteTestRoot) { $TestRoot = Join-Path ([System.IO.Path]::GetTempPath()) (
 $resolvedTestRoot = [System.IO.Path]::GetFullPath($TestRoot)
 $installRoot = Join-Path $resolvedTestRoot "installed app"
 $stateRoot = Join-Path $resolvedTestRoot "state"
+$logRoot = Join-Path $resolvedTestRoot "logs"
 $uninstallRegistrationKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{2D75D5A7-BC78-4BBE-B0BC-5B8D0366C4B4}_is1"
 $previousStateRoot = $env:BLOCKWRIGHT_STATE_ROOT
 $previousAppData = $env:APPDATA
@@ -21,6 +22,9 @@ $previousInstallerTestStateRoot = $env:BLOCKWRIGHT_INSTALLER_TEST_STATE_ROOT
 $previousInstallerTestRoamingRoot = $env:BLOCKWRIGHT_INSTALLER_TEST_ROAMING_ROOT
 $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $codexProbePath = Join-Path $resolvedTestRoot "Probe-BlockwrightCodex.ps1"
+$installerInvocationCount = 0
+$uninstallerInvocationCount = 0
+$lifecycleSucceeded = $false
 
 function Quote-NativeArgument {
     param([Parameter(Mandatory = $true)][string]$Value)
@@ -208,7 +212,9 @@ function Invoke-PackagedDiagnostics {
 
 function Invoke-Installer {
     param([string]$Path)
-    $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $installRoot + '"'
+    $script:installerInvocationCount++
+    $logPath = Join-Path $logRoot ("setup-{0:D2}.log" -f $script:installerInvocationCount)
+    $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $installRoot + '" /LOG="' + $logPath + '"'
     if ($TestCodexIntegration) { $arguments += ' /TASKS="codexintegration"' }
     $process = Start-Process -FilePath ([System.IO.Path]::GetFullPath($Path)) -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
     if ($process.ExitCode -ne 0) { throw "Installer $Path exited with code $($process.ExitCode)." }
@@ -218,7 +224,9 @@ function Invoke-Uninstaller {
     param([switch]$RemoveUserData)
     $uninstaller = Join-Path $installRoot "unins000.exe"
     if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) { throw "Inno uninstaller is missing: $uninstaller" }
-    $arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+    $script:uninstallerInvocationCount++
+    $logPath = Join-Path $logRoot ("uninstall-{0:D2}.log" -f $script:uninstallerInvocationCount)
+    $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="' + $logPath + '"'
     if ($RemoveUserData) { $arguments += " /REMOVEUSERDATA" }
     $process = Start-Process -FilePath $uninstaller -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
     if ($process.ExitCode -ne 0) { throw "Uninstaller exited with code $($process.ExitCode)." }
@@ -255,6 +263,7 @@ if (Test-Path -LiteralPath $uninstallRegistrationKey) {
 
 try {
     $null = New-Item -ItemType Directory -Path $resolvedTestRoot -Force
+    $null = New-Item -ItemType Directory -Path $logRoot -Force
     if (-not (Test-Path -LiteralPath $windowsPowerShell -PathType Leaf)) { throw "Windows PowerShell 5.1 was not found: $windowsPowerShell" }
     $env:BLOCKWRIGHT_STATE_ROOT = $stateRoot
     $env:APPDATA = Join-Path $resolvedTestRoot "roaming"
@@ -354,6 +363,7 @@ try {
     if (Test-Path -LiteralPath $stateRoot) { throw "Explicit-cleanup uninstall left Blockwright state behind." }
     if (Test-Path -LiteralPath $legacyPaletteRoot) { throw "Explicit-cleanup uninstall left the exact legacy palette directory behind." }
     if (Test-Path -LiteralPath $uninstallRegistrationKey) { throw "Explicit-cleanup uninstall left the stable AppId registration behind." }
+    $lifecycleSucceeded = $true
     [pscustomobject]@{
         valid = $true
         install = "pass"
@@ -376,7 +386,9 @@ try {
     $fallbackUninstaller = Join-Path $installRoot "unins000.exe"
     if ((Test-Path -LiteralPath $uninstallRegistrationKey) -and (Test-Path -LiteralPath $fallbackUninstaller -PathType Leaf)) {
         try {
-            $fallbackProcess = Start-Process -FilePath $fallbackUninstaller -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait -PassThru -WindowStyle Hidden
+            $fallbackLog = Join-Path $logRoot "uninstall-recovery.log"
+            $fallbackArguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="' + $fallbackLog + '"'
+            $fallbackProcess = Start-Process -FilePath $fallbackUninstaller -ArgumentList $fallbackArguments -Wait -PassThru -WindowStyle Hidden
             if ($fallbackProcess.ExitCode -ne 0) { Write-Warning "Fixture uninstaller recovery exited with code $($fallbackProcess.ExitCode); the fixture directory will be preserved." }
         } catch {
             Write-Warning "Fixture uninstaller recovery failed; the fixture directory will be preserved. $($_.Exception.Message)"
@@ -386,8 +398,10 @@ try {
     $env:APPDATA = $previousAppData
     $env:BLOCKWRIGHT_INSTALLER_TEST_STATE_ROOT = $previousInstallerTestStateRoot
     $env:BLOCKWRIGHT_INSTALLER_TEST_ROAMING_ROOT = $previousInstallerTestRoamingRoot
-    if ($deleteTestRoot -and -not (Test-Path -LiteralPath $uninstallRegistrationKey) -and (Test-Path -LiteralPath $resolvedTestRoot -PathType Container) -and $resolvedTestRoot.StartsWith([System.IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) {
+    if ($deleteTestRoot -and $lifecycleSucceeded -and -not (Test-Path -LiteralPath $uninstallRegistrationKey) -and (Test-Path -LiteralPath $resolvedTestRoot -PathType Container) -and $resolvedTestRoot.StartsWith([System.IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) {
         Remove-Item -LiteralPath $resolvedTestRoot -Recurse -Force
+    } elseif ($deleteTestRoot -and -not $lifecycleSucceeded) {
+        Write-Warning "Lifecycle fixture and setup logs were retained at $resolvedTestRoot because the test did not complete successfully."
     } elseif ($deleteTestRoot -and (Test-Path -LiteralPath $uninstallRegistrationKey)) {
         Write-Warning "Lifecycle fixture was retained at $resolvedTestRoot because its stable AppId registration still exists. Repair/uninstall it before deleting those files."
     }

@@ -88,7 +88,14 @@ function Test-BlockwrightInstallerTestRoot {
     $lifecycleRoot = [System.IO.Path]::GetFullPath((Split-Path -Parent $candidatePath))
     if ([System.IO.Path]::GetFileName($lifecycleRoot) -notmatch '^Blockwright Installer Lifecycle [a-f0-9]{32}$') { return $false }
     $temporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
-    return Test-BlockwrightChildPath -Parent $temporaryRoot -Candidate $lifecycleRoot
+    $lifecycleParent = [System.IO.Path]::GetFullPath((Split-Path -Parent $lifecycleRoot))
+    try {
+        $canonicalLifecycleParent = [System.IO.Path]::GetFullPath((Get-Item -LiteralPath $lifecycleParent -Force -ErrorAction Stop).FullName).TrimEnd('\')
+        $canonicalTemporaryRoot = [System.IO.Path]::GetFullPath((Get-Item -LiteralPath $temporaryRoot -Force -ErrorAction Stop).FullName).TrimEnd('\')
+    } catch {
+        return $false
+    }
+    return $canonicalLifecycleParent.Equals($canonicalTemporaryRoot, [StringComparison]::OrdinalIgnoreCase)
 }
 
 function Test-BlockwrightInstalledStateRoot {

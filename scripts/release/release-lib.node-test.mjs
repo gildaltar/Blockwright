@@ -114,6 +114,8 @@ test("Windows lifecycle pull-request triggers cover every staged payload and bui
   ]) {
     assert.ok(workflow.includes(`- "${path}"`), `Windows lifecycle trigger is missing ${path}`);
   }
+  assert.match(workflow, /Test-InstallerRequiredFailure\.ps1[\s\S]+Test-InstallerLifecycle\.ps1/);
+  assert.match(workflow, /Upload unsigned CI evidence\s+if: always\(\)[\s\S]+Blockwright Installer Lifecycle \*\/logs\/\*\.log/);
 });
 
 test("public release workflow binds a qualified tag and requires artifact provenance", () => {
@@ -161,6 +163,7 @@ test("Windows workflows acquire and invoke only the byte-pinned Inno toolchain",
   assert.match(releaseWorkflow, /Install-PinnedInnoSetup\.ps1/);
   assert.match(lifecycleWorkflow, /Install-PinnedInnoSetup\.ps1/);
   assert.match(lifecycleWorkflow, /Invoke-PinnedInnoCompile\.ps1/);
+  assert.match(releaseWorkflow, /Test-InstallerRequiredFailure\.ps1[\s\S]+Test-InstallerLifecycle\.ps1/);
   assert.match(builder, /Invoke-PinnedInnoCompile\.ps1/);
   assert.doesNotMatch(builder, /run\(isccPath/);
   for (const required of ["SHA256", "Get-AuthenticodeSignature", "publisherThumbprint", "publisherSubject", "ExpectedBytes", "maxSizeBytes", "timeoutSeconds", "InfiniteTimeSpan"]) {
@@ -181,10 +184,14 @@ test("installer never elevates and validates lifecycle-only root overrides befor
   assert.doesNotMatch(installer, /^\[UninstallRun\]$/m);
   assert.match(installer, /GetValidatedLifecycleTestRoot[\s\S]+ExpandFileName\(RawValue\)/);
   assert.match(installer, /TemporaryRoot := RemoveBackslashUnlessRoot\(ExpandFileName\(GetTempDir\)\)/);
+  assert.match(installer, /CanonicalLifecycleParent := RemoveBackslashUnlessRoot\(GetShortName\(LifecycleParent\)\)/);
+  assert.match(installer, /CanonicalTemporaryRoot := RemoveBackslashUnlessRoot\(GetShortName\(TemporaryRoot\)\)/);
+  assert.match(installer, /CompareText\(LifecycleParent, TemporaryRoot\) <> 0[\s\S]+CompareText\(CanonicalLifecycleParent, CanonicalTemporaryRoot\) <> 0/);
   assert.match(installer, /Pos\('"', RawValue\)[\s\S]+Pos\(#13, RawValue\)[\s\S]+Pos\(#10, RawValue\)/);
   assert.match(installer, /Blockwright Installer Lifecycle [\s\S]+Length\(Suffix\) <> 32[\s\S]+IsHexCharacter/);
   assert.match(installer, /GetValidatedLifecycleTestRoot\('BLOCKWRIGHT_INSTALLER_TEST_STATE_ROOT', 'state'\)/);
   assert.match(installer, /GetValidatedLifecycleTestRoot\('BLOCKWRIGHT_INSTALLER_TEST_ROAMING_ROOT', 'roaming'\)/);
+  assert.match(installer, /RequiredPostInstallFailed := True[\s\S]+GetCustomSetupExitCode[\s\S]+Result := 100/);
   const codexRemoval = installer.indexOf("Register-BlockwrightCodex.ps1");
   const associationRemoval = installer.indexOf("Set-BlockwrightSchematicAssociation.ps1", codexRemoval + 1);
   const stateRemoval = installer.indexOf("Remove-BlockwrightOwnedState.ps1", associationRemoval + 1);

@@ -105,6 +105,9 @@ jobs:
         shell: powershell
         run: |
           $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-InstallerRequiredFailure.ps1" `
+            -CurrentInstaller ".\release\windows\Blockwright-$version-windows-x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Installer required-failure contract failed with exit code $LASTEXITCODE." }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-InstallerLifecycle.ps1" `
             -PreviousInstaller ".\release\windows\.work\fixtures\Blockwright-0.0.1-windows-x64-setup.exe" `
             -CurrentInstaller ".\release\windows\Blockwright-$version-windows-x64-setup.exe"
@@ -117,6 +120,7 @@ jobs:
             -PortableZip ".\release\windows\Blockwright-$version-windows-x64-portable.zip"
           if ($LASTEXITCODE -ne 0) { throw "Portable lifecycle failed with exit code $LASTEXITCODE." }
       - name: Upload unsigned CI evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: blockwright-windows-unsigned-ci
@@ -126,3 +130,4 @@ jobs:
             release/windows/*.zip
             release/windows/*.json
             release/windows/SHA256SUMS.txt
+            ${{ runner.temp }}/Blockwright Installer Lifecycle */logs/*.log

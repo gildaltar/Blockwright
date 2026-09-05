@@ -67,6 +67,8 @@ var
   CodexIntegrationStatus: String;
   SchematicAssociationStatus: String;
   IntegrationWarnings: String;
+  RequiredPostInstallFailed: Boolean;
+  RequiredPostInstallFailureMessage: String;
 
 procedure InitializeWizard;
 begin
@@ -131,7 +133,10 @@ var
   RawValue: String;
   Candidate: String;
   LifecycleRoot: String;
+  LifecycleParent: String;
   TemporaryRoot: String;
+  CanonicalLifecycleParent: String;
+  CanonicalTemporaryRoot: String;
 begin
   Result := '';
   RawValue := GetEnv(EnvironmentName);
@@ -143,8 +148,19 @@ begin
   if CompareText(ExtractFileName(Candidate), LeafName) <> 0 then
     RaiseException(EnvironmentName + ' must name the exact ' + LeafName + ' lifecycle-test directory.');
   LifecycleRoot := RemoveBackslashUnlessRoot(ExtractFileDir(Candidate));
+  LifecycleParent := RemoveBackslashUnlessRoot(ExtractFileDir(LifecycleRoot));
   TemporaryRoot := RemoveBackslashUnlessRoot(ExpandFileName(GetTempDir));
-  if CompareText(RemoveBackslashUnlessRoot(ExtractFileDir(LifecycleRoot)), TemporaryRoot) <> 0 then
+  { GitHub-hosted Windows runners can expose one temporary directory through
+    both its long and 8.3 aliases. Canonicalize the two existing parent
+    directories before enforcing the immediate-child boundary. }
+  CanonicalLifecycleParent := RemoveBackslashUnlessRoot(GetShortName(LifecycleParent));
+  CanonicalTemporaryRoot := RemoveBackslashUnlessRoot(GetShortName(TemporaryRoot));
+  Log(EnvironmentName + ' lifecycle parent: ' + LifecycleParent);
+  Log(EnvironmentName + ' Windows temporary root: ' + TemporaryRoot);
+  Log(EnvironmentName + ' canonical lifecycle parent: ' + CanonicalLifecycleParent);
+  Log(EnvironmentName + ' canonical Windows temporary root: ' + CanonicalTemporaryRoot);
+  if (CompareText(LifecycleParent, TemporaryRoot) <> 0) and
+    (CompareText(CanonicalLifecycleParent, CanonicalTemporaryRoot) <> 0) then
     RaiseException(EnvironmentName + ' must be an immediate lifecycle-test child of the Windows temporary directory.');
   if not IsLifecycleTestDirectoryName(ExtractFileName(LifecycleRoot)) then
     RaiseException(EnvironmentName + ' does not contain the required random lifecycle-test directory name.');
@@ -172,6 +188,7 @@ var
   ResultCode: Integer;
 begin
   WizardForm.StatusLabel.Caption := StepDescription;
+  ResultCode := -1;
   Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\scripts\windows\' + ScriptName) + '" ' + ScriptArguments;
   Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Parameters,
@@ -225,14 +242,11 @@ begin
       '. Blockwright setup cannot safely report the selected integration results.');
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
+procedure RunBlockwrightPostInstall;
 var
   CommonArguments: String;
   StepSucceeded: Boolean;
 begin
-  if CurStep <> ssPostInstall then
-    Exit;
-
   CodexIntegrationStatus := 'not-selected';
   SchematicAssociationStatus := 'not-selected';
   IntegrationWarnings := '';
@@ -281,6 +295,36 @@ begin
       IntegrationWarnings + #13#10 + #13#10 + 'These results were saved to ' +
       AddBackslash(GetInstallerStateRoot('')) + 'integration\installer-status.txt.',
       mbError, MB_OK, IDOK);
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+
+  RequiredPostInstallFailed := False;
+  RequiredPostInstallFailureMessage := '';
+  try
+    RunBlockwrightPostInstall;
+  except
+    RequiredPostInstallFailed := True;
+    RequiredPostInstallFailureMessage := GetExceptionMessage;
+    Log('Required Blockwright post-install configuration failed: ' +
+      RequiredPostInstallFailureMessage);
+    SuppressibleMsgBox('Blockwright setup did not complete its required configuration.' + #13#10 + #13#10 +
+      RequiredPostInstallFailureMessage + #13#10 + #13#10 +
+      'The application files were copied, but setup will return a failure code. ' +
+      'Correct the reported problem and run the installer again.',
+      mbError, MB_OK, IDOK);
+  end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if RequiredPostInstallFailed then
+    Result := 100
+  else
+    Result := 0;
 end;
 
 function UninstallArgumentPresent(Name: String): Boolean;

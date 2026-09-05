@@ -217,10 +217,13 @@ jobs:
             --repository $env:RELEASE_REPOSITORY --source-digest $env:RELEASE_COMMIT --source-ref $env:RELEASE_REF `
             --expected-thumbprint $env:SIGNING_THUMBPRINT
           if ($LASTEXITCODE -ne 0) { throw "Commit-bound provenance verification failed with exit code $LASTEXITCODE." }
-      - name: Exercise exact signed installer
+      - name: Exercise exact signed installer failure and success lifecycles
         shell: powershell
         run: |
           $version = "${{ needs.validate-release-ref.outputs.release_version }}"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-InstallerRequiredFailure.ps1" `
+            -CurrentInstaller ".\release\windows\Blockwright-$version-windows-x64-setup.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Signed installer required-failure contract failed with exit code $LASTEXITCODE." }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-InstallerLifecycle.ps1" -CurrentInstaller ".\release\windows\Blockwright-$version-windows-x64-setup.exe"
           if ($LASTEXITCODE -ne 0) { throw "Signed installer lifecycle failed with exit code $LASTEXITCODE." }
       - name: Exercise matching portable private runtime, diagnostics, primary workflow, and isolation
@@ -231,6 +234,7 @@ jobs:
             -PortableZip ".\release\windows\Blockwright-$version-windows-x64-portable.zip"
           if ($LASTEXITCODE -ne 0) { throw "Signed-candidate portable lifecycle failed with exit code $LASTEXITCODE." }
       - name: Upload signed release evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: blockwright-windows-${{ needs.validate-release-ref.outputs.release_version }}-signed
@@ -240,6 +244,7 @@ jobs:
             release/windows/*.zip
             release/windows/*.json
             release/windows/SHA256SUMS.txt
+            ${{ runner.temp }}/Blockwright Installer Lifecycle */logs/*.log
       - name: Create draft GitHub release
         shell: powershell
         env:
