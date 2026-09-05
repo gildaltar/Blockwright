@@ -1,6 +1,6 @@
 # Blockwright Design System
 
-Source of truth: `blockwright-concept.png` (1584×960).
+Source of truth: `blockwright-concept.png` (1586×992).
 
 ## Visual direction
 

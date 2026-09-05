@@ -1,6 +1,6 @@
 # Blockwright Fidelity Ledger
 
-Compared against `blockwright-concept.png` at the native concept size of 1584 × 960 and against the implemented widget at 2000 × 1020 (desktop host) and 900 × 900 (compact host).
+Compared against `blockwright-concept.png` at the native concept size of 1586 × 992 and against the implemented widget at 2000 × 1020 (desktop host) and 900 × 900 (compact host).
 
 | Area | Concept target | Implemented result | Status |
 | --- | --- | --- | --- |
@@ -10,7 +10,7 @@ Compared against `blockwright-concept.png` at the native concept size of 1584 ×
 | Core controls | Perspective modes, camera presets, layer playback, inspector, export menu | All controls are present and interactive; compact mode preserves the essential set | Match |
 | Data presentation | Edition, 17 × 13 × 14 dimensions, layer, palette, validation, coordinates, count, hash | Every field is backed by the canonical compiled record; Java now reads 26.2 and the texture source is visible | Match with requested version update |
 | Responsive behavior | Desktop-first cinematic workstation | At 900 × 900, side panels become a rail plus stacked inspector without horizontal overflow | Intentional adaptation |
-| Build imagery | Highly detailed illustrative lodge with texture-rich materials | Exact 1 × 1 procedural voxel geometry with original generated style thumbnails | Intentional deviation |
+| Build imagery | Highly detailed illustrative lodge with texture-rich materials | Exact placement geometry in the workbench plus state-aware stairs, slabs, doors, trapdoors, panes, fences, walls, and lanterns in the dedicated reviewer | Intentional deviation |
 
 ## Copy comparison
 
@@ -20,4 +20,4 @@ Three concept-only values changed intentionally. The concept's illustrative `Jav
 
 ## Remaining difference
 
-The concept uses atmospheric smoke and shape-specific block models. The implementation can reproduce a selected pack's face textures, but every placement remains a full 1 × 1 × 1 cube and lighting remains approximate. It does not redistribute game textures: the user selects a pack or verified client JAR locally. Real Sponge v3 `.schem` import/export is now implemented and verified with WorldEdit 7.4.4. Direct Java Anvil editing, Bedrock LevelDB, and `.mcworld` writers remain clearly unavailable.
+The concept uses atmospheric smoke and more detailed material treatment than the live app. The workbench emphasizes exact placement geometry, while the reviewer adds state-aware geometry for stairs, slabs, doors, trapdoors, panes, fences, walls, and lanterns; lighting remains approximate. Blockwright does not redistribute game textures: the user selects a pack or verified client JAR locally. Real Sponge v3 `.schem` import/export is implemented and verified with WorldEdit 7.4.4. Direct Java Anvil editing, Bedrock LevelDB, and `.mcworld` writers remain clearly unavailable.

@@ -1,57 +1,177 @@
-# Blockwright — Minecraft Build Architect
+<p align="center">
+  <img src="assets/github/blockwright-hero.png" alt="A voxel pavilion emerging from precise Blockwright blueprint layers" width="100%" />
+</p>
 
-Blockwright is a deployable Skybridge MCP/ChatGPT App and responsive React + Three.js workbench that turns a constrained build specification into a deterministic, exact Minecraft block plan.
+<h1 align="center">Blockwright</h1>
 
-## What ships
+<p align="center">
+  <strong>From build brief to exact <code>.schem</code> — with seeded planning, version-aware palettes, 3D review, and guarded WorldEdit installation.</strong>
+</p>
 
-- Streamable HTTP MCP endpoint at `/mcp`.
-- Local liveness and readiness endpoints at `/health` and `/ready` for operator tooling.
-- Twenty-seven MCP tools, including adaptive palette sessions, safety preflight, seeded candidates, live Java synchronization, local world discovery, real schematic import/export, whole-build structural auditing, a dedicated 3D reviewer, and guarded WorldEdit installation.
-- Human-readable tool titles, complete parameter guidance, structured output schemas, and invocation status text for MCP hosts.
-- Exact integer `x/y/z` placements; one viewer cube equals one Minecraft block.
-- One immutable build record feeds the viewer, counts, layers, validation, hash, and every export.
-- Interactive perspective/orthographic viewer with orbit, preset cameras, layer slicing, exploded layers, material highlighting, and construction playback.
-- State-aware 3D reviewer with exact block/region selection, distance measurement, roof hiding, layer clipping, categorized annotations, matching review JSON import/export, and global defect-class findings.
-- JSON, CSV, Java `.mcfunction`, Bedrock `.mcfunction`, Sponge Schematic v3 `.schem`, layer blueprint, and checksummed ZIP bundle generation.
-- Stateful named role palettes with exact-version validation, locking, rejection/replacement, and local texture previews.
-- Modular courtyard, interlocking-volume, tower, and framed-hall generators driven by validated high-level plans and visible reproducible seeds.
-- Configurable green/amber/red sizing preflight with regional generation metadata and explicit confirmation for extreme requests.
-- Read-only Windows Java-world discovery plus an atomic, re-verified WorldEdit schematic installation workflow.
-- More than 20 original architectural profiles.
-- Java and Bedrock registries are separate and source/coverage gaps stay visible.
-- Java resource-pack ZIP and client-JAR loading with blockstate/model-aware texture resolution entirely in the browser.
-- A reusable ChatGPT skill in `skill/SKILL.md`.
-- A real compiled example in `examples/nordic-hearth-lodge/`.
+<p align="center">
+  <a href="https://github.com/gildaltar/Blockwright/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gildaltar/Blockwright/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/gildaltar/Blockwright/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/gildaltar/Blockwright?color=d88742&label=release" /></a>
+  <img alt="Node.js 22.23.1 or newer" src="https://img.shields.io/badge/Node.js-22.23.1%2B-6f9f55" />
+  <a href="LICENSE"><img alt="GPL-2.0-only license" src="https://img.shields.io/github/license/gildaltar/Blockwright?color=8aa49a" /></a>
+</p>
 
-## Accuracy and data policy
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#review-what-was-actually-built">3D reviewer</a> ·
+  <a href="#windows-control-center">Windows app</a> ·
+  <a href="https://github.com/gildaltar/Blockwright/releases/latest">Latest release</a>
+</p>
 
-The Java release manifest reported `26.2` when registry metadata was synchronized on 2026-09-02. Blockwright verified the official Java 26.2 client JAR SHA-1 and derived 1,198 namespaced block identifiers from its blockstate assets. Bedrock identifiers come from Microsoft’s `@minecraft/vanilla-data` package.
+<p align="center"><sub>Original Blockwright artwork. The product captures below come from a live local v0.5.0 build.</sub></p>
 
-Blockwright does not redistribute Mojang texture artwork. The viewer accepts a resource-pack ZIP or official client JAR selected by the user, resolves its blockstate/model texture references locally, and never uploads the archive. Unresolved materials use procedural colors. Exact engine light propagation remains outside this vertical slice.
+> [!NOTE]
+> Blockwright is an independent project. It is not an official Minecraft product and is not approved by or associated with Mojang or Microsoft.
 
-Sponge Schematic v3 export was successfully loaded by the released WorldEdit CLI 7.4.4 against Java 26.2 data. Direct Java Anvil editing and Bedrock LevelDB/`.mcworld` parsing remain explicitly unavailable. Blockwright never claims it directly changed a save; it installs a reversible schematic only after confirmation.
+## Design with intent. Ship with evidence.
 
-## Run locally
+Blockwright is a local-first Minecraft build architect delivered as a Skybridge MCP/ChatGPT App, Codex plugin, and responsive React + Three.js workbench. It turns a constrained brief into one deterministic block record, then uses that same record for the model, counts, layers, audit, hash, and every export.
 
-Requirements: Node.js 22.23.1 or newer (Node 24 recommended) and npm.
+| Plan architecture | Inspect precisely |
+| --- | --- |
+| Seeded plans vary structure, circulation, rooms, roof language, and palette—not just surface blocks. | Select exact blocks or regions, inspect state and phase data, measure spans, search coordinates, and navigate audit findings. |
+| **Export real artifacts** | **Operate locally** |
+| Produce JSON, CSV, Java or Bedrock functions, Sponge v3 `.schem`, layer blueprints, and checksummed bundles. | Keep texture packs on-device, discover Java worlds read-only, and preview every WorldEdit install before confirmation. |
+
+<p align="center">
+  <img src="assets/github/workbench-v050.png" alt="Blockwright v0.5.0 workbench showing the Shinrinyoku Pavilion build, Java 26.2, design plan, safety preflight, layer controls, and role palette" width="100%" />
+</p>
+
+<p align="center"><sub>Live v0.5.0 capture: 4,361 exact Java 26.2 placements from seed <code>readme-050</code>, rendered with procedural fallback materials.</sub></p>
+
+## One build record, every downstream result
+
+```mermaid
+flowchart LR
+    A[Build brief] --> B[Version + sizing preflight]
+    B --> C[Seeded architectural plan]
+    C --> D[(Immutable placements + hash)]
+    D --> E[3D workbench]
+    D --> F[Reviewer + structural audit]
+    D --> G[Commands, JSON, schem, ZIP]
+    G --> H[WorldEdit preview]
+    H --> I[Confirmed install]
+```
+
+There is no decorative count and no second, looser export model. If a coordinate, material, layer, or hash appears in the interface, it comes from the canonical compiled record.
+
+## Review what was actually built
+
+The dedicated reviewer is for decisions, not just orbiting a model. It understands block states and renders shape-aware stairs, slabs, doors, trapdoors, panes, fences, walls, and lanterns. Whole-build auditing groups recurring structural problems and keeps every affected coordinate navigable.
+
+<p align="center">
+  <img src="assets/github/reviewer-audit.png" alt="Blockwright reviewer showing a selected roof stair at coordinate 1,17,1, its exact block state and phase, global audit findings, and annotation controls" width="100%" />
+</p>
+
+<p align="center"><sub>A real audit focus at <code>1,17,1</code>: exact bounds, block identifier, state, generation phase, issue category, and review status remain visible together.</sub></p>
+
+- Block and box selection with inclusive dimensions, occupied count, volume, palette breakdown, and phase breakdown.
+- Coordinate, block, phase, and state search with keyboard-accessible camera presets and layer clipping.
+- Distance measurement kept separate from annotations so measurements never become accidental change requests.
+- `change`, `fix`, `remove`, and `liked` annotations with open/resolved status, editing, filtering, undo, and portable JSON import/export.
+- Global defect-class audits for support, contact, connection state, incomplete multi-block structures, overlaps, and related recurring problems.
+
+## Windows Control Center
+
+Running Blockwright from a Windows PC does not require babysitting a terminal. The native WPF control center owns the local process it starts and exposes the information that matters while it is running.
+
+<p align="center">
+  <img src="assets/github/windows-control-center.png" alt="Native Blockwright Windows Control Center showing a running v0.5.0 server, local endpoint, uptime, lifecycle controls, and passing environment checks" width="100%" />
+</p>
+
+<p align="center"><sub>Native UI during a real local v0.5.0 run. The repository-root label was generalized for this public capture.</sub></p>
+
+- Start, stop, and restart the server without leaving orphaned child processes.
+- Verify Node.js/npm requirements, manifest alignment, packaged files, runtime dependencies, registries, MCP launch configuration, and generated-build synchronization.
+- Show health, readiness, PID, uptime, endpoint, exit state, timestamped live logs, and copy/save actions.
+- Repair the production-only runtime from the lockfile under a shared, ownership-checked maintenance lock.
+
+Launch [`scripts/windows/Launch-Blockwright-ControlCenter.vbs`](scripts/windows/Launch-Blockwright-ControlCenter.vbs), or use the optional [shortcut installer](scripts/windows/README.md).
+
+## Quick start
+
+Requirements: Node.js 22.23.1 or newer and npm.
 
 ```bash
-npm install
+git clone https://github.com/gildaltar/Blockwright.git
+cd Blockwright
+npm ci
 npm run dev
 ```
 
-Open `http://localhost:3000`, run `compile_build`, and choose **Open workbench**. The MCP endpoint is `http://localhost:3000/mcp`.
+Open `http://localhost:3000`, run `compile_build`, then choose **Open workbench**. The local MCP endpoint is `http://localhost:3000/mcp`.
 
-To check Mojang's current Java release and synchronize it:
+### Choose how you use it
 
-```bash
-npm run check:java
-npm run sync:java -- latest
-```
+| Surface | Start here |
+| --- | --- |
+| Local workbench + MCP | `npm run dev` |
+| ChatGPT App development | `npm run dev:tunnel`, then connect `{forwarding-url}/mcp` in ChatGPT Developer Mode |
+| Codex plugin | Use the checked-in `.codex-plugin/plugin.json`, bundled skill, local stdio bridge, and production workbench |
+| Native Windows app | Open `scripts/windows/Launch-Blockwright-ControlCenter.vbs` |
+| Container or hosted MCP | Build the included `Dockerfile`, or deploy the Skybridge server with your preferred compatible host |
 
-The sync command verifies the official client SHA-1, writes an exact local registry, and creates a local vanilla resource ZIP for the workbench. You can also load your existing resource-pack ZIP or select the matching client JAR from the Minecraft launcher version folder.
+<p align="center">
+  <img src="assets/mobile.png" alt="Blockwright responsive workbench at a compact viewport" width="360" />
+</p>
 
-## Verify
+<p align="center"><sub>The same build workflow adapts to compact hosts without horizontal overflow.</sub></p>
+
+## Accuracy boundaries
+
+Blockwright makes its compatibility boundary visible instead of treating “Minecraft” as one undifferentiated target.
+
+| Area | Current boundary |
+| --- | --- |
+| Java registry | Included Java 26.2 registry: 1,198 namespaced block identifiers derived from the SHA-1-verified official client JAR |
+| Bedrock registry | Separate identifiers sourced from Microsoft's `@minecraft/vanilla-data`; Java and Bedrock identifiers are never mixed |
+| Textures | Resource-pack ZIPs and client JARs stay in the browser; Blockwright does not bundle or upload Mojang texture artwork |
+| Schematic export | GZip-compressed Sponge Schematic v3, verified with WorldEdit CLI 7.4.4 against Java 26.2 data |
+| World access | Java-world discovery is read-only; installation writes a reversible WorldEdit schematic only after preview and confirmation |
+| Direct save editing | Java Anvil editing, Bedrock LevelDB, and `.mcworld` writers are explicitly unavailable |
+
+See the [fidelity ledger](FIDELITY.md) for the visual/technical boundary and the [specification](SPEC.md) for acceptance criteria.
+
+<details>
+<summary><strong>What ships in v0.5.0</strong></summary>
+
+- 27 MCP tools with human-readable titles, parameter guidance, structured outputs, and invocation states.
+- Adaptive palette interviews, durable named palettes, exact-version validation, and role locking/replacement.
+- Seeded architectural candidates and modular courtyard, interlocking-volume, tower, and framed-hall generators.
+- Green/amber/red sizing preflight with volume, placements, chunks, regions, commands, and export-size estimates.
+- Live Java release checking and SHA-1-verified registry synchronization.
+- Real Sponge v3 import/export, Java and Bedrock functions, blueprints, CSV, JSON, and checksummed bundles.
+- Local Java-world discovery and atomic, re-verified WorldEdit installation.
+- Liveness at `/health`, readiness at `/ready`, and the Streamable HTTP MCP endpoint at `/mcp`.
+- A reusable Blockwright skill and a compiled Nordic Hearth Lodge example.
+
+</details>
+
+<details>
+<summary><strong>Project map</strong></summary>
+
+- `src/lib/compiler.ts` — deterministic voxel compiler.
+- `src/lib/preflight.ts` — configurable size/resource risk estimation and confirmation tokens.
+- `src/lib/palette-studio.ts` — adaptive palette state and durable named palettes.
+- `src/lib/reviewer.ts` — whole-build state/contact/support/connection audit and portable review types.
+- `src/lib/schematic.ts` — Sponge Schematic v3 NBT import/export.
+- `src/lib/worlds.ts` — safe `level.dat` discovery and guarded WorldEdit installation.
+- `src/lib/exports.ts` — construction exports and checksummed bundles.
+- `src/views/compile-build.tsx` — seeded 3D workbench and textured role palette.
+- `src/views/review-build.tsx` — exact-coordinate reviewer and annotation workflow.
+- `src/server.ts` — MCP tools and shared view registration.
+- `mcp/server.mjs` — resilient stdio-to-local-HTTP bridge for the Codex plugin.
+- `scripts/diagnose.mjs` — read-only source or installed-plugin diagnostics.
+- `scripts/windows/` — native Windows controller, launchers, runtime repair, tests, and operator notes.
+- `examples/nordic-hearth-lodge/` — generated example artifacts.
+
+</details>
+
+## Verify it
 
 ```bash
 npm test
@@ -60,42 +180,15 @@ npm run build
 npm run diagnose
 ```
 
-`npm run verify` runs the tests, production build and packaging, clean runtime installation, read-only diagnostics, and a clean production-runtime lock verification together. CI additionally runs `npm run verify:packaged-sync` so a rebuilt-but-uncommitted `app/` cannot pass and later ship stale generated files. Diagnostics check the Node and npm versions, manifest and lock alignment, direct dependency versions, MCP launch configuration, packaged runtime assets and Java registries, separate source-build health, skill-copy drift, packaged-build drift, and Windows control-center files. Use `node scripts/diagnose.mjs --json` for stable machine-readable `{ summary, checks }` output.
+`npm run verify` runs the test suite, production build, plugin packaging, runtime-lock check, production dependency installation, and read-only diagnostics. CI also rejects packaged output that has drifted from source.
 
-## Connect to ChatGPT
+## Documentation
 
-Run `npm run dev:tunnel`, copy the HTTPS forwarding URL, enable Developer Mode in ChatGPT, and create an app pointing to `{forwarding-url}/mcp` with no authentication.
+- [Product specification](SPEC.md)
+- [Visual design notes](DESIGN.md)
+- [Fidelity and accuracy ledger](FIDELITY.md)
+- [Windows operator guide](scripts/windows/README.md)
+- [Release history](CHANGELOG.md)
+- [Media provenance](assets/github/README.md)
 
-## Codex plugin
-
-The companion `blockwright` plugin bundles the skill, local MCP bridge, production workbench, exact Java 26.2 registry, starter prompts, and a native Windows control center. Launch `scripts/windows/Launch-Blockwright-ControlCenter.vbs` for a hidden-console desktop UI that can start, stop, restart, inspect, and diagnose the local service; `Install-BlockwrightShortcut.ps1` can create a convenient shortcut.
-
-The stdio MCP bridge starts its own local service on an isolated ephemeral port, validates the Node/runtime/dependency state first, waits for a matching ready response, and removes the full child process tree when the task ends. First launch uses the packaged runtime lock for a reproducible production-only install. If its child exits unexpectedly, the next MCP request starts a fresh instance. The bridge writes only JSON-RPC to stdout and sends operator logs to stderr.
-
-The private app-only `get_build_chunk` helper is reserved for paginating large immutable build records inside a future reviewer paging protocol. It is intentionally hidden from model-facing workflows; the current reviewer receives the complete record so counts, search, selections, and audits remain exact.
-
-`GET /health` is a lightweight liveness response: if it returns HTTP 200, the Blockwright process and versioned HTTP route are alive. `GET /ready` is stricter: it returns HTTP 200 only when the runtime is loaded, at least one synchronized Java registry is valid, and every asset referenced by the production Vite manifest exists; otherwise it returns HTTP 503 with per-check details. These routes are local/self-hosted operator endpoints—Alpic Cloud routes only `/mcp`.
-
-The development command itself is intentionally stricter: it uses port 3000 only, reuses a healthy matching Blockwright server, and reports an ownership/version conflict rather than silently incrementing to another port.
-
-## Project map
-
-- `SPEC.md` — requirements, flows, tool architecture, and acceptance criteria.
-- `DESIGN.md` / `blockwright-concept.png` — visual design source of truth.
-- `src/lib/compiler.ts` — deterministic voxel compiler.
-- `src/lib/preflight.ts` — configurable size/resource risk estimation and confirmation tokens.
-- `src/lib/palette-studio.ts` — adaptive palette state and durable named palettes.
-- `src/lib/schematic.ts` — Sponge Schematic v3 NBT import/export.
-- `src/lib/reviewer.ts` — whole-build state/contact/support/connection audit and portable review types.
-- `src/lib/worlds.ts` — safe `level.dat` discovery and guarded WorldEdit installation.
-- `src/lib/exports.ts` — construction exports and checksummed bundle.
-- `src/server.ts` — MCP tools and shared view registration.
-- `mcp/server.mjs` — resilient stdio-to-local-HTTP bridge used by the Codex plugin.
-- `scripts/diagnose.mjs` — read-only source or installed-plugin diagnostics with text and JSON output.
-- `scripts/windows/` — native Windows service control center, launchers, shortcut installer, and operator notes.
-- `src/views/compile-build.tsx` — interactive seeded workbench and textured role palette.
-- `src/views/review-build.tsx` — state-aware exact-coordinate reviewer and annotation workflow.
-- `src/views/palette-studio.tsx` / `world-browser.tsx` — palette interview and local-world UI.
-- `src/data/` — registry provenance and original style profiles.
-- `examples/nordic-hearth-lodge/` — generated build artifacts.
-- `skill/SKILL.md` — reusable app-usage skill.
+Blockwright is available under the [GNU General Public License v2.0](LICENSE).
