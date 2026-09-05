@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdir, rename, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import JSZip from "jszip";
 import { JAVA_MANIFEST_URL, javaDataRoot, listJavaRegistries, type JavaRegistrySnapshot } from "./java-registry.js";
@@ -24,8 +25,23 @@ type ClientVersion = {
   };
 };
 
+const JSON_TIMEOUT_MS = 20_000;
+const CLIENT_TIMEOUT_MS = 120_000;
+const USER_AGENT = "Blockwright/version-synchronizer";
+
+async function fetchOfficial(url: string, timeoutMs: number) {
+  try {
+    return await fetch(url, { headers: { "user-agent": USER_AGENT }, signal: AbortSignal.timeout(timeoutMs) });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+      throw new Error(`Mojang request timed out after ${Math.round(timeoutMs / 1000)} seconds for ${url}.`);
+    }
+    throw error;
+  }
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { headers: { "user-agent": "Blockwright/0.2 version synchronizer" } });
+  const response = await fetchOfficial(url, JSON_TIMEOUT_MS);
   if (!response.ok) throw new Error(`Mojang request failed (${response.status}) for ${url}`);
   return response.json() as Promise<T>;
 }
@@ -51,9 +67,24 @@ function displayName(id: string) {
 }
 
 async function writeAtomic(path: string, bytes: string | Uint8Array) {
-  const temporary = `${path}.partial`;
+  const temporary = `${path}.${process.pid}.${Date.now()}.partial`;
+  const backup = `${path}.${process.pid}.${Date.now()}.backup`;
+  let movedExisting = false;
   await writeFile(temporary, bytes);
-  await rename(temporary, path);
+  try {
+    if (existsSync(path)) {
+      await rename(path, backup);
+      movedExisting = true;
+    }
+    await rename(temporary, path);
+    if (movedExisting) await rm(backup, { force: true });
+  } catch (error) {
+    if (movedExisting && !existsSync(path) && existsSync(backup)) await rename(backup, path);
+    throw error;
+  } finally {
+    await rm(temporary, { force: true });
+    if (existsSync(path)) await rm(backup, { force: true });
+  }
 }
 
 export async function syncJavaVersion(requestedVersion = "latest", includeTextures = true) {
@@ -62,7 +93,7 @@ export async function syncJavaVersion(requestedVersion = "latest", includeTextur
   const entry = manifest.versions.find((candidate) => candidate.id === version);
   if (!entry) throw new Error(`Java ${version} is not present in Mojang's version manifest.`);
   const metadata = await fetchJson<VersionMetadata>(entry.url);
-  const clientResponse = await fetch(metadata.downloads.client.url, { headers: { "user-agent": "Blockwright/0.2 version synchronizer" } });
+  const clientResponse = await fetchOfficial(metadata.downloads.client.url, CLIENT_TIMEOUT_MS);
   if (!clientResponse.ok) throw new Error(`Official Java ${version} client download failed (${clientResponse.status}).`);
   const clientBytes = new Uint8Array(await clientResponse.arrayBuffer());
   const actualSha1 = createHash("sha1").update(clientBytes).digest("hex");

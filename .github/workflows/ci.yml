@@ -15,6 +15,20 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm test
-      - run: npm run build
-      - run: npm run package:plugin
+      - run: npm run verify
+      - run: npm run verify:packaged-sync
+
+  windows-control-center:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run verify:packaged-sync
+      - run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-ControlCenter.ps1"
+      - run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Blockwright-ControlCenter.ps1" -ValidateUi
+      - run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Blockwright-ControlCenter.ps1" -SmokeTest -SmokeTestSeconds 60 -Json

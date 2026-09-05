@@ -5,7 +5,9 @@ Blockwright is a deployable Skybridge MCP/ChatGPT App and responsive React + Thr
 ## What ships
 
 - Streamable HTTP MCP endpoint at `/mcp`.
+- Local liveness and readiness endpoints at `/health` and `/ready` for operator tooling.
 - Twenty-seven MCP tools, including adaptive palette sessions, safety preflight, seeded candidates, live Java synchronization, local world discovery, real schematic import/export, whole-build structural auditing, a dedicated 3D reviewer, and guarded WorldEdit installation.
+- Human-readable tool titles, complete parameter guidance, structured output schemas, and invocation status text for MCP hosts.
 - Exact integer `x/y/z` placements; one viewer cube equals one Minecraft block.
 - One immutable build record feeds the viewer, counts, layers, validation, hash, and every export.
 - Interactive perspective/orthographic viewer with orbit, preset cameras, layer slicing, exploded layers, material highlighting, and construction playback.
@@ -55,7 +57,10 @@ The sync command verifies the official client SHA-1, writes an exact local regis
 npm test
 npm run sample
 npm run build
+npm run diagnose
 ```
+
+`npm run verify` runs the tests, production build and packaging, clean runtime installation, read-only diagnostics, and a clean production-runtime lock verification together. CI additionally runs `npm run verify:packaged-sync` so a rebuilt-but-uncommitted `app/` cannot pass and later ship stale generated files. Diagnostics check the Node and npm versions, manifest and lock alignment, direct dependency versions, MCP launch configuration, packaged runtime assets and Java registries, separate source-build health, skill-copy drift, packaged-build drift, and Windows control-center files. Use `node scripts/diagnose.mjs --json` for stable machine-readable `{ summary, checks }` output.
 
 ## Connect to ChatGPT
 
@@ -63,7 +68,13 @@ Run `npm run dev:tunnel`, copy the HTTPS forwarding URL, enable Developer Mode i
 
 ## Codex plugin
 
-The companion `blockwright` plugin bundles the skill, local MCP bridge, production workbench, exact Java 26.2 registry, and starter prompts. Its MCP bridge starts the local service on an isolated ephemeral port and removes the full child process tree when the task ends. The first launch installs local runtime dependencies once.
+The companion `blockwright` plugin bundles the skill, local MCP bridge, production workbench, exact Java 26.2 registry, starter prompts, and a native Windows control center. Launch `scripts/windows/Launch-Blockwright-ControlCenter.vbs` for a hidden-console desktop UI that can start, stop, restart, inspect, and diagnose the local service; `Install-BlockwrightShortcut.ps1` can create a convenient shortcut.
+
+The stdio MCP bridge starts its own local service on an isolated ephemeral port, validates the Node/runtime/dependency state first, waits for a matching ready response, and removes the full child process tree when the task ends. First launch uses the packaged runtime lock for a reproducible production-only install. If its child exits unexpectedly, the next MCP request starts a fresh instance. The bridge writes only JSON-RPC to stdout and sends operator logs to stderr.
+
+The private app-only `get_build_chunk` helper is reserved for paginating large immutable build records inside a future reviewer paging protocol. It is intentionally hidden from model-facing workflows; the current reviewer receives the complete record so counts, search, selections, and audits remain exact.
+
+`GET /health` is a lightweight liveness response: if it returns HTTP 200, the Blockwright process and versioned HTTP route are alive. `GET /ready` is stricter: it returns HTTP 200 only when the runtime is loaded, at least one synchronized Java registry is valid, and every asset referenced by the production Vite manifest exists; otherwise it returns HTTP 503 with per-check details. These routes are local/self-hosted operator endpoints—Alpic Cloud routes only `/mcp`.
 
 The development command itself is intentionally stricter: it uses port 3000 only, reuses a healthy matching Blockwright server, and reports an ownership/version conflict rather than silently incrementing to another port.
 
@@ -79,6 +90,9 @@ The development command itself is intentionally stricter: it uses port 3000 only
 - `src/lib/worlds.ts` — safe `level.dat` discovery and guarded WorldEdit installation.
 - `src/lib/exports.ts` — construction exports and checksummed bundle.
 - `src/server.ts` — MCP tools and shared view registration.
+- `mcp/server.mjs` — resilient stdio-to-local-HTTP bridge used by the Codex plugin.
+- `scripts/diagnose.mjs` — read-only source or installed-plugin diagnostics with text and JSON output.
+- `scripts/windows/` — native Windows service control center, launchers, shortcut installer, and operator notes.
 - `src/views/compile-build.tsx` — interactive seeded workbench and textured role palette.
 - `src/views/review-build.tsx` — state-aware exact-coordinate reviewer and annotation workflow.
 - `src/views/palette-studio.tsx` / `world-browser.tsx` — palette interview and local-world UI.

@@ -5,7 +5,16 @@ import { resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 import { comp, int, long, parse, simplify, string, writeUncompressed, type NBT } from "prismarine-nbt";
 import { afterEach, describe, expect, it } from "vitest";
-import { compileBuild, structuralSimilarity } from "./compiler.js";
+import { compileBuild, generateBuildCandidates, structuralSimilarity, summarizeBuild } from "./compiler.js";
+import {
+  buildAuditOutputSchema,
+  buildCandidateOutputSchema,
+  buildPreflightOutputSchema,
+  buildSummaryOutputSchema,
+  installWorldEditResultOutputSchema,
+  paletteInterviewOutputSchema,
+  savedPaletteOutputSchema,
+} from "./output-schemas.js";
 import { continuePaletteInterview, deletePalette, listPalettes, loadPalette, renamePalette, savePalette } from "./palette-studio.js";
 import { estimateBuild } from "./preflight.js";
 import { auditBuild } from "./reviewer.js";
@@ -34,6 +43,19 @@ function writeLevelDat(worldPath: string, name: string, version = "26.2", dataVe
 }
 
 describe("modular architecture", () => {
+  it("keeps build summaries and candidate results aligned with their MCP contracts", () => {
+    const build = compileBuild(base);
+    expect(buildSummaryOutputSchema.safeParse(summarizeBuild(build)).success).toBe(true);
+    const candidates = generateBuildCandidates(base, 2).map(({ build: candidateBuild, candidate, maximumSimilarity }) => ({
+      candidate,
+      maximumSimilarity,
+      build: summarizeBuild(candidateBuild),
+      plan: candidateBuild.plan,
+    }));
+    expect(candidates).toHaveLength(2);
+    expect(candidates.every((candidate) => buildCandidateOutputSchema.safeParse(candidate).success)).toBe(true);
+  });
+
   it("makes Japanese architecture structurally distinct from Nordic architecture", () => {
     const nordic = compileBuild({ ...base, style: "nordic", buildingType: "house" as const });
     const japanese = compileBuild({ ...base, style: "japanese", buildingType: "temple" as const });
@@ -63,6 +85,7 @@ describe("safety preflight", () => {
   it("warns and requires confirmation before a large generation", () => {
     const request = { ...base, dimensions: { width: 512, depth: 512, height: 128 }, buildingType: "megabase" as const };
     const preflight = estimateBuild(request);
+    expect(buildPreflightOutputSchema.safeParse(preflight).success).toBe(true);
     expect(preflight.totalVolume).toBe(33_554_432);
     expect(preflight.chunksTouched).toBe(1024);
     expect(preflight.overallRisk).toBe("red");
@@ -76,7 +99,9 @@ describe("palette persistence", () => {
   it("round-trips, renames, and deletes a saved exact-version palette", () => {
     process.env.BLOCKWRIGHT_STATE_DIR = fixtureRoot();
     const started = continuePaletteInterview({ edition: "java", version: "26.2", style: "japanese", answers: { buildType: "temple" }, lockRoles: ["roof"] });
+    expect(paletteInterviewOutputSchema.safeParse(started).success).toBe(true);
     const saved = savePalette(started.session.id, "Quiet Courtyard");
+    expect(savedPaletteOutputSchema.safeParse(saved).success).toBe(true);
     expect(loadPalette(saved.id).roles.roof).toBe("minecraft:dark_oak_stairs");
     expect(loadPalette(saved.id).lockedRoles).toContain("roof");
     expect(renamePalette(saved.id, "Rain Garden").name).toBe("Rain Garden");
@@ -111,6 +136,7 @@ describe("local world discovery and guarded installation", () => {
     expect(world.displayName).toBe("Creative Test World"); expect(world.minecraftVersion).toBe("26.2"); expect(world.dataVersion).toBe(4903);
     const build = compileBuild({ ...base, style: "modern" }); const targetFolder = world.suggestedSchematicFolders[0];
     const preview = await installWorldEditSchematic({ worldId: world.id, canonicalWorldPath: world.canonicalPath, targetFolder, name: "guarded", build, confirmed: false, dimension: "overworld", anchor: { x: 32, y: 70, z: -16 } });
+    expect(installWorldEditResultOutputSchema.safeParse(preview).success).toBe(true);
     expect(preview.status).toBe("confirmation_required"); expect(preview.blockCount).toBe(build.placements.length); expect(preview.anchor).toEqual({ x: 32, y: 70, z: -16 });
     expect(existsSync(resolve(targetFolder, "guarded.schem"))).toBe(false);
     expect(existsSync(resolve(targetFolder, "guarded.schem"))).toBe(false);
@@ -131,6 +157,7 @@ describe("global build review audit", () => {
       ],
     };
     const audit = auditBuild(reviewed);
+    expect(buildAuditOutputSchema.safeParse(audit).success).toBe(true);
     expect(audit.scannedPlacements).toBe(reviewed.placements.length);
     const stairFinding = audit.findings.find(({ code }) => code === "INCOMPLETE_STAIR_STATE");
     expect(stairFinding?.coordinates).toContainEqual({ x: 999, y: 120, z: 999 });

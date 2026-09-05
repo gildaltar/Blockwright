@@ -17,6 +17,7 @@ The painful part today is the gap between inspiration and construction: screensh
 7. Discover local Java worlds safely and install a verified schematic into an explicitly selected WorldEdit schematics folder.
 8. Review any compiled build in a state-aware 3D surface with exact selections, measurements, roof hiding, layer clipping, and portable annotations.
 9. Scan all placements for recurring structural defect classes so an example annotation leads to a whole-build audit rather than a one-coordinate patch.
+10. Operate the PC-local server from a native Windows control center with dependency and required-file checks, start/stop/restart controls, live health details, and continuously visible logs.
 
 ## Why an LLM?
 
@@ -34,9 +35,11 @@ The painful part today is the gap between inspiration and construction: screensh
 
 **Inspect:** Orbit, pan, zoom, switch perspective/orthographic views, isolate or explode layers, highlight materials, inspect coordinates, and play the construction sequence.
 
-**Review:** A dedicated state-aware reviewer renders common stairs, slabs, trapdoors, doors, panes, fences, walls, and lanterns from their canonical state. Users can select blocks or regions, measure, hide roof phases, clip layers, and save Change, Fix, Remove, or Liked notes tied to exact world coordinates.
+**Review:** A dedicated state-aware reviewer renders common stairs, slabs, trapdoors, doors, panes, fences, walls, and lanterns from their canonical state. Users can select blocks or regions, measure, hide roof phases, clip layers, and save Change, Fix, Remove, or Liked notes tied to exact world coordinates. The active mode, two-point progress, visible-block count, canonical selection details, inclusive dimensions, and measurement semantics stay visible while reviewing. Keyboard shortcuts accelerate mode, view, layer, roof, and annotation actions without hiding equivalent controls.
 
 **Audit:** A global structural audit groups analogous state, contact, support, connection, isolation, and generator-overlap findings across the complete immutable placement record.
+
+**Local Windows operation:** A native Windows utility checks Node/npm and the packaged runtime, reports actionable repair guidance, and controls one local server process. It exposes PID, endpoint, uptime, readiness, and bounded live stdout/stderr, with copy/export diagnostics for troubleshooting.
 
 **Validate:** The same build record reports unsupported identifiers, collisions, unsupported or floating placements, protected-coordinate conflicts, and budget violations.
 
@@ -66,6 +69,7 @@ The painful part today is the gap between inspiration and construction: screensh
 - Large command exports are safely chunked.
 - App UI is functional on desktop and mobile, keyboard accessible, and responsive.
 - Core server, compiler, exporter, and HTTP/MCP behavior are covered by automated tests.
+- Core build, candidate, preflight, audit, palette, and guarded-install responses publish concrete MCP schemas that are validated against their real handler data.
 - Public claims distinguish verified behavior from unavailable capabilities.
 - Java 26.2 compiles against an exact locally synchronized 26.2 block registry rather than a 1.21.x fallback.
 - Resource-pack loading reports how many build materials were resolved and falls back per material when a texture is missing.
@@ -76,7 +80,13 @@ The painful part today is the gap between inspiration and construction: screensh
 - World discovery is read-only, canonical-path based, bounded to standard or explicitly authorized roots, and reports `level.dat` metadata without modifying saves.
 - Guided installation copies only a verified `.schem` file after explicit confirmation. Direct save editing is never attempted.
 - Review selections and annotations preserve exact integer coordinates and canonical block state; imported reviews must match the immutable build hash.
+- Review import rejects malformed, oversized, out-of-bounds, or unsupported annotation data without replacing the current review, and reports the result in the UI.
+- Audit findings and annotation history can be searched and filtered without changing canonical totals, coordinates, or saved review state.
+- Reviewer controls expose accessible names, pressed/selected state, focus indicators, and a responsive inspector usable without pointer-only interaction.
 - Global review audits scan the complete placement record and preserve exact totals even when coordinate samples are capped for response size.
+- The native Windows control center can diagnose a stopped installation without changing it, prevents duplicate managed launches, and leaves a clear process/log trail for every start, stop, restart, or failure.
+- Windows dependency checks compare the installed Node version with the package engine requirement and verify required manifests, entry points, runtime modules, and packaged assets before launch.
+- Dependency repair is serialized by an OS-owned mutex across bridge and controller processes; stale owner metadata is handled only while that mutex is held, so two `npm` repairs cannot overlap.
 
 ## UX Flows
 
@@ -96,9 +106,17 @@ The painful part today is the gap between inspiration and construction: screensh
 
 1. Open the dedicated reviewer for a canonical build record.
 2. Inspect from multiple elevations or cardinal views, optionally hiding roof phases or clipping at a Y layer.
-3. Select one block or a two-corner region, measure if useful, and save a categorized annotation.
-4. Export a review JSON bound to the build id and hash, or import a matching review to continue.
-5. Run the whole-build audit before revision so every analogous issue is considered.
+3. Select one block or a two-corner region, inspect canonical state and inclusive dimensions, measure center-to-center and axis distances if useful, and save a categorized annotation with actionable intent.
+4. Search or filter annotations and audit findings, then jump to their exact sampled coordinates and visible Y layer.
+5. Export a review JSON bound to the build id and hash, or import a validated matching review to continue without risking the current notes.
+6. Run the whole-build audit before revision so every analogous issue is considered.
+
+**Operate the local server on Windows**
+
+1. Open the native Blockwright Control Center and inspect dependency, version, required-file, and runtime-module status.
+2. Install or repair runtime dependencies only when requested, then start one managed local server instance.
+3. Observe readiness, endpoint, PID, uptime, and live stdout/stderr while the server runs.
+4. Stop or restart the managed process and copy or export bounded diagnostics when troubleshooting is needed.
 
 **Develop a palette**
 
@@ -177,8 +195,14 @@ The painful part today is the gap between inspiration and construction: screensh
 
 - **Input:** `{ build }`
 - **Output:** Concise build and audit summary plus view-only canonical placements and findings.
-- **View:** Fullscreen state-aware 3D review surface with exact block/region selection, measurements, layer clipping, roof hiding, categorized annotations, user-owned textures, and review JSON import/export.
-- **State:** Camera, layer, roof visibility, selection, and annotations persist in shared view state and remain available to the assistant for referential requests.
+- **View:** Fullscreen state-aware 3D review surface with exact block/region selection, unambiguous inclusive and center-to-center measurements, layer clipping, roof hiding, searchable/filterable audits and annotations, keyboard shortcuts, user-owned textures, and guarded review JSON import/export.
+- **State:** Camera preset/projection, layer, roof visibility, selection, in-progress two-point anchor, annotations, and reviewer filters persist in shared view state and remain available to the assistant for referential requests.
+
+**Native utility: Blockwright Control Center (Windows)**
+
+- **Input:** Local plugin checkout/package location and an optional preferred loopback port.
+- **Output:** Dependency and required-file checks, process status, endpoint/readiness, PID, uptime, recent bounded logs, and exportable diagnostics.
+- **Behavior:** Uses built-in Windows/.NET UI, owns only the server process it launches, rejects duplicate managed starts, and provides explicit start, stop, restart, refresh, repair, copy, and diagnostics actions.
 
 **Tool: `analyze_world_region`**
 

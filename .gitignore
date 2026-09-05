@@ -12,3 +12,4 @@ app/node_modules/
 .vercel/
 cache/
 data/java/*-vanilla-resources.zip
+app/data/java/*-vanilla-resources.zip

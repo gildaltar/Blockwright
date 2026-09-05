@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readJavaRegistry } from "./java-registry.js";
+import { isValidJavaRegistrySnapshot, readJavaRegistry } from "./java-registry.js";
 import { chooseModelReference, placementTextureKey } from "./resource-pack.js";
 
 describe("Java version registry", () => {
@@ -10,6 +10,15 @@ describe("Java version registry", () => {
     expect(registry?.resourcePackVersion.major).toBe(88);
     expect(registry?.blocks.some(({ id }) => id === "minecraft:spruce_planks")).toBe(true);
     expect(registry?.blockCount).toBe(1198);
+  });
+
+  it("rejects truncated, inconsistent, and duplicate Java registry snapshots", () => {
+    const registry = readJavaRegistry("26.2");
+    expect(registry).toBeDefined();
+    expect(isValidJavaRegistrySnapshot(registry, "26.2")).toBe(true);
+    expect(isValidJavaRegistrySnapshot({ schemaVersion: 1, edition: "java", version: "26.2" }, "26.2")).toBe(false);
+    expect(isValidJavaRegistrySnapshot({ ...registry, blockCount: registry!.blockCount + 1 }, "26.2")).toBe(false);
+    expect(isValidJavaRegistrySnapshot({ ...registry, blocks: [registry!.blocks[0], registry!.blocks[0]], blockCount: 2 }, "26.2")).toBe(false);
   });
 });
 
