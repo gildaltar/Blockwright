@@ -553,7 +553,7 @@ function New-CapturedProcess {
     }
     $process.BeginOutputReadLine()
     $process.BeginErrorReadLine()
-    return [pscustomobject]@{ Process = $process; Pump = $pump; Label = $Label }
+    return [pscustomobject]@{ Process = $process; Pump = $pump; Label = $Label; ProcessTreeSnapshot = @() }
 }
 
 function Add-ControllerLog {
@@ -608,6 +608,65 @@ function Test-ProcessRunning {
     param([object]$Handle)
     if ($null -eq $Handle -or $null -eq $Handle.Process) { return $false }
     try { return -not $Handle.Process.HasExited } catch { return $false }
+}
+
+function Get-ProcessTreeSnapshot {
+    param([Parameter(Mandatory = $true)][int]$RootProcessId)
+    $knownIds = New-Object 'System.Collections.Generic.List[int]'
+    $knownIds.Add($RootProcessId)
+    try {
+        $processRows = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId -ErrorAction Stop
+        $changed = $true
+        while ($changed) {
+            $changed = $false
+            foreach ($row in $processRows) {
+                $candidateId = [int]$row.ProcessId
+                $candidateParentId = [int]$row.ParentProcessId
+                if ($knownIds.Contains($candidateParentId) -and -not $knownIds.Contains($candidateId)) {
+                    $knownIds.Add($candidateId)
+                    $changed = $true
+                }
+            }
+        }
+    } catch {}
+
+    $snapshot = @()
+    foreach ($processIdValue in $knownIds) {
+        $process = Get-Process -Id $processIdValue -ErrorAction SilentlyContinue
+        if ($null -eq $process) { continue }
+        $processStartUtc = $null
+        try { $processStartUtc = $process.StartTime.ToUniversalTime().ToString("o") } catch {}
+        $snapshot += [pscustomobject]@{ ProcessId = [int]$processIdValue; ProcessStartUtc = $processStartUtc }
+    }
+    return @($snapshot)
+}
+
+function Test-CapturedProcessIdentityRunning {
+    param([Parameter(Mandatory = $true)][object]$Identity)
+    $process = Get-Process -Id ([int]$Identity.ProcessId) -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $false }
+    if ([string]::IsNullOrWhiteSpace([string]$Identity.ProcessStartUtc)) { return $true }
+    try {
+        $expectedStart = [datetimeoffset]::Parse([string]$Identity.ProcessStartUtc).UtcDateTime
+        $actualStart = $process.StartTime.ToUniversalTime()
+        return [math]::Abs(($actualStart - $expectedStart).TotalSeconds) -le 1
+    } catch {
+        return $true
+    }
+}
+
+function Get-RunningCapturedProcessIds {
+    param([object[]]$Snapshot)
+    return @($Snapshot | Where-Object { Test-CapturedProcessIdentityRunning -Identity $_ } | ForEach-Object { [int]$_.ProcessId } | Sort-Object -Unique)
+}
+
+function Test-CapturedProcessTreeRunning {
+    param([object]$Handle)
+    if (Test-ProcessRunning $Handle) { return $true }
+    if ($null -eq $Handle) { return $false }
+    $snapshotProperty = $Handle.PSObject.Properties["ProcessTreeSnapshot"]
+    if ($null -eq $snapshotProperty) { return $false }
+    return @(Get-RunningCapturedProcessIds -Snapshot @($snapshotProperty.Value)).Count -gt 0
 }
 
 function Start-BlockwrightServer {
@@ -678,7 +737,22 @@ function Start-BlockwrightServer {
         throw
     }
     $script:ExpectedServerStop = $false
-    Write-ManagedServerRecord
+    try {
+        Write-ManagedServerRecord
+    } catch {
+        $recordFailure = $_.Exception.Message
+        $startedProcessId = [int]$script:ServerHandle.Process.Id
+        $script:ExpectedServerStop = $true
+        try {
+            Stop-CapturedProcessTree -Handle $script:ServerHandle
+        } catch {
+            $cleanupFailure = $_.Exception.Message
+            $script:ExpectedServerStop = $false
+            throw "The server started as PID $startedProcessId, but its managed-process record could not be persisted and process-tree cleanup could not be confirmed. The live handle and any ownership evidence were retained. Record failure: $recordFailure Cleanup failure: $cleanupFailure"
+        }
+        Complete-ConfirmedServerStop -RemoveManagedRecord
+        throw "The server started as PID $startedProcessId, but its managed-process record could not be persisted. The started process tree was stopped before startup failed. $recordFailure"
+    }
     Add-ControllerLog "Production entry: $entryPath (NODE_ENV=production, __PORT=$Port, PORT=$Port)."
     Add-ControllerLog "Started the standalone Blockwright HTTP/MCP server on 127.0.0.1:$Port (PID $($script:ServerHandle.Process.Id)). Codex-managed session servers are separate."
 }
@@ -686,38 +760,76 @@ function Start-BlockwrightServer {
 function Stop-CapturedProcessTree {
     param(
         [object]$Handle,
-        [int]$GraceMilliseconds = 3500
+        [int]$GraceMilliseconds = 3500,
+        [int]$ForceWaitMilliseconds = 5000,
+        [string]$TaskKillPath
     )
-    if (-not (Test-ProcessRunning $Handle)) { return }
+    if ($null -eq $Handle -or $null -eq $Handle.Process) { return }
     $managedProcess = $Handle.Process
-    $managedProcessId = $managedProcess.Id
-    try { $managedProcess.StandardInput.Close() } catch {}
-    try { $null = $managedProcess.WaitForExit($GraceMilliseconds) } catch {}
-    if (-not $managedProcess.HasExited) {
-        $taskKillPath = Join-Path $env:SystemRoot "System32\taskkill.exe"
-        $taskKillInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $taskKillInfo.FileName = $taskKillPath
-        $taskKillInfo.Arguments = "/PID $managedProcessId /T /F"
-        $taskKillInfo.UseShellExecute = $false
-        $taskKillInfo.CreateNoWindow = $true
-        $taskKillInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-        $taskKillProcess = [System.Diagnostics.Process]::Start($taskKillInfo)
-        $null = $taskKillProcess.WaitForExit(5000)
-        $taskKillProcess.Dispose()
+    $managedProcessId = [int]$managedProcess.Id
+    $snapshotProperty = $Handle.PSObject.Properties["ProcessTreeSnapshot"]
+    if ($null -eq $snapshotProperty) {
+        $Handle | Add-Member -NotePropertyName ProcessTreeSnapshot -NotePropertyValue @()
+        $snapshotProperty = $Handle.PSObject.Properties["ProcessTreeSnapshot"]
     }
+    $snapshotByIdentity = @{}
+    foreach ($identity in @($snapshotProperty.Value) + @(Get-ProcessTreeSnapshot -RootProcessId $managedProcessId)) {
+        $key = "{0}|{1}" -f ([int]$identity.ProcessId), ([string]$identity.ProcessStartUtc)
+        $snapshotByIdentity[$key] = $identity
+    }
+    $snapshot = @($snapshotByIdentity.Values)
+    $Handle.ProcessTreeSnapshot = $snapshot
+
+    if (Test-ProcessRunning $Handle) {
+        try { $managedProcess.StandardInput.Close() } catch {}
+        try { $null = $managedProcess.WaitForExit($GraceMilliseconds) } catch {}
+    }
+
+    $remainingProcessIds = @(Get-RunningCapturedProcessIds -Snapshot $snapshot)
+    if ($remainingProcessIds.Count -gt 0) {
+        if ([string]::IsNullOrWhiteSpace($TaskKillPath)) { $TaskKillPath = Join-Path $env:SystemRoot "System32\taskkill.exe" }
+        if (-not (Test-Path -LiteralPath $TaskKillPath -PathType Leaf)) {
+            throw "Forced process-tree stop could not run because taskkill.exe is missing: $TaskKillPath"
+        }
+        $forceTargets = if ($remainingProcessIds -contains $managedProcessId) { @($managedProcessId) } else { @($remainingProcessIds) }
+        foreach ($forceTargetId in $forceTargets) {
+            $taskKillInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $taskKillInfo.FileName = $TaskKillPath
+            $taskKillInfo.Arguments = "/PID $forceTargetId /T /F"
+            $taskKillInfo.UseShellExecute = $false
+            $taskKillInfo.CreateNoWindow = $true
+            $taskKillInfo.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+            $taskKillProcess = [System.Diagnostics.Process]::Start($taskKillInfo)
+            if ($null -eq $taskKillProcess) { throw "Forced process-tree stop did not start for PID $forceTargetId." }
+            try {
+                if (-not $taskKillProcess.WaitForExit($ForceWaitMilliseconds)) {
+                    try { $taskKillProcess.Kill() } catch {}
+                    throw "Forced process-tree stop timed out for PID $forceTargetId."
+                }
+            } finally {
+                $taskKillProcess.Dispose()
+            }
+        }
+        $deadline = (Get-Date).AddMilliseconds($ForceWaitMilliseconds)
+        do {
+            $remainingProcessIds = @(Get-RunningCapturedProcessIds -Snapshot $snapshot)
+            if ($remainingProcessIds.Count -eq 0) { break }
+            Start-Sleep -Milliseconds 50
+        } while ((Get-Date) -lt $deadline)
+    }
+
+    $remainingProcessIds = @(Get-RunningCapturedProcessIds -Snapshot $snapshot)
+    if ($remainingProcessIds.Count -gt 0 -or (Test-ProcessRunning $Handle)) {
+        $remainingText = if ($remainingProcessIds.Count -gt 0) { $remainingProcessIds -join ", " } else { [string]$managedProcessId }
+        throw "Blockwright process-tree exit could not be confirmed; PID(s) still running: $remainingText. Ownership evidence was retained."
+    }
+    $Handle.ProcessTreeSnapshot = @()
 }
 
-function Stop-BlockwrightServer {
-    if (-not (Test-ProcessRunning $script:ServerHandle)) {
-        $script:LocalMcpToken = $null
-        Add-ControllerLog "The server is already stopped."
-        return
-    }
-    $stoppedProcessId = $script:ServerHandle.Process.Id
-    $script:ExpectedServerStop = $true
-    Add-ControllerLog "Stopping Blockwright PID $stoppedProcessId and its managed worker..."
-    Stop-CapturedProcessTree -Handle $script:ServerHandle
-    $null = Drain-ProcessLogs -Handle $script:ServerHandle
+function Complete-ConfirmedServerStop {
+    param([switch]$RemoveManagedRecord)
+    if ($null -eq $script:ServerHandle) { return }
+    try { $null = Drain-ProcessLogs -Handle $script:ServerHandle } catch {}
     try { $script:LastExitCode = $script:ServerHandle.Process.ExitCode } catch {}
     try { $script:ServerHandle.Process.Dispose() } catch {}
     $script:ServerHandle = $null
@@ -730,7 +842,26 @@ function Stop-BlockwrightServer {
     $script:ServerReadinessDetail = $null
     $script:ServerStartedAt = $null
     $script:LocalMcpToken = $null
-    Remove-ManagedServerRecord
+    $script:ExpectedServerStop = $false
+    if ($RemoveManagedRecord) { Remove-ManagedServerRecord }
+}
+
+function Stop-BlockwrightServer {
+    if ($null -eq $script:ServerHandle) {
+        $script:LocalMcpToken = $null
+        Add-ControllerLog "The server is already stopped."
+        return
+    }
+    $stoppedProcessId = $script:ServerHandle.Process.Id
+    $script:ExpectedServerStop = $true
+    Add-ControllerLog "Stopping Blockwright PID $stoppedProcessId and its managed worker..."
+    try {
+        Stop-CapturedProcessTree -Handle $script:ServerHandle
+    } catch {
+        $script:ExpectedServerStop = $false
+        throw
+    }
+    Complete-ConfirmedServerStop -RemoveManagedRecord
     Add-ControllerLog "Blockwright stopped."
 }
 
@@ -799,24 +930,7 @@ function Get-UpdateReportMessage {
 function Get-ManagedProcessIds {
     if (-not (Test-ProcessRunning $script:ServerHandle)) { return @() }
     $rootProcessId = [int]$script:ServerHandle.Process.Id
-    $knownIds = New-Object 'System.Collections.Generic.List[int]'
-    $knownIds.Add($rootProcessId)
-    try {
-        $processRows = Get-CimInstance Win32_Process -Property ProcessId, ParentProcessId -ErrorAction Stop
-        $changed = $true
-        while ($changed) {
-            $changed = $false
-            foreach ($row in $processRows) {
-                $candidateId = [int]$row.ProcessId
-                $candidateParentId = [int]$row.ParentProcessId
-                if ($knownIds.Contains($candidateParentId) -and -not $knownIds.Contains($candidateId)) {
-                    $knownIds.Add($candidateId)
-                    $changed = $true
-                }
-            }
-        }
-    } catch {}
-    return @($knownIds)
+    return @(Get-ProcessTreeSnapshot -RootProcessId $rootProcessId | ForEach-Object { [int]$_.ProcessId })
 }
 
 function Get-ManagedListeningPorts {
@@ -848,7 +962,7 @@ function Get-ManagedListeningPorts {
 function Read-BoundedResponseBody {
     param(
         [Parameter(Mandatory = $true)][System.IO.Stream]$Stream,
-        [ValidateRange(1024, 131072)][int]$MaximumCharacters = 32768
+        [ValidateRange(1024, 1048576)][int]$MaximumCharacters = 32768
     )
     $reader = New-Object System.IO.StreamReader($Stream)
     try {
@@ -947,6 +1061,164 @@ function Test-LocalMcpEndpoint {
         return [pscustomobject]@{ Responded = ($null -ne $statusCode); Successful = $false; StatusCode = $statusCode; Detail = "authenticated MCP initialize failed" }
     } catch {
         return [pscustomobject]@{ Responded = $false; Successful = $false; StatusCode = $null; Detail = "authenticated MCP initialize was unreachable" }
+    }
+}
+
+function Invoke-LocalMcpJsonRpc {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Id,
+        [Parameter(Mandatory = $true)][string]$Method,
+        [object]$Parameters = @{},
+        [ValidateRange(1000, 60000)][int]$TimeoutMilliseconds = 30000,
+        [ValidateRange(32768, 1048576)][int]$MaximumResponseCharacters = 1048576
+    )
+    if ([string]::IsNullOrWhiteSpace($script:LocalMcpToken)) {
+        throw "The per-launch MCP credential is unavailable."
+    }
+    $request = [System.Net.HttpWebRequest]::Create($Url)
+    $request.Method = "POST"
+    $request.Timeout = $TimeoutMilliseconds
+    $request.ReadWriteTimeout = $TimeoutMilliseconds
+    $request.AllowAutoRedirect = $false
+    $request.ContentType = "application/json"
+    $request.Accept = "application/json, text/event-stream"
+    $request.Headers["Authorization"] = "Bearer $($script:LocalMcpToken)"
+    $payloadDocument = [ordered]@{ jsonrpc = "2.0"; id = $Id; method = $Method; params = $Parameters }
+    $payload = [Text.Encoding]::UTF8.GetBytes(($payloadDocument | ConvertTo-Json -Depth 16 -Compress))
+    $request.ContentLength = $payload.Length
+    try {
+        $requestStream = $request.GetRequestStream()
+        try { $requestStream.Write($payload, 0, $payload.Length) } finally { $requestStream.Dispose() }
+        $response = $request.GetResponse()
+        try {
+            $statusCode = [int]$response.StatusCode
+            $body = Read-BoundedResponseBody -Stream $response.GetResponseStream() -MaximumCharacters $MaximumResponseCharacters
+        } finally {
+            $response.Close()
+        }
+    } catch [System.Net.WebException] {
+        $statusCode = $null
+        $body = ""
+        if ($null -ne $_.Exception.Response) {
+            try {
+                $statusCode = [int]$_.Exception.Response.StatusCode
+                $body = Read-BoundedResponseBody -Stream $_.Exception.Response.GetResponseStream() -MaximumCharacters 32768
+            } finally {
+                $_.Exception.Response.Close()
+            }
+        }
+        $summary = ($body -replace '\s+', ' ').Trim()
+        if ($summary.Length -gt 360) { $summary = $summary.Substring(0, 357) + "..." }
+        throw "MCP $Method failed$(if ($null -ne $statusCode) { " with HTTP $statusCode" }).$(if ($summary) { " $summary" })"
+    }
+    if ($statusCode -lt 200 -or $statusCode -ge 300) { throw "MCP $Method returned HTTP $statusCode." }
+    try { $message = $body | ConvertFrom-Json } catch { throw "MCP $Method did not return bounded JSON." }
+    if ([string]$message.jsonrpc -ne "2.0" -or [string]$message.id -ne $Id) { throw "MCP $Method returned a mismatched JSON-RPC envelope." }
+    if ($null -ne $message.PSObject.Properties["error"]) {
+        $errorMessage = [string](Get-FirstPropertyValue -Object $message.error -Names @("message"))
+        throw "MCP $Method returned an error.$(if ($errorMessage) { " $errorMessage" })"
+    }
+    return $message
+}
+
+function Invoke-PrimaryWorkflowSmokeTest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$ExpectedVersion
+    )
+    $initialize = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-initialize" -Method "initialize" -Parameters @{
+        protocolVersion = "2025-03-26"
+        capabilities = @{}
+        clientInfo = @{ name = "blockwright-windows-smoke"; version = $ControllerVersion }
+    }
+    $serverInfo = Get-FirstPropertyValue -Object $initialize.result -Names @("serverInfo")
+    $serverName = [string](Get-FirstPropertyValue -Object $serverInfo -Names @("name"))
+    $serverVersion = [string](Get-FirstPropertyValue -Object $serverInfo -Names @("version"))
+    if ($serverName -cne "blockwright" -or $serverVersion -cne $ExpectedVersion) {
+        throw "Installed MCP identity mismatch (name '$serverName', version '$serverVersion'; expected blockwright $ExpectedVersion)."
+    }
+
+    $toolList = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-tools" -Method "tools/list"
+    $tools = @($toolList.result.tools)
+    $toolNames = @($tools | ForEach-Object { [string]$_.name })
+    $requiredTools = @("compile_build", "validate_build", "validate_build_contract", "export_build")
+    $missingTools = @($requiredTools | Where-Object { $toolNames -notcontains $_ })
+    if ($missingTools.Count -gt 0) { throw "Installed MCP tool inventory is missing: $($missingTools -join ', ')." }
+
+    $buildInput = [ordered]@{
+        name = "Installed MVP Smoke"
+        edition = "java"
+        version = "26.2"
+        style = "nordic"
+        buildingType = "house"
+        dimensions = @{ width = 9; depth = 9; height = 7 }
+        seed = "blockwright-windows-mvp-smoke-v1"
+        blockBudget = 5000
+    }
+    $compileParameters = @{ name = "compile_build"; arguments = $buildInput }
+    $compile = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-compile" -Method "tools/call" -Parameters $compileParameters
+    if ([bool]$compile.result.isError) { throw "Installed compile_build returned a tool error." }
+    $build = $compile.result.structuredContent.build
+    if ($null -eq $build -or [string]$build.id -notmatch '^bw_[a-f0-9]{12}$' -or [string]$build.hash -notmatch '^[a-f0-9]{64}$') {
+        throw "Installed compile_build did not return a canonical build identity."
+    }
+    if ([int]$build.blockCount -le 0 -or -not [bool]$build.validation.valid -or [string]$build.contract.status -ne "valid") {
+        throw "Installed compile_build did not produce a non-empty, valid build and contract."
+    }
+
+    $replay = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-replay" -Method "tools/call" -Parameters $compileParameters
+    $replayBuild = $replay.result.structuredContent.build
+    if ([bool]$replay.result.isError -or [string]$replayBuild.hash -cne [string]$build.hash -or [int]$replayBuild.blockCount -ne [int]$build.blockCount) {
+        throw "Installed compile_build did not reproduce the same deterministic build hash and block count."
+    }
+
+    $validation = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-validation" -Method "tools/call" -Parameters @{
+        name = "validate_build"
+        arguments = @{ build = [string]$build.id }
+    }
+    if ([bool]$validation.result.isError -or -not [bool]$validation.result.structuredContent.validation.valid -or
+        [string]$validation.result.structuredContent.hash -cne [string]$build.hash) {
+        throw "Installed validate_build did not reproduce the compiled build's valid hash-bound result."
+    }
+
+    $contractValidation = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-contract" -Method "tools/call" -Parameters @{
+        name = "validate_build_contract"
+        arguments = @{ build = [string]$build.id }
+    }
+    $contract = $contractValidation.result.structuredContent.contract
+    if ([bool]$contractValidation.result.isError -or [string]$contract.status -ne "valid" -or [string]$contract.buildHash -cne [string]$build.hash) {
+        throw "Installed validate_build_contract did not reproduce the compiled build's valid hash-bound contract."
+    }
+
+    $export = Invoke-LocalMcpJsonRpc -Url $Url -Id "blockwright-smoke-export" -Method "tools/call" -Parameters @{
+        name = "export_build"
+        arguments = @{ build = [string]$build.id; format = "schem" }
+    }
+    $exportResult = $export.result.structuredContent
+    if ([bool]$export.result.isError -or [string]$exportResult.format -ne "schem" -or
+        [string]$exportResult.filename -notmatch '\.schem$' -or [int]$exportResult.bytes -le 0 -or [int]$exportResult.schematicVersion -ne 3) {
+        throw "Installed export_build did not produce a non-empty Sponge Schematic v3 artifact."
+    }
+
+    return [pscustomobject][ordered]@{
+        passed = $true
+        protocolVersion = [string]$initialize.result.protocolVersion
+        serverName = $serverName
+        serverVersion = $serverVersion
+        toolCount = $tools.Count
+        requiredTools = $requiredTools
+        buildId = [string]$build.id
+        buildHash = [string]$build.hash
+        blockCount = [int]$build.blockCount
+        deterministicReplay = $true
+        validationValid = $true
+        contractStatus = [string]$contract.status
+        exportFormat = [string]$exportResult.format
+        exportFilename = [string]$exportResult.filename
+        exportBytes = [int]$exportResult.bytes
+        dataVersion = [int]$exportResult.dataVersion
+        schematicVersion = [int]$exportResult.schematicVersion
     }
 }
 
@@ -1143,7 +1415,7 @@ function Update-EndpointDiscovery {
 function Complete-ExitedProcesses {
     if ($null -ne $script:ServerHandle) {
         $null = Drain-ProcessLogs -Handle $script:ServerHandle
-        if (-not (Test-ProcessRunning $script:ServerHandle)) {
+        if (-not (Test-ProcessRunning $script:ServerHandle) -and -not (Test-CapturedProcessTreeRunning $script:ServerHandle)) {
             try { $script:LastExitCode = $script:ServerHandle.Process.ExitCode } catch {}
             Add-ControllerLog "The server process exited with code $script:LastExitCode."
             if (-not $script:ExpectedServerStop) { Write-CrashRecord -ExitCode $script:LastExitCode }
@@ -1240,6 +1512,7 @@ function Invoke-SmokeTest {
     $processIdValue = $null
     $smokeEndpoint = $null
     $smokeHttpStatus = $null
+    $workflow = $null
     try {
         Start-BlockwrightServer
         $started = (Test-ProcessRunning $script:ServerHandle) -or (Test-ProcessRunning $script:MaintenanceHandle)
@@ -1266,9 +1539,10 @@ function Invoke-SmokeTest {
             }
             Update-EndpointDiscovery
             if (-not [string]::IsNullOrWhiteSpace($script:ServerBaseUrl) -and $script:ServerReady) {
-                $healthy = $true
                 $smokeEndpoint = "$($script:ServerBaseUrl)/mcp"
                 $smokeHttpStatus = $script:ServerHttpStatus
+                $workflow = Invoke-PrimaryWorkflowSmokeTest -Url $smokeEndpoint -ExpectedVersion (Get-ExpectedAppVersion)
+                $healthy = [bool]$workflow.passed
                 break
             }
             Start-Sleep -Milliseconds 250
@@ -1305,6 +1579,7 @@ function Invoke-SmokeTest {
         processId = $processIdValue
         endpoint = $smokeEndpoint
         httpStatus = $smokeHttpStatus
+        workflow = $workflow
         failure = $failure
         logs = @($capturedLines)
     }

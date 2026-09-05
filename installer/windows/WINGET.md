@@ -2,6 +2,8 @@
 
 Do not submit Blockwright to the Windows Package Manager repository until a signed installer has passed all clean-machine and real-world checks below.
 
+The explicitly unsigned v0.6.0 MVP prerelease is not eligible for WinGet submission.
+
 - The exact public installer URL is immutable and uses HTTPS.
 - The manifest SHA-256 is calculated from the final Authenticode-signed installer, not from an unsigned precursor.
 - Scope is `user`, architecture is `x64`, installer type is `inno`, and silent switches are `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.

@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/gildaltar/Blockwright/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gildaltar/Blockwright/actions/workflows/ci.yml/badge.svg" /></a>
-  <a href="https://github.com/gildaltar/Blockwright/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/gildaltar/Blockwright?color=d88742&label=release" /></a>
+  <a href="https://github.com/gildaltar/Blockwright/releases/latest"><img alt="Latest stable release" src="https://img.shields.io/github/v/release/gildaltar/Blockwright?color=d88742&label=stable%20release" /></a>
   <img alt="Node.js 22.23.1 or newer" src="https://img.shields.io/badge/Node.js-22.23.1%2B-6f9f55" />
   <a href="LICENSE"><img alt="GPL-2.0-only license" src="https://img.shields.io/github/license/gildaltar/Blockwright?color=8aa49a" /></a>
 </p>
@@ -19,7 +19,7 @@
   <a href="#quick-start">Quick start</a> ·
   <a href="#review-what-was-actually-built">3D reviewer</a> ·
   <a href="#windows-control-center">Windows app</a> ·
-  <a href="https://github.com/gildaltar/Blockwright/releases/latest">Latest release</a>
+  <a href="https://github.com/gildaltar/Blockwright/releases/latest">Latest stable release</a>
 </p>
 
 <p align="center"><sub>Original v0.6.0 Blockwright artwork. Illustrative art is labeled separately from live product captures.</sub></p>
@@ -102,7 +102,10 @@ Launch [`scripts/windows/Launch-Blockwright-ControlCenter.vbs`](scripts/windows/
 
 ## Quick start
 
-For ordinary Windows use, install the latest [per-user Windows package](https://github.com/gildaltar/Blockwright/releases/latest/download/Blockwright-0.6.0-windows-x64-setup.exe) or extract the [portable package](https://github.com/gildaltar/Blockwright/releases/latest/download/Blockwright-0.6.0-windows-x64-portable.zip). Both carry a private pinned Node.js runtime and do not modify a machine-wide Node installation. These links become live when the signed v0.6.0 GitHub release is published.
+For Windows, download the exact v0.6.0 MVP prerelease as either the [per-user installer](https://github.com/gildaltar/Blockwright/releases/download/v0.6.0/Blockwright-0.6.0-windows-x64-setup.exe) or the [portable ZIP](https://github.com/gildaltar/Blockwright/releases/download/v0.6.0/Blockwright-0.6.0-windows-x64-portable.zip). Both carry a private pinned Node.js runtime and do not modify a machine-wide Node installation. The installer uses `%LOCALAPPDATA%\Programs\Blockwright` and does not require administrator access; for the portable build, extract the whole ZIP before running `scripts\windows\Start-Blockwright-Portable.cmd`.
+
+> [!WARNING]
+> **Blockwright 0.6.0 is an unsigned Windows MVP prerelease.** Its setup program will show an unknown publisher, and Microsoft Defender SmartScreen may display **Windows protected your PC**. Download it only from the [official v0.6.0 release page](https://github.com/gildaltar/Blockwright/releases/tag/v0.6.0), compare the file's SHA-256 with `SHA256SUMS.txt` from that page (`Get-FileHash .\Blockwright-0.6.0-windows-x64-setup.exe -Algorithm SHA256`), and continue through **More info → Run anyway** only if the hash matches and you trust this repository. A matching checksum detects a damaged or changed download; it is not a publisher signature. The built-in updater intentionally refuses this unsigned prerelease, so install later prereleases manually.
 
 For source development:
 
@@ -210,7 +213,7 @@ npm run diagnose
 
 `npm run verify` runs the test suite, production build, plugin packaging, runtime-lock check, production dependency installation, and read-only diagnostics. Windows release verification additionally checks the private runtime, SBOMs, hashes, signed-installer policy, install/upgrade/repair/uninstall lifecycle, and cleanup ownership boundaries. CI rejects packaged output that has drifted from source.
 
-Unsigned local packages are development artifacts. A public paid release still requires a real publisher certificate, protected signing configuration, final installer testing, and approval of the separate exact-ID publication workflow; direct UI publication is outside the verified release boundary. Protected/immutable release tags, GitHub immutable releases, custom-domain DNS, live Stripe credentials, WinGet submission, real Litematica interoperability, and consented customer case studies are separate external gates.
+The public v0.6.0 Windows build is a deliberately unsigned, explicitly labeled MVP prerelease. Its exact tagged release, checksum manifest, SBOMs, and machine-readable signature-status file define that limited distribution boundary; it does not satisfy the signed-release gate and is not eligible for the automatic updater or WinGet. Signed stable releases remain the preferred channel and still require a real publisher certificate, protected signing configuration, final installer testing, provenance, and approval of the separate exact-ID publication workflow. Protected/immutable release tags, GitHub immutable releases, custom-domain DNS, live Stripe credentials, WinGet submission, real Litematica interoperability, and consented customer case studies remain separate external gates.
 
 ## Documentation
 

@@ -21,6 +21,7 @@ The release is complete only when the supported local workflow can be installed 
 
 - Supported commercial output is Java-first. Bedrock `.mcstructure`, Bedrock world output, and Marketplace workflows remain deferred.
 - Code signing requires an externally supplied signing identity. Unsigned development artifacts must be labeled as such and may not satisfy the signed-release gate.
+- The explicitly authorized public `v0.6.0` MVP may ship only as a conspicuously **unsigned GitHub prerelease** when no publisher identity is available. Its exact installer and portable ZIP must pass the full local and clean-runner lifecycle, publish checksums, SBOMs, and machine-readable unsigned status, and give manual hash/SmartScreen guidance. It is excluded from the signed automatic updater, the stable latest-release channel, and WinGet, and must never be described as signed or trusted-publisher verified.
 - A first-party domain, production payments, refunds, invoices, email delivery, and public review links require operator-owned service configuration. Missing configuration must fail closed.
 - WinGet submission begins only after the exact installer has passed clean-machine and real-world validation.
 - Showcase builds may be generated as demonstrations, but customer case studies must describe consenting real customers and measured outcomes.

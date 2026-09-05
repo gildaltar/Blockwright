@@ -72,6 +72,50 @@ test("checksums round-trip and reject malformed records", () => {
   }
 });
 
+test("signed release workflow is manual-only and cannot auto-run on an unsigned tag", () => {
+  const workflow = readFileSync(resolve(repositoryRoot, ".github", "workflows", "windows-release.yml"), "utf8");
+  const triggerBlock = workflow.match(/^on:\r?\n([\s\S]*?)^permissions:/m);
+  assert.ok(triggerBlock, "Windows release workflow must have a bounded trigger block");
+  const triggers = [...triggerBlock[1].matchAll(/^ {2}([a-z_]+):/gm)].map((match) => match[1]);
+  assert.deepEqual(triggers, ["workflow_dispatch"]);
+  assert.match(triggerBlock[1], /release_tag:[\s\S]+required: true[\s\S]+type: string/);
+  assert.doesNotMatch(triggerBlock[1], /^ {2}push:/m);
+  assert.doesNotMatch(triggerBlock[1], /tags:\s*\[?\s*["']?v\*/);
+  assert.match(workflow, /REQUESTED_TAG: \$\{\{ inputs\.release_tag \}\}[\s\S]+\$tag = \(\[string\]\$env:REQUESTED_TAG\)\.Trim\(\)/);
+  assert.doesNotMatch(workflow, /github\.(?:event_name|ref_name)|EVENT_(?:NAME|REF_NAME)/);
+});
+
+test("Windows lifecycle pull-request triggers cover every staged payload and build input", () => {
+  const workflow = readFileSync(resolve(repositoryRoot, ".github", "workflows", "windows-installer-ci.yml"), "utf8");
+  for (const path of [
+    ".codex-plugin/**",
+    ".mcp.json",
+    "alpic.json",
+    "app/**",
+    "assets/github/**",
+    "data/java/**",
+    "installer/windows/**",
+    "LICENSE",
+    "mcp/**",
+    "package.json",
+    "package-lock.json",
+    "README.md",
+    "scripts/benchmark-v060.ts",
+    "scripts/diagnose.mjs",
+    "scripts/package-plugin.mjs",
+    "scripts/release/**",
+    "scripts/windows/**",
+    "skills/**",
+    "src/**",
+    "standalone/**",
+    "tsconfig.json",
+    "vite.config.ts",
+    "vite.standalone.config.ts",
+  ]) {
+    assert.ok(workflow.includes(`- "${path}"`), `Windows lifecycle trigger is missing ${path}`);
+  }
+});
+
 test("public release workflow binds a qualified tag and requires artifact provenance", () => {
   const workflow = readFileSync(resolve(repositoryRoot, ".github", "workflows", "windows-release.yml"), "utf8");
   const publishWorkflow = readFileSync(resolve(repositoryRoot, ".github", "workflows", "windows-publish-release.yml"), "utf8");

@@ -1,13 +1,12 @@
 name: Draft signed Windows release
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Existing v-prefixed tag to stage; select the same tag in Use workflow from"
+        description: "Existing signed-stable v-prefixed tag to stage; select the same tag in Use workflow from"
         required: true
+        type: string
 
 permissions:
   contents: read
@@ -28,11 +27,9 @@ jobs:
         id: resolve
         shell: powershell
         env:
-          EVENT_NAME: ${{ github.event_name }}
           REQUESTED_TAG: ${{ inputs.release_tag }}
-          EVENT_REF_NAME: ${{ github.ref_name }}
         run: |
-          $tag = if ($env:EVENT_NAME -eq "workflow_dispatch") { $env:REQUESTED_TAG } else { $env:EVENT_REF_NAME }
+          $tag = ([string]$env:REQUESTED_TAG).Trim()
           if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Windows releases require a stable numeric vMAJOR.MINOR.PATCH tag: $tag" }
           $qualifiedRef = "refs/tags/$tag"
           "release_tag=$tag" >> $env:GITHUB_OUTPUT
@@ -181,6 +178,10 @@ jobs:
           }
       - name: Generate signed update metadata and final checksums
         shell: powershell
+        env:
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_REF: ${{ needs.validate-release-ref.outputs.qualified_ref }}
+          SIGNING_THUMBPRINT: ${{ vars.BLOCKWRIGHT_SIGNING_THUMBPRINT }}
         run: |
           $version = "${{ needs.validate-release-ref.outputs.release_version }}"
           $tag = "${{ needs.validate-release-ref.outputs.release_tag }}"
@@ -190,7 +191,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Update metadata generation failed with exit code $LASTEXITCODE." }
           node scripts/release/write-checksums.mjs --dir ".\release\windows"
           if ($LASTEXITCODE -ne 0) { throw "Final checksum generation failed with exit code $LASTEXITCODE." }
-          node scripts/release/verify-release.mjs --dir ".\release\windows" --require-signed
+          node scripts/release/verify-release.mjs --dir ".\release\windows" --require-signed `
+            --repository $env:RELEASE_REPOSITORY --source-ref $env:RELEASE_REF --expected-thumbprint $env:SIGNING_THUMBPRINT
           if ($LASTEXITCODE -ne 0) { throw "Signed release verification failed with exit code $LASTEXITCODE." }
       - name: Attest every public Windows release artifact and manifest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -209,9 +211,11 @@ jobs:
           RELEASE_REPOSITORY: ${{ github.repository }}
           RELEASE_COMMIT: ${{ needs.validate-release-ref.outputs.release_commit }}
           RELEASE_REF: ${{ needs.validate-release-ref.outputs.qualified_ref }}
+          SIGNING_THUMBPRINT: ${{ vars.BLOCKWRIGHT_SIGNING_THUMBPRINT }}
         run: |
           node scripts/release/verify-release.mjs --dir ".\release\windows" --require-signed --require-github-attestation `
-            --repository $env:RELEASE_REPOSITORY --source-digest $env:RELEASE_COMMIT --source-ref $env:RELEASE_REF
+            --repository $env:RELEASE_REPOSITORY --source-digest $env:RELEASE_COMMIT --source-ref $env:RELEASE_REF `
+            --expected-thumbprint $env:SIGNING_THUMBPRINT
           if ($LASTEXITCODE -ne 0) { throw "Commit-bound provenance verification failed with exit code $LASTEXITCODE." }
       - name: Exercise exact signed installer
         shell: powershell
@@ -219,6 +223,13 @@ jobs:
           $version = "${{ needs.validate-release-ref.outputs.release_version }}"
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-InstallerLifecycle.ps1" -CurrentInstaller ".\release\windows\Blockwright-$version-windows-x64-setup.exe"
           if ($LASTEXITCODE -ne 0) { throw "Signed installer lifecycle failed with exit code $LASTEXITCODE." }
+      - name: Exercise matching portable private runtime, diagnostics, primary workflow, and isolation
+        shell: powershell
+        run: |
+          $version = "${{ needs.validate-release-ref.outputs.release_version }}"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-PortableLifecycle.ps1" `
+            -PortableZip ".\release\windows\Blockwright-$version-windows-x64-portable.zip"
+          if ($LASTEXITCODE -ne 0) { throw "Signed-candidate portable lifecycle failed with exit code $LASTEXITCODE." }
       - name: Upload signed release evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

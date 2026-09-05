@@ -6,7 +6,11 @@ import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
   assertChildPath,
+  assertPluginManifestReferences,
+  clearReleaseCandidateOutputs,
+  copyPluginManifestPayload,
   createSboms,
+  inventoryFromInstalledTree,
   normalizeThumbprint,
   readJson,
   readReleaseConfig,
@@ -35,7 +39,10 @@ function run(command, args, options = {}) {
     executable = isAbsolute(command) ? resolve(dirname(command), "node.exe") : process.execPath;
     const npmCli = isAbsolute(command)
       ? resolve(dirname(command), "node_modules", "npm", "bin", "npm-cli.js")
-      : process.env.npm_execpath;
+      : [
+          process.env.npm_execpath,
+          resolve(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+        ].find((candidate) => candidate && existsSync(candidate));
     if (!npmCli || !existsSync(npmCli)) throw new Error(`npm CLI entry could not be resolved for ${command}.`);
     invocationArguments = [npmCli, ...args];
   }
@@ -120,9 +127,7 @@ function copySourcePayload(stageRoot) {
     const source = resolve(repositoryRoot, name);
     if (existsSync(source)) cpSync(source, resolve(stageRoot, name), { recursive: statSync(source).isDirectory() });
   }
-  if (existsSync(resolve(repositoryRoot, ".codex-plugin"))) {
-    cpSync(resolve(repositoryRoot, ".codex-plugin"), resolve(stageRoot, ".codex-plugin"), { recursive: true });
-  }
+  copyPluginManifestPayload(repositoryRoot, stageRoot);
   const presentationIcon = resolve(repositoryRoot, "assets", "github", "blockwright-icon-v060.png");
   const windowsIcon = resolve(repositoryRoot, "installer", "windows", "assets", "blockwright-v060.ico");
   if (!existsSync(presentationIcon)) throw new Error(`The reviewed Blockwright presentation icon is missing: ${presentationIcon}`);
@@ -248,6 +253,8 @@ try {
   installProductionDependencies(stageRoot);
   assertNoRedistributionRestrictedResourceArchives(stageRoot);
   writeBundleMetadata(stageRoot, config, version, trustedPublisherThumbprint);
+  assertPluginManifestReferences(stageRoot);
+  clearReleaseCandidateOutputs(outputDirectory, version);
 
   const portableParent = resolve(workDirectory, "portable");
   const portableRoot = resolve(portableParent, "Blockwright");
@@ -257,10 +264,29 @@ try {
   const portableZip = resolve(outputDirectory, `Blockwright-${version}-windows-x64-portable.zip`);
   compressPortable(portableParent, "Blockwright", portableZip);
 
-  const lock = readJson(resolve(stageRoot, "app", "package-lock.json"));
+  const stagedApplicationManifest = readJson(resolve(stageRoot, "app", "package.json"));
+  if (stagedApplicationManifest.name !== rootPackage.name || stagedApplicationManifest.version !== version || stagedApplicationManifest.license !== rootPackage.license) {
+    throw new Error("Staged application package identity/version/license does not match the release package.");
+  }
+  const applicationInventory = inventoryFromInstalledTree(resolve(stageRoot, "app", "node_modules"), { rootManifest: stagedApplicationManifest });
+  const runtimeNpmInventory = inventoryFromInstalledTree(resolve(stageRoot, "runtime", "node", "node_modules"));
   const serialHash = createHash("sha256").update(`blockwright:${version}:windows:x64`).digest("hex");
   const serial = `urn:uuid:${serialHash.slice(0, 8)}-${serialHash.slice(8, 12)}-4${serialHash.slice(13, 16)}-8${serialHash.slice(17, 20)}-${serialHash.slice(20, 32)}`;
-  const { cyclonedx, spdx } = createSboms({ lock, name: rootPackage.name, version, serial });
+  const { cyclonedx, spdx } = createSboms({
+    applicationInventory,
+    runtimeNpmInventory,
+    name: rootPackage.name,
+    version,
+    license: rootPackage.license,
+    bundledRuntime: {
+      name: config.runtime.name,
+      version: config.runtime.version,
+      source: config.runtime.url,
+      archiveSha256: config.runtime.sha256,
+      license: "MIT",
+    },
+    serial,
+  });
   const cyclonedxPath = resolve(outputDirectory, `blockwright-${version}-cyclonedx.json`);
   const spdxPath = resolve(outputDirectory, `blockwright-${version}-spdx.json`);
   writeJson(cyclonedxPath, cyclonedx);

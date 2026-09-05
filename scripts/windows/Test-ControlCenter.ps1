@@ -123,11 +123,21 @@ try {
 '@
     $fixtureServer = @'
 import http from "node:http";
+import { spawn } from "node:child_process";
 
 const port = Number(process.env.__PORT || process.env.PORT);
 const service = process.env.BLOCKWRIGHT_FIXTURE_SERVICE || "blockwright";
 const token = process.env.BLOCKWRIGHT_LOCAL_MCP_TOKEN;
+const buildHash = "a".repeat(64);
+const buildId = "bw_123456789abc";
+const childPort = Number(process.env.BLOCKWRIGHT_FIXTURE_CHILD_PORT || 0);
+let childProcess;
 if (!/^[A-Za-z0-9_-]{43,128}$/.test(token || "")) throw new Error("Fixture did not receive a strong per-launch MCP token.");
+if (Number.isInteger(childPort) && childPort > 0) {
+  const childSource = 'const http=require("node:http");const port=Number(process.argv[1]);http.createServer((request,response)=>response.end("child")).listen(port,"127.0.0.1");';
+  childProcess = spawn(process.execPath, ["-e", childSource, String(childPort)], { stdio: "ignore", windowsHide: true });
+  console.log(`CHILD_PID=${childProcess.pid} CHILD_PORT=${childPort}`);
+}
 const server = http.createServer((request, response) => {
   response.setHeader("content-type", "application/json");
   if (request.url === "/health") {
@@ -150,7 +160,24 @@ const server = http.createServer((request, response) => {
     request.on("end", () => {
       const message = JSON.parse(body);
       console.log("MCP_AUTH=ok");
-      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: service, version: "9.9.9" } } }));
+      let result;
+      if (message.method === "initialize") {
+        result = { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: service, version: "9.9.9" } };
+      } else if (message.method === "tools/list") {
+        result = { tools: ["compile_build", "validate_build", "validate_build_contract", "export_build"].map((name) => ({ name })) };
+      } else if (message.method === "tools/call" && message.params?.name === "compile_build") {
+        result = { isError: false, structuredContent: { build: { id: buildId, hash: buildHash, blockCount: 274, validation: { valid: true }, contract: { status: "valid" } } } };
+      } else if (message.method === "tools/call" && message.params?.name === "validate_build") {
+        result = { isError: false, structuredContent: { validation: { valid: true }, hash: buildHash } };
+      } else if (message.method === "tools/call" && message.params?.name === "validate_build_contract") {
+        result = { isError: false, structuredContent: { contract: { status: "valid", buildHash } } };
+      } else if (message.method === "tools/call" && message.params?.name === "export_build") {
+        result = { isError: false, structuredContent: { format: "schem", filename: "fixture.schem", bytes: 519, dataVersion: 4903, schematicVersion: 3 } };
+      } else {
+        response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "fixture method not found" } }));
+        return;
+      }
+      response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
     });
     return;
   }
@@ -159,8 +186,10 @@ const server = http.createServer((request, response) => {
 server.listen(port, "127.0.0.1", () => {
   console.log(`ENTRY=__entry NODE_ENV=${process.env.NODE_ENV} __PORT=${process.env.__PORT} PORT=${process.env.PORT}`);
 });
-process.stdin.resume();
-process.stdin.on("end", () => server.close(() => process.exit(0)));
+if (process.env.BLOCKWRIGHT_FIXTURE_IGNORE_STDIN !== "1") {
+  process.stdin.resume();
+  process.stdin.on("end", () => server.close(() => process.exit(0)));
+}
 '@
     [System.IO.File]::WriteAllText((Join-Path $appRoot "package.json"), $packageJson, (New-Object System.Text.UTF8Encoding($false)))
     [System.IO.File]::WriteAllText((Join-Path $appRoot "package-lock.json"), $packageLock, (New-Object System.Text.UTF8Encoding($false)))
@@ -168,16 +197,18 @@ process.stdin.on("end", () => server.close(() => process.exit(0)));
     [System.IO.File]::Copy($repairPath, (Join-Path $fixtureWindowsScripts "Invoke-BlockwrightRuntimeRepair.ps1"), $true)
     [System.IO.File]::Copy($pathsModulePath, (Join-Path $fixtureWindowsScripts "Blockwright-Paths.psm1"), $true)
 
+    $controllerAst = $null
     foreach ($scriptPath in @($controllerPath, $repairPath, $pathsModulePath, $shortcutInstallerPath, $PSCommandPath)) {
         $tokens = $null
         $parseErrors = $null
-        [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
+        $parsedAst = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
         Assert-Condition ($parseErrors.Count -eq 0) "PowerShell parsing failed for $scriptPath`: $($parseErrors.Message -join '; ')"
+        if ($scriptPath -eq $controllerPath) { $controllerAst = $parsedAst }
     }
     Add-Pass "powershell-parse" "Controller, path/runtime module, repair helper, shortcut helper, and this test script parse without errors."
 
     $controllerSource = [System.IO.File]::ReadAllText($controllerPath)
-    foreach ($requiredFragment in @('app\dist\__entry.js', 'Get-BlockwrightPrivateNode', 'Write-ManagedServerRecord', 'BLOCKWRIGHT_STATE_ROOT = $script:StateRoot', 'BLOCKWRIGHT_STATE_DIR = $script:StateRoot', 'BLOCKWRIGHT_LOCAL_MCP_TOKEN = $script:LocalMcpToken', 'New-LocalMcpToken', 'Authorization', 'NODE_ENV = "production"', '__PORT = [string]$Port', 'npm ls', 'TakeDroppedCount', 'MaxLines = 250', 'UpdateButton', 'Update-Blockwright.ps1', 'Start-BlockwrightUpdateProcess -Mode "check"', ' -CheckOnly', 'MessageBoxResult]::Yes', 'Start-BlockwrightUpdateProcess -Mode "install"', 'last-check.json', 'nothing will be installed without confirmation')) {
+    foreach ($requiredFragment in @('app\dist\__entry.js', 'Get-BlockwrightPrivateNode', 'Write-ManagedServerRecord', 'BLOCKWRIGHT_STATE_ROOT = $script:StateRoot', 'BLOCKWRIGHT_STATE_DIR = $script:StateRoot', 'BLOCKWRIGHT_LOCAL_MCP_TOKEN = $script:LocalMcpToken', 'New-LocalMcpToken', 'Authorization', 'NODE_ENV = "production"', '__PORT = [string]$Port', 'npm ls', 'TakeDroppedCount', 'MaxLines = 250', 'Invoke-PrimaryWorkflowSmokeTest', 'tools/list', 'compile_build', 'validate_build_contract', 'export_build', 'ProcessTreeSnapshot', 'Complete-ConfirmedServerStop -RemoveManagedRecord', 'process-tree exit could not be confirmed', 'Ownership evidence was retained', 'UpdateButton', 'Update-Blockwright.ps1', 'Start-BlockwrightUpdateProcess -Mode "check"', ' -CheckOnly', 'MessageBoxResult]::Yes', 'Start-BlockwrightUpdateProcess -Mode "install"', 'last-check.json', 'nothing will be installed without confirmation')) {
         Assert-Condition ($controllerSource.Contains($requiredFragment)) "Controller contract fragment is missing: $requiredFragment"
     }
     $checkInvocationIndex = $controllerSource.IndexOf('Start-BlockwrightUpdateProcess -Mode "check"')
@@ -206,12 +237,88 @@ process.stdin.on("end", () => server.close(() => process.exit(0)));
     Assert-Condition ($smokeResult.ExitCode -eq 0) "Direct-entry smoke failed: $($smokeResult.StandardError) $($smokeResult.StandardOutput)"
     $smoke = $smokeResult.StandardOutput | ConvertFrom-Json
     Assert-Condition ([bool]$smoke.healthy) "Direct-entry smoke did not become healthy."
+    Assert-Condition ([bool]$smoke.workflow.passed -and [bool]$smoke.workflow.deterministicReplay -and [bool]$smoke.workflow.validationValid -and [string]$smoke.workflow.contractStatus -eq "valid" -and [string]$smoke.workflow.exportFormat -eq "schem" -and [int]$smoke.workflow.schematicVersion -eq 3) "Direct-entry smoke did not exercise the deterministic compile/validation/export workflow."
     $joinedLogs = @($smoke.logs) -join "`n"
     Assert-Condition ($joinedLogs -match "ENTRY=__entry NODE_ENV=production __PORT=$smokePort PORT=$smokePort") "Direct entry did not receive the required production environment."
     Assert-Condition ($joinedLogs -match "MCP_AUTH=ok") "Control Center did not authenticate its MCP initialize smoke request."
     Assert-Condition ($joinedLogs -notmatch "BLOCKWRIGHT_LOCAL_MCP_TOKEN=") "The per-launch MCP token was written to a captured log."
     Assert-Condition (Test-PortAvailable -Port $smokePort) "The bounded smoke test left port $smokePort in use."
-    Add-Pass "direct-entry-smoke" "Strict /health and /ready passed on port $smokePort; the process stopped and released the listener."
+    Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot "state\run\managed-server.json"))) "The bounded smoke test removed the process but left its managed-process record behind."
+    Add-Pass "direct-entry-smoke" "Strict /health and /ready plus MCP initialize/tools/list/deterministic compile/validation/export passed on port $smokePort; the process stopped and released the listener."
+
+    $forcedTreePort = Get-FreePort
+    do { $forcedChildPort = Get-FreePort } while ($forcedChildPort -eq $forcedTreePort)
+    $forcedTreeArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -SmokeTest -SmokeTestSeconds 10 -Port $forcedTreePort -Json"
+    $forcedTreeResult = Invoke-WindowsPowerShell -Arguments $forcedTreeArguments -EnvironmentVariables @{
+        BLOCKWRIGHT_FIXTURE_IGNORE_STDIN = "1"
+        BLOCKWRIGHT_FIXTURE_CHILD_PORT = [string]$forcedChildPort
+    }
+    Assert-Condition ($forcedTreeResult.ExitCode -eq 0) "Forced process-tree smoke failed: $($forcedTreeResult.StandardError) $($forcedTreeResult.StandardOutput)"
+    $forcedTree = $forcedTreeResult.StandardOutput | ConvertFrom-Json
+    Assert-Condition ([bool]$forcedTree.healthy) "Forced process-tree smoke did not become healthy."
+    $forcedTreeLogs = @($forcedTree.logs) -join "`n"
+    Assert-Condition ($forcedTreeLogs -match "CHILD_PID=(\d+) CHILD_PORT=$forcedChildPort") "The forced-stop fixture did not report its descendant process."
+    $forcedChildProcessId = [int]$Matches[1]
+    Assert-Condition ($null -eq (Get-Process -Id $forcedChildProcessId -ErrorAction SilentlyContinue)) "Forced stop reported success while descendant PID $forcedChildProcessId remained alive."
+    Assert-Condition (Test-PortAvailable -Port $forcedTreePort) "Forced stop left root port $forcedTreePort in use."
+    Assert-Condition (Test-PortAvailable -Port $forcedChildPort) "Forced stop left descendant port $forcedChildPort in use."
+    Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot "state\run\managed-server.json"))) "Forced stop left its managed-process record behind."
+    Add-Pass "forced-tree-stop" "A server that ignored graceful stdin shutdown and its listening descendant were force-stopped, verified exited, and had their ownership record removed."
+
+    $recordFailureStateRoot = Join-Path $testRoot "record failure state"
+    $null = New-Item -ItemType Directory -Path $recordFailureStateRoot -Force
+    [System.IO.File]::WriteAllText((Join-Path $recordFailureStateRoot "run"), "blocks the managed-record directory", (New-Object System.Text.UTF8Encoding($false)))
+    $recordFailurePort = Get-FreePort
+    $recordFailureArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -SmokeTest -SmokeTestSeconds 5 -Port $recordFailurePort -Json"
+    $recordFailureResult = Invoke-WindowsPowerShell -Arguments $recordFailureArguments -EnvironmentVariables @{ BLOCKWRIGHT_STATE_ROOT = $recordFailureStateRoot }
+    Assert-Condition ($recordFailureResult.ExitCode -eq 1) "Managed-record persistence failure did not fail startup. Output: $($recordFailureResult.StandardOutput) Error: $($recordFailureResult.StandardError)"
+    $recordFailure = $recordFailureResult.StandardOutput | ConvertFrom-Json
+    Assert-Condition ([string]$recordFailure.failure -match "managed-process record could not be persisted") "Managed-record failure did not identify the persistence error."
+    Assert-Condition ([string]$recordFailure.failure -match "process tree was stopped before startup failed") "Managed-record failure did not confirm transactional process cleanup."
+    Assert-Condition (Test-PortAvailable -Port $recordFailurePort) "Managed-record failure left the newly started server listening on port $recordFailurePort."
+    $fixtureEntryPath = Join-Path $distRoot "__entry.js"
+    $orphanedFixtureProcesses = @(Get-CimInstance Win32_Process -Property ProcessId, CommandLine -ErrorAction SilentlyContinue | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_.CommandLine) -and $_.CommandLine.IndexOf($fixtureEntryPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+    })
+    Assert-Condition ($orphanedFixtureProcesses.Count -eq 0) "Managed-record failure left a fixture Node process alive: $($orphanedFixtureProcesses.ProcessId -join ', ')."
+    Add-Pass "record-persistence-rollback" "A post-launch managed-record write failure stopped and verified the new process tree before startup reported failure."
+
+    foreach ($functionName in @('Test-ProcessRunning', 'Get-ProcessTreeSnapshot', 'Test-CapturedProcessIdentityRunning', 'Get-RunningCapturedProcessIds', 'Stop-CapturedProcessTree')) {
+        $functionAst = @($controllerAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
+        }, $true))[0]
+        Assert-Condition ($null -ne $functionAst) "Controller test helper could not locate function $functionName."
+        Invoke-Expression $functionAst.Extent.Text
+    }
+    $sleeperStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $sleeperStartInfo.FileName = $windowsPowerShell
+    $sleeperStartInfo.Arguments = '-NoLogo -NoProfile -NonInteractive -Command "Start-Sleep -Seconds 30"'
+    $sleeperStartInfo.UseShellExecute = $false
+    $sleeperStartInfo.CreateNoWindow = $true
+    $sleeperStartInfo.RedirectStandardInput = $true
+    $sleeper = New-Object System.Diagnostics.Process
+    $sleeper.StartInfo = $sleeperStartInfo
+    Assert-Condition ($sleeper.Start()) "Failed-force fixture process did not start."
+    $failedForceHandle = [pscustomobject]@{ Process = $sleeper; ProcessTreeSnapshot = @() }
+    try {
+        $failedForceMessage = $null
+        try {
+            Stop-CapturedProcessTree -Handle $failedForceHandle -GraceMilliseconds 50 -ForceWaitMilliseconds 200 -TaskKillPath (Join-Path $env:SystemRoot "System32\whoami.exe")
+        } catch {
+            $failedForceMessage = $_.Exception.Message
+        }
+        Assert-Condition ([string]$failedForceMessage -match "process-tree exit could not be confirmed") "A failed forced stop did not report that exit was unconfirmed: $failedForceMessage"
+        Assert-Condition (-not $sleeper.HasExited) "The failed-force fixture unexpectedly exited, so evidence retention was not exercised."
+        Assert-Condition (@($failedForceHandle.ProcessTreeSnapshot | Where-Object { [int]$_.ProcessId -eq $sleeper.Id }).Count -eq 1) "A failed forced stop discarded the captured ownership identity."
+    } finally {
+        if (-not $sleeper.HasExited) {
+            try { $sleeper.Kill() } catch {}
+            try { $null = $sleeper.WaitForExit(5000) } catch {}
+        }
+        $sleeper.Dispose()
+    }
+    Add-Pass "failed-force-retains-evidence" "When the forced-stop utility did not terminate the process, stop failed and retained the captured process identity."
 
     $mismatchPort = Get-FreePort
     $mismatchArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -SmokeTest -SmokeTestSeconds 5 -Port $mismatchPort -Json"

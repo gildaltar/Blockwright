@@ -4,20 +4,31 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - ".codex-plugin/**"
+      - ".mcp.json"
       - ".github/workflows/windows-installer-ci.yml"
       - ".github/workflows/windows-release.yml"
       - ".github/workflows/windows-publish-release.yml"
+      - "alpic.json"
       - "app/**"
-      - "assets/github/blockwright-icon-v060.png"
+      - "assets/github/**"
+      - "data/java/**"
       - "installer/windows/**"
+      - "LICENSE"
       - "mcp/**"
       - "package.json"
       - "package-lock.json"
+      - "README.md"
+      - "scripts/benchmark-v060.ts"
+      - "scripts/diagnose.mjs"
       - "scripts/package-plugin.mjs"
       - "scripts/release/**"
       - "scripts/windows/**"
+      - "skills/**"
       - "src/**"
       - "standalone/**"
+      - "tsconfig.json"
+      - "vite.config.ts"
       - "vite.standalone.config.ts"
 
 permissions:
@@ -70,7 +81,8 @@ jobs:
         run: |
           $iscc = "${{ steps.inno.outputs.iscc_path }}"
           $stage = (Resolve-Path ".\release\windows\.work\installer\Blockwright").Path
-          $output = (Resolve-Path ".\release\windows").Path
+          $output = Join-Path (Resolve-Path ".\release\windows\.work").Path "fixtures"
+          $null = New-Item -ItemType Directory -Path $output -Force
           $manifestPath = Join-Path $stage "release-manifest.json"
           $appManifestPath = Join-Path $stage "app\package.json"
           $manifestOriginal = [IO.File]::ReadAllText($manifestPath)
@@ -89,14 +101,21 @@ jobs:
             [IO.File]::WriteAllText($manifestPath, $manifestOriginal, [Text.UTF8Encoding]::new($false))
             [IO.File]::WriteAllText($appManifestPath, $appManifestOriginal, [Text.UTF8Encoding]::new($false))
           }
-      - name: Exercise clean install, upgrade, repair, readiness, stop, and uninstall
+      - name: Exercise install, diagnostics, primary workflow, upgrade, repair, stop, and uninstall
         shell: powershell
         run: |
           $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-InstallerLifecycle.ps1" `
-            -PreviousInstaller ".\release\windows\Blockwright-0.0.1-windows-x64-setup.exe" `
+            -PreviousInstaller ".\release\windows\.work\fixtures\Blockwright-0.0.1-windows-x64-setup.exe" `
             -CurrentInstaller ".\release\windows\Blockwright-$version-windows-x64-setup.exe"
           if ($LASTEXITCODE -ne 0) { throw "Installer lifecycle failed with exit code $LASTEXITCODE." }
+      - name: Exercise portable private runtime, diagnostics, primary workflow, and isolation
+        shell: powershell
+        run: |
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-PortableLifecycle.ps1" `
+            -PortableZip ".\release\windows\Blockwright-$version-windows-x64-portable.zip"
+          if ($LASTEXITCODE -ne 0) { throw "Portable lifecycle failed with exit code $LASTEXITCODE." }
       - name: Upload unsigned CI evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

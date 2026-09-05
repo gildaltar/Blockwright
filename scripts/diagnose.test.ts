@@ -50,9 +50,21 @@ function createHealthyPluginFixture() {
   const manifest = { name: "blockwright", version: "1.2.3", engines: { node: ">=0.0.0" }, dependencies: {} };
   writeFixtureJson(root, "app/package.json", manifest);
   writeFixtureJson(root, "app/package-lock.json", { name: "blockwright", version: "1.2.3", lockfileVersion: 3, packages: { "": manifest } });
-  writeFixtureJson(root, ".codex-plugin/plugin.json", { name: "blockwright", version: "1.2.3" });
-  writeFixtureJson(root, ".mcp.json", { mcpServers: { blockwright: { command: "node", args: ["./mcp/server.mjs"] } } });
+  writeFixtureJson(root, ".codex-plugin/plugin.json", {
+    name: "blockwright",
+    version: "1.2.3",
+    skills: "./skills/",
+    mcpServers: "./.mcp.json",
+    interface: { composerIcon: "./assets/icon.png", screenshots: ["./assets/screenshot.png"] },
+  });
+  writeFixtureJson(root, ".mcp.json", { mcpServers: { blockwright: { cwd: ".", command: "cmd.exe", args: ["/d", "/s", "/c", ".\\scripts\\windows\\Launch-Blockwright-Mcp.cmd"] } } });
+  writeFixtureFile(root, "skills/blockwright/SKILL.md", "# Fixture\n");
+  writeFixtureFile(root, "assets/icon.png");
+  writeFixtureFile(root, "assets/screenshot.png");
   writeFixtureFile(root, "mcp/server.mjs", "export {};\n");
+  writeFixtureFile(root, "runtime/node/node.exe", "fixture\n");
+  writeFixtureFile(root, "runtime/node/npm.cmd", "@echo off\n");
+  writeFixtureFile(root, "runtime/node/node_modules/npm/bin/npm-cli.js", "console.log('fixture');\n");
   addBuildFixture(root, "app");
   for (const name of [
     "Blockwright-ControlCenter.ps1",
@@ -69,11 +81,24 @@ function createHealthyPluginFixture() {
     "Set-BlockwrightSchematicAssociation.ps1",
     "Start-Blockwright-Portable.cmd",
     "Test-ControlCenter.ps1",
+    "Test-PortableLifecycle.ps1",
     "Test-WindowsDistribution.ps1",
     "Update-Blockwright.ps1",
     "README.md",
   ]) writeFixtureFile(root, `scripts/windows/${name}`);
+  writeFixtureFile(root, "scripts/windows/Launch-Blockwright-Mcp.cmd", "@echo off\nset BLOCKWRIGHT_NODE=%BLOCKWRIGHT_ROOT%\\runtime\\node\\node.exe\n\"%BLOCKWRIGHT_NODE%\" \"%BLOCKWRIGHT_ROOT%\\mcp\\server.mjs\"\n");
   return root;
+}
+
+function runFixtureDiagnostics(root: string, calls: Array<{ command: string; args: string[] }> = []) {
+  return runDiagnostics(root, {
+    platform: "win32",
+    env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+    spawnSync(command: string, args: string[]) {
+      calls.push({ command, args });
+      return { status: 0, stdout: "11.6.0\n", stderr: "" };
+    },
+  });
 }
 
 describe("Blockwright diagnostics", () => {
@@ -85,6 +110,7 @@ describe("Blockwright diagnostics", () => {
       "version_alignment",
       "node_version",
       "npm_version",
+      "plugin_payload",
       "runtime_dependencies",
       "server_bundle",
       "view_assets",
@@ -115,11 +141,70 @@ describe("Blockwright diagnostics", () => {
   it("reports an intact packaged runtime as healthy", () => {
     const root = createHealthyPluginFixture();
     try {
-      const report = runDiagnostics(root);
+      const calls: Array<{ command: string; args: string[] }> = [];
+      const report = runFixtureDiagnostics(root, calls);
       expect(report.summary).toMatchObject({ mode: "plugin", status: "healthy", errors: 0, warnings: 0 });
       expect(report.checks.find(({ id }) => id === "server_bundle")).toMatchObject({ status: "pass" });
       expect(report.checks.find(({ id }) => id === "view_assets")).toMatchObject({ status: "pass" });
       expect(report.checks.find(({ id }) => id === "runtime_dependencies")).toMatchObject({ status: "pass" });
+      expect(report.checks.find(({ id }) => id === "mcp_launch")).toMatchObject({ status: "pass", details: { mode: "packaged-private-runtime-wrapper" } });
+      expect(report.checks.find(({ id }) => id === "npm_version")).toMatchObject({ status: "pass", details: { command: expect.stringMatching(/runtime[\\/]node[\\/]node\.exe.*npm-cli\.js$/) } });
+      expect(calls).toHaveLength(1);
+      expect(calls[0].command).toBe(resolve(root, "runtime/node/node.exe"));
+      expect(calls[0].args).toEqual([resolve(root, "runtime/node/node_modules/npm/bin/npm-cli.js"), "--version"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("does not fall back to machine npm when the packaged private runtime is incomplete", () => {
+    const root = createHealthyPluginFixture();
+    try {
+      rmSync(resolve(root, "runtime/node/npm.cmd"));
+      const calls: Array<{ command: string; args: string[] }> = [];
+      const report = runFixtureDiagnostics(root, calls);
+      expect(report.checks.find(({ id }) => id === "npm_version")).toMatchObject({
+        status: "error",
+        details: { missing: [expect.stringMatching(/runtime[\\/]node[\\/]npm\.cmd$/)] },
+      });
+      expect(calls).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails when a plugin-manifest skill or UI asset reference is omitted from the package", () => {
+    const root = createHealthyPluginFixture();
+    try {
+      rmSync(resolve(root, "assets/screenshot.png"));
+      const report = runFixtureDiagnostics(root);
+      expect(report.checks.find(({ id }) => id === "plugin_payload")).toMatchObject({
+        status: "error",
+        details: { missing: [{ label: "screenshot 1", reference: "./assets/screenshot.png" }] },
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("accepts the source node bridge shape and rejects it in a packaged release", () => {
+    const root = createHealthyPluginFixture();
+    try {
+      writeFixtureJson(root, ".mcp.json", { mcpServers: { blockwright: { cwd: ".", command: "node", args: ["./mcp/server.mjs"] } } });
+      let report = runFixtureDiagnostics(root);
+      expect(report.checks.find(({ id }) => id === "mcp_launch")).toMatchObject({ status: "error", details: { mode: "packaged-private-runtime-wrapper" } });
+
+      const sourceManifest = { name: "blockwright", version: "1.2.3", engines: { node: ">=0.0.0" }, dependencies: {} };
+      writeFixtureJson(root, "package.json", sourceManifest);
+      writeFixtureJson(root, "package-lock.json", { name: "blockwright", version: "1.2.3", lockfileVersion: 3, packages: { "": sourceManifest } });
+      writeFixtureFile(root, "src/server.ts", "export {};\n");
+      addBuildFixture(root, ".");
+      writeFixtureFile(root, "skill/SKILL.md", "same\n");
+      writeFixtureFile(root, "skills/blockwright/SKILL.md", "same\n");
+      mkdirSync(resolve(root, "skill/references"), { recursive: true });
+      mkdirSync(resolve(root, "skills/blockwright/references"), { recursive: true });
+      report = runFixtureDiagnostics(root);
+      expect(report.checks.find(({ id }) => id === "mcp_launch")).toMatchObject({ status: "pass", details: { mode: "source-node-bridge" } });
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -135,12 +220,13 @@ describe("Blockwright diagnostics", () => {
       addBuildFixture(root, ".");
       writeFixtureFile(root, "skill/SKILL.md", "same\n");
       writeFixtureFile(root, "skills/blockwright/SKILL.md", "same\n");
+      writeFixtureJson(root, ".mcp.json", { mcpServers: { blockwright: { cwd: ".", command: "node", args: ["./mcp/server.mjs"] } } });
       mkdirSync(resolve(root, "skill/references"), { recursive: true });
       mkdirSync(resolve(root, "skills/blockwright/references"), { recursive: true });
       rmSync(resolve(root, "app/dist/server.js"));
       rmSync(resolve(root, "app/dist/__entry.js"));
 
-      const report = runDiagnostics(root);
+      const report = runFixtureDiagnostics(root);
       const runtimeBundle = report.checks.find(({ id }) => id === "server_bundle");
       expect(report.summary).toMatchObject({ mode: "source", status: "unhealthy" });
       expect(runtimeBundle).toMatchObject({ status: "error" });
@@ -157,7 +243,7 @@ describe("Blockwright diagnostics", () => {
     const root = createHealthyPluginFixture();
     try {
       rmSync(resolve(root, "mcp/server.mjs"));
-      const report = runDiagnostics(root);
+      const report = runFixtureDiagnostics(root);
       expect(report.summary).toMatchObject({ status: "unhealthy", errors: 1 });
       expect(report.checks.find(({ id }) => id === "mcp_launch")).toMatchObject({ status: "error" });
     } finally {
@@ -169,7 +255,7 @@ describe("Blockwright diagnostics", () => {
     const root = createHealthyPluginFixture();
     try {
       rmSync(resolve(root, "app/dist/assets/assets/app.css"));
-      const report = runDiagnostics(root);
+      const report = runFixtureDiagnostics(root);
       expect(report.summary.status).toBe("unhealthy");
       expect(report.checks.find(({ id }) => id === "view_assets")).toMatchObject({ status: "error" });
     } finally {
@@ -181,7 +267,7 @@ describe("Blockwright diagnostics", () => {
     const root = createHealthyPluginFixture();
     try {
       writeFixtureJson(root, "app/data/java/26.2.registry.json", { schemaVersion: 1, edition: "java", version: "26.2" });
-      const report = runDiagnostics(root);
+      const report = runFixtureDiagnostics(root);
       expect(report.summary.status).toBe("unhealthy");
       expect(report.checks.find(({ id }) => id === "java_registries")).toMatchObject({ status: "error" });
     } finally {

@@ -44,6 +44,7 @@ export function createRuntimePackage(sourcePackage) {
     version: sourcePackage.version,
     private: true,
     description: sourcePackage.description,
+    license: sourcePackage.license,
     type: sourcePackage.type,
     scripts: { start: sourcePackage.scripts.start },
     dependencies: sourcePackage.dependencies,

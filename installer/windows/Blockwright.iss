@@ -58,15 +58,15 @@ Name: "{group}\Create redacted support bundle"; Filename: "{sys}\WindowsPowerShe
 Name: "{autodesktop}\Blockwright"; Filename: "{sys}\wscript.exe"; Parameters: "//nologo ""{app}\scripts\windows\Launch-Blockwright-ControlCenter.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\blockwright-v060.ico"; Tasks: desktopicon
 
 [Run]
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\scripts\windows\Initialize-Blockwright.ps1"" -InstallRoot ""{app}"" -StateRoot ""{code:GetInstallerStateRoot}"" -Port {code:GetSelectedPort} -InstallerMode -PreserveExistingConfiguration"; StatusMsg: "Configuring Blockwright..."; Flags: runhidden waituntilterminated
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\scripts\windows\Register-BlockwrightCodex.ps1"" -InstallRoot ""{app}"" -StateRoot ""{code:GetInstallerStateRoot}"""; StatusMsg: "Registering Codex integration..."; Flags: runhidden waituntilterminated; Tasks: codexintegration
-Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\scripts\windows\Set-BlockwrightSchematicAssociation.ps1"" -InstallRoot ""{app}"" -StateRoot ""{code:GetInstallerStateRoot}"""; StatusMsg: "Registering .schem association..."; Flags: runhidden waituntilterminated; Tasks: schemassociation
 Filename: "{sys}\wscript.exe"; Parameters: "//nologo ""{app}\scripts\windows\Launch-Blockwright-ControlCenter.vbs"""; Description: "Launch Blockwright Control Center"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var
   PortPage: TInputQueryWizardPage;
   UninstallCleanupExecuted: Boolean;
+  CodexIntegrationStatus: String;
+  SchematicAssociationStatus: String;
+  IntegrationWarnings: String;
 
 procedure InitializeWizard;
 begin
@@ -163,6 +163,124 @@ begin
   Result := GetValidatedLifecycleTestRoot('BLOCKWRIGHT_INSTALLER_TEST_ROAMING_ROOT', 'roaming');
   if Result = '' then
     Result := ExpandConstant('{userappdata}');
+end;
+
+function RunSetupPowerShellScript(ScriptName: String; ScriptArguments: String;
+  StepDescription: String; Required: Boolean): Boolean;
+var
+  Parameters: String;
+  ResultCode: Integer;
+begin
+  WizardForm.StatusLabel.Caption := StepDescription;
+  Parameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\scripts\windows\' + ScriptName) + '" ' + ScriptArguments;
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Parameters,
+    ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if not Result then
+  begin
+    if Required then
+      RaiseException(StepDescription + ' could not start. Blockwright setup did not complete.')
+    else
+      ResultCode := -1;
+  end;
+  if Result and (ResultCode <> 0) then
+  begin
+    Result := False;
+    if Required then
+      RaiseException(StepDescription + ' failed with exit code ' + IntToStr(ResultCode) +
+        '. Blockwright setup did not complete. The installed Control Center can be used to diagnose or repair the package.');
+  end;
+  if not Result then
+    Log(StepDescription + ' failed with exit code ' + IntToStr(ResultCode) + '.');
+end;
+
+procedure AppendIntegrationWarning(IntegrationName: String; ResultCodeText: String;
+  RecoveryCommand: String);
+var
+  WarningText: String;
+begin
+  WarningText := IntegrationName + ' could not be enabled (' + ResultCodeText + '). ' +
+    'Blockwright itself was installed. Retry from Windows PowerShell with:' + #13#10 +
+    RecoveryCommand;
+  if IntegrationWarnings = '' then
+    IntegrationWarnings := WarningText
+  else
+    IntegrationWarnings := IntegrationWarnings + #13#10 + #13#10 + WarningText;
+end;
+
+procedure WriteInstallerIntegrationStatus;
+var
+  StatusRoot: String;
+  StatusPath: String;
+  StatusText: String;
+begin
+  StatusRoot := AddBackslash(GetInstallerStateRoot('')) + 'integration';
+  ForceDirectories(StatusRoot);
+  StatusPath := AddBackslash(StatusRoot) + 'installer-status.txt';
+  StatusText := 'schemaVersion=1' + #13#10 +
+    'codexintegration=' + CodexIntegrationStatus + #13#10 +
+    'schemassociation=' + SchematicAssociationStatus + #13#10;
+  if not SaveStringToFile(StatusPath, StatusText, False) then
+    RaiseException('Could not write the installer integration status file: ' + StatusPath +
+      '. Blockwright setup cannot safely report the selected integration results.');
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  CommonArguments: String;
+  StepSucceeded: Boolean;
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+
+  CodexIntegrationStatus := 'not-selected';
+  SchematicAssociationStatus := 'not-selected';
+  IntegrationWarnings := '';
+  CommonArguments := '-InstallRoot "' + ExpandConstant('{app}') + '" -StateRoot "' +
+    GetInstallerStateRoot('') + '"';
+
+  RunSetupPowerShellScript('Initialize-Blockwright.ps1', CommonArguments + ' -Port ' +
+    GetSelectedPort('') + ' -InstallerMode -PreserveExistingConfiguration',
+    'Configuring Blockwright', True);
+
+  if WizardIsTaskSelected('codexintegration') then
+  begin
+    StepSucceeded := RunSetupPowerShellScript('Register-BlockwrightCodex.ps1', CommonArguments,
+      'Registering the optional Codex integration', False);
+    if StepSucceeded then
+      CodexIntegrationStatus := 'pass'
+    else
+    begin
+      CodexIntegrationStatus := 'failed';
+      AppendIntegrationWarning('The optional Codex integration', 'see the setup log for its exit code',
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' +
+        ExpandConstant('{app}\scripts\windows\Register-BlockwrightCodex.ps1') + '" -InstallRoot "' +
+        ExpandConstant('{app}') + '"');
+    end;
+  end;
+
+  if WizardIsTaskSelected('schemassociation') then
+  begin
+    StepSucceeded := RunSetupPowerShellScript('Set-BlockwrightSchematicAssociation.ps1', CommonArguments,
+      'Registering the optional .schem association', False);
+    if StepSucceeded then
+      SchematicAssociationStatus := 'pass'
+    else
+    begin
+      SchematicAssociationStatus := 'failed';
+      AppendIntegrationWarning('The optional .schem association', 'see the setup log for its exit code',
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' +
+        ExpandConstant('{app}\scripts\windows\Set-BlockwrightSchematicAssociation.ps1') + '" -InstallRoot "' +
+        ExpandConstant('{app}') + '"');
+    end;
+  end;
+
+  WriteInstallerIntegrationStatus;
+  if IntegrationWarnings <> '' then
+    SuppressibleMsgBox('Blockwright installed with optional integration warnings.' + #13#10 + #13#10 +
+      IntegrationWarnings + #13#10 + #13#10 + 'These results were saved to ' +
+      AddBackslash(GetInstallerStateRoot('')) + 'integration\installer-status.txt.',
+      mbError, MB_OK, IDOK);
 end;
 
 function UninstallArgumentPresent(Name: String): Boolean;

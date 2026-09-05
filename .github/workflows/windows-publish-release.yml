@@ -104,6 +104,7 @@ jobs:
           RELEASE_TAG: ${{ needs.validate-publish-boundary.outputs.release_tag }}
           QUALIFIED_REF: ${{ needs.validate-publish-boundary.outputs.qualified_ref }}
           EXPECTED_COMMIT: ${{ needs.validate-publish-boundary.outputs.release_commit }}
+          SIGNING_THUMBPRINT: ${{ vars.BLOCKWRIGHT_SIGNING_THUMBPRINT }}
         run: |
           function Get-ExactRelease {
             param([long]$ReleaseId)
@@ -163,7 +164,8 @@ jobs:
             if (($expectedNames -join "`n") -ne ($localNames -join "`n")) { throw "Every draft asset must be covered by SHA256SUMS.txt, with only the attested checksum manifest outside itself." }
 
             node scripts/release/verify-release.mjs --dir $downloadRoot --require-signed --require-github-attestation `
-              --repository $env:RELEASE_REPOSITORY --source-digest $env:EXPECTED_COMMIT --source-ref $env:QUALIFIED_REF
+              --repository $env:RELEASE_REPOSITORY --source-digest $env:EXPECTED_COMMIT --source-ref $env:QUALIFIED_REF `
+              --expected-thumbprint $env:SIGNING_THUMBPRINT
             if ($LASTEXITCODE -ne 0) { throw "Signed bytes or commit-bound GitHub provenance failed publication-time verification." }
 
             $unchangedDraft = Get-ExactRelease -ReleaseId $releaseId

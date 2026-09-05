@@ -45,6 +45,9 @@ h1 em { color: transparent; font-style: normal; -webkit-text-stroke: 1px rgba(23
 .button.secondary { color: var(--ink); border-color: rgba(190, 222, 217, .3); background: rgba(10, 22, 26, .7); }
 .button:disabled { cursor: not-allowed; opacity: .5; }
 .button.full { width: 100%; }
+.release-warning { max-width: 680px; margin: 18px 0 0; padding: 12px 14px; border-left: 3px solid var(--copper-light); color: #f2d3ba; background: rgba(57, 30, 15, .72); font-size: 12px; line-height: 1.55; }
+.release-warning strong { color: #fff1e5; }
+.release-warning a { color: var(--copper-light); }
 .boundary { margin: 18px 0 0; color: #8ea4a1; font-size: 11px; letter-spacing: .05em; }
 .promise, .workflow, .proof, .pricing, .workspace, .download { padding: 110px clamp(24px, 7vw, 112px); }
 .promise > p:first-child { color: var(--teal); font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .12em; }
@@ -161,6 +164,7 @@ dd { margin: 0; text-align: right; }
 .download h2 { margin: 0; font-size: clamp(30px, 4vw, 54px); }
 .download .eyebrow { margin-bottom: 12px; }
 .download-actions { margin: 0; justify-content: flex-end; }
+.download > .release-warning { grid-column: 2 / -1; max-width: none; margin: 0; }
 footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18px; padding: 26px clamp(24px, 7vw, 112px); color: #788b88; background: #050b0e; font-size: 10px; letter-spacing: .03em; }
 
 @media (max-width: 880px) {
@@ -176,6 +180,7 @@ footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 18
   .section-copy { position: static; }
   .download { grid-template-columns: auto 1fr; }
   .download-actions { grid-column: 1 / -1; justify-content: flex-start; }
+  .download > .release-warning { grid-column: 1 / -1; }
 }
 
 @media (max-width: 540px) {

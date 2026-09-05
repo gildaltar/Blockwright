@@ -70,7 +70,8 @@ type PublicReview = {
   review: { id: string; expiresAt: string; decisions: Array<{ actorId: string; decision: string; comment?: string; createdAt: string }> };
 };
 
-const releaseBase = "https://github.com/gildaltar/Blockwright/releases/latest/download";
+const releasePage = "https://github.com/gildaltar/Blockwright/releases/tag/v0.6.0";
+const releaseBase = "https://github.com/gildaltar/Blockwright/releases/download/v0.6.0";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -447,9 +448,10 @@ function App() {
           <h1>Build boldly.<br /><em>Deliver with evidence.</em></h1>
           <p className="lede">Blockwright turns measurable Minecraft Java briefs into deterministic, reviewable, client-ready schematics—or tells you exactly why it cannot.</p>
           <div className="hero-actions">
-            <a className="button primary" href={`${releaseBase}/Blockwright-0.6.0-windows-x64-setup.exe`}>Direct download for Windows</a>
+            <a className="button primary" href={`${releaseBase}/Blockwright-0.6.0-windows-x64-setup.exe`}>Download unsigned Windows MVP</a>
             <a className="button secondary" href={`${releaseBase}/Blockwright-0.6.0-windows-x64-portable.zip`}>Portable version</a>
           </div>
+          <p className="release-warning"><strong>Unsigned Windows prerelease.</strong> SmartScreen may report an unknown publisher. Use only the <a href={releasePage}>official v0.6.0 release</a>, verify the download against its <code>SHA256SUMS.txt</code>, and choose <b>More info → Run anyway</b> only if the hash matches and you trust this repository. A checksum is not a publisher signature.</p>
           <p className="boundary">Java-first · private local runtime · Sponge v3 + Litematica · independent project</p>
         </div>
       </section>
@@ -581,7 +583,8 @@ function App() {
       <section className="download" id="get-blockwright">
         <BrandMark />
         <div><p className="eyebrow"><span /> Blockwright 0.6</p><h2>Your next build should be provable.</h2></div>
-        <div className="download-actions"><a className="button primary" href={`${releaseBase}/Blockwright-0.6.0-windows-x64-setup.exe`}>Windows installer</a><a className="button secondary" href={`${releaseBase}/Blockwright-0.6.0-windows-x64-portable.zip`}>Portable ZIP</a></div>
+        <div className="download-actions"><a className="button primary" href={`${releaseBase}/Blockwright-0.6.0-windows-x64-setup.exe`}>Unsigned Windows installer</a><a className="button secondary" href={`${releaseBase}/Blockwright-0.6.0-windows-x64-portable.zip`}>Portable ZIP</a></div>
+        <p className="release-warning"><strong>v0.6.0 is unsigned.</strong> Review the <a href={releasePage}>warning, hashes, and install instructions</a> before running it.</p>
       </section>
     </main>
 

@@ -74,10 +74,13 @@ export function javaRegistryValidationError(value, expectedVersion) {
   return undefined;
 }
 
-export function runDiagnostics(root = scriptRoot) {
+export function runDiagnostics(root = scriptRoot, options = {}) {
   const resolvedRoot = resolve(root);
   const sourceMode = existsSync(resolve(resolvedRoot, "src", "server.ts"));
   const mode = sourceMode ? "source" : "plugin";
+  const platform = options.platform ?? process.platform;
+  const environment = options.env ?? process.env;
+  const spawnProcess = options.spawnSync ?? spawnSync;
   const checks = [];
   const add = (id, area, status, message, details) => {
     if (!validStatuses.has(status)) throw new Error(`Invalid diagnostic status: ${status}`);
@@ -97,6 +100,9 @@ export function runDiagnostics(root = scriptRoot) {
     sourceDist: resolve(resolvedRoot, "dist"),
     sourceRegistry: resolve(resolvedRoot, "data", "java"),
     sourceNodeModules: resolve(resolvedRoot, "node_modules"),
+    privateNode: resolve(resolvedRoot, "runtime", "node", "node.exe"),
+    privateNpm: resolve(resolvedRoot, "runtime", "node", "npm.cmd"),
+    privateNpmCli: resolve(resolvedRoot, "runtime", "node", "node_modules", "npm", "bin", "npm-cli.js"),
   };
 
   let sourcePackage;
@@ -139,6 +145,39 @@ export function runDiagnostics(root = scriptRoot) {
     versions,
   );
 
+  if (pluginManifest) {
+    try {
+      const rawReferences = [
+        [pluginManifest.skills, "skills"],
+        [pluginManifest.mcpServers, "MCP configuration"],
+        [pluginManifest.interface?.composerIcon, "composer icon"],
+        [pluginManifest.interface?.logo, "logo"],
+        [pluginManifest.interface?.logoDark, "dark logo"],
+        ...(Array.isArray(pluginManifest.interface?.screenshots) ? pluginManifest.interface.screenshots.map((value, index) => [value, `screenshot ${index + 1}`]) : []),
+      ].filter(([value]) => value !== undefined);
+      if (pluginManifest.interface?.screenshots !== undefined && !Array.isArray(pluginManifest.interface.screenshots)) throw new Error("interface.screenshots must be an array");
+      const references = [...new Map(rawReferences.map(([value, label]) => [value, label])).entries()].map(([value, label]) => {
+        if (typeof value !== "string" || !value.startsWith("./")) throw new Error(`${label} reference must begin with ./`);
+        const path = resolve(resolvedRoot, value);
+        const relativePath = relative(resolvedRoot, path);
+        if (!relativePath || /^\.\.(?:[\\/]|$)/.test(relativePath) || isAbsolute(relativePath)) throw new Error(`${label} reference escapes the package root`);
+        return { label, reference: value, path };
+      });
+      const missing = references.filter(({ path }) => !existsSync(path)).map(({ label, reference }) => ({ label, reference }));
+      add(
+        "plugin_payload",
+        "manifest",
+        missing.length ? "error" : "pass",
+        missing.length ? `${missing.length} plugin-manifest payload reference(s) are missing.` : `${references.length} plugin-manifest payload reference(s) are present inside the package root.`,
+        { references: references.map(({ label, reference }) => ({ label, reference })), missing },
+      );
+    } catch (error) {
+      add("plugin_payload", "manifest", "error", "Plugin-manifest payload references are invalid.", error instanceof Error ? error.message : String(error));
+    }
+  } else {
+    add("plugin_payload", "manifest", "error", "Plugin-manifest payload references cannot be validated without a valid plugin manifest.");
+  }
+
   const minimumNode = /(?:^|\s)>=\s*(\d+(?:\.\d+){0,2})/.exec(String((runtimePackage ?? sourcePackage)?.engines?.node ?? ""))?.[1];
   const nodeComparison = minimumNode ? compareVersions(process.versions.node, minimumNode) : undefined;
   add(
@@ -149,29 +188,94 @@ export function runDiagnostics(root = scriptRoot) {
     { installed: process.versions.node, required: minimumNode },
   );
 
-  const npmCommand = process.platform === "win32" ? process.env.ComSpec || "cmd.exe" : "npm";
-  const npmArgs = process.platform === "win32" ? ["/d", "/s", "/c", "npm", "--version"] : ["--version"];
-  const npmResult = spawnSync(npmCommand, npmArgs, { encoding: "utf8", windowsHide: true, timeout: 5_000 });
-  const npmVersion = npmResult.status === 0 ? npmResult.stdout.trim() : undefined;
+  const privateRuntimeFiles = [paths.privateNode, paths.privateNpm, paths.privateNpmCli];
+  const missingPrivateRuntimeFiles = sourceMode ? [] : privateRuntimeFiles.filter((path) => !existsSync(path));
+  let npmCommand;
+  let npmArgs;
+  let npmDisplayCommand;
+  if (sourceMode) {
+    npmCommand = platform === "win32" ? environment.ComSpec || "cmd.exe" : "npm";
+    npmArgs = platform === "win32" ? ["/d", "/s", "/c", "npm --version"] : ["--version"];
+    npmDisplayCommand = platform === "win32" ? "npm via ComSpec" : npmCommand;
+  } else {
+    npmCommand = paths.privateNode;
+    npmArgs = [paths.privateNpmCli, "--version"];
+    npmDisplayCommand = `${toDisplayPath(resolvedRoot, paths.privateNode)} ${toDisplayPath(resolvedRoot, paths.privateNpmCli)}`;
+  }
+  const npmResult = missingPrivateRuntimeFiles.length
+    ? { status: null, stdout: "", stderr: "", error: new Error(`Missing ${missingPrivateRuntimeFiles.map((path) => toDisplayPath(resolvedRoot, path)).join(", ")}`) }
+    : spawnProcess(npmCommand, npmArgs, { encoding: "utf8", windowsHide: true, timeout: 5_000, env: environment });
+  const npmVersion = npmResult.status === 0 ? String(npmResult.stdout ?? "").trim() : undefined;
   add(
     "npm_version",
     "dependency",
     npmVersion ? "pass" : "error",
-    npmVersion ? `npm ${npmVersion} is available for first-launch install and dependency repair.` : "npm is unavailable; Blockwright cannot install or repair its local runtime dependencies.",
-    npmVersion ? { command: process.platform === "win32" ? "npm via ComSpec" : npmCommand, version: npmVersion } : { command: process.platform === "win32" ? "npm via ComSpec" : npmCommand, error: npmResult.error?.message || npmResult.stderr.trim() || `exit ${npmResult.status ?? "unknown"}` },
+    npmVersion
+      ? `npm ${npmVersion} is available from ${sourceMode ? "the source-development environment" : "the packaged private runtime"}.`
+      : sourceMode
+        ? "npm is unavailable; the source workspace cannot install or repair dependencies."
+        : "The packaged private Node/npm runtime is unavailable; Blockwright will not fall back to machine-wide npm.",
+    npmVersion
+      ? { command: npmDisplayCommand, launcher: npmCommand, version: npmVersion }
+      : { command: npmDisplayCommand, launcher: npmCommand, missing: missingPrivateRuntimeFiles.map((path) => toDisplayPath(resolvedRoot, path)), error: npmResult.error?.message || String(npmResult.stderr ?? "").trim() || `exit ${npmResult.status ?? "unknown"}` },
   );
 
   const configured = mcpConfig?.mcpServers?.blockwright;
   const configuredBridge = resolve(resolvedRoot, "mcp", "server.mjs");
+  const configuredWrapper = resolve(resolvedRoot, "scripts", "windows", "Launch-Blockwright-Mcp.cmd");
   let bridgeExists = false;
   try {
     bridgeExists = statSync(configuredBridge).isFile();
   } catch {
     bridgeExists = false;
   }
-  const mcpConfigValid = configured?.command === "node" && Array.isArray(configured.args) && configured.args.includes("./mcp/server.mjs");
-  const mcpValid = mcpConfigValid && bridgeExists;
-  add("mcp_launch", "manifest", mcpValid ? "pass" : "error", mcpValid ? "MCP config launches the present packaged stdio bridge from the plugin root." : !mcpConfigValid ? "MCP config does not launch node ./mcp/server.mjs." : `Configured MCP bridge is missing or is not a file: ${toDisplayPath(resolvedRoot, configuredBridge)}.`, { configured, bridge: toDisplayPath(resolvedRoot, configuredBridge), bridgeExists });
+  let wrapperExists = false;
+  let wrapperUsesPrivateRuntime = false;
+  try {
+    wrapperExists = statSync(configuredWrapper).isFile();
+    if (wrapperExists) {
+      const wrapper = readFileSync(configuredWrapper, "utf8");
+      wrapperUsesPrivateRuntime = /runtime\\node\\node\.exe/i.test(wrapper) && /mcp\\server\.mjs/i.test(wrapper);
+    }
+  } catch {
+    wrapperExists = false;
+  }
+  const configuredArgs = Array.isArray(configured?.args) ? configured.args : [];
+  const sourceConfigValid = configured?.cwd === "."
+    && configured?.command === "node"
+    && configuredArgs.length === 1
+    && configuredArgs[0] === "./mcp/server.mjs";
+  const packagedConfigValid = configured?.cwd === "."
+    && String(configured?.command ?? "").toLowerCase() === "cmd.exe"
+    && configuredArgs.length === 4
+    && configuredArgs[0]?.toLowerCase() === "/d"
+    && configuredArgs[1]?.toLowerCase() === "/s"
+    && configuredArgs[2]?.toLowerCase() === "/c"
+    && configuredArgs[3]?.replaceAll("/", "\\").toLowerCase() === ".\\scripts\\windows\\launch-blockwright-mcp.cmd";
+  const mcpConfigValid = sourceMode ? sourceConfigValid : packagedConfigValid;
+  const mcpValid = mcpConfigValid && bridgeExists && (sourceMode || (wrapperExists && wrapperUsesPrivateRuntime));
+  const invalidMessage = !mcpConfigValid
+    ? sourceMode
+      ? "Source MCP config must launch node ./mcp/server.mjs from the project root."
+      : "Packaged MCP config must launch the private-runtime wrapper through cmd.exe from the package root."
+    : !bridgeExists
+      ? `Configured MCP bridge is missing or is not a file: ${toDisplayPath(resolvedRoot, configuredBridge)}.`
+      : !sourceMode && !wrapperExists
+        ? `Configured packaged MCP wrapper is missing or is not a file: ${toDisplayPath(resolvedRoot, configuredWrapper)}.`
+        : "The packaged MCP wrapper does not launch runtime\\node\\node.exe and mcp\\server.mjs.";
+  add(
+    "mcp_launch",
+    "manifest",
+    mcpValid ? "pass" : "error",
+    mcpValid ? sourceMode ? "Source MCP config launches the present stdio bridge with Node.js." : "Packaged MCP config launches the present stdio bridge through the private-runtime wrapper." : invalidMessage,
+    {
+      mode: sourceMode ? "source-node-bridge" : "packaged-private-runtime-wrapper",
+      configured,
+      bridge: toDisplayPath(resolvedRoot, configuredBridge),
+      bridgeExists,
+      ...(sourceMode ? {} : { wrapper: toDisplayPath(resolvedRoot, configuredWrapper), wrapperExists, wrapperUsesPrivateRuntime }),
+    },
+  );
 
   const checkLockfile = (id, path, expectedVersion, label) => {
     if (!existsSync(path)) {
@@ -320,6 +424,7 @@ export function runDiagnostics(root = scriptRoot) {
     resolve(resolvedRoot, "scripts", "windows", "Set-BlockwrightSchematicAssociation.ps1"),
     resolve(resolvedRoot, "scripts", "windows", "Start-Blockwright-Portable.cmd"),
     resolve(resolvedRoot, "scripts", "windows", "Test-ControlCenter.ps1"),
+    resolve(resolvedRoot, "scripts", "windows", "Test-PortableLifecycle.ps1"),
     resolve(resolvedRoot, "scripts", "windows", "Test-WindowsDistribution.ps1"),
     resolve(resolvedRoot, "scripts", "windows", "Update-Blockwright.ps1"),
     resolve(resolvedRoot, "scripts", "windows", "README.md"),
