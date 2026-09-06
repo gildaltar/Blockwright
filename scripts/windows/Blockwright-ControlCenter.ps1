@@ -1601,10 +1601,15 @@ function Stop-CapturedProcessTree {
 }
 
 function Complete-ConfirmedServerStop {
-    param([switch]$RemoveManagedRecord)
+    param(
+        [switch]$RemoveManagedRecord,
+        [switch]$PassThruLogs
+    )
     if ($null -eq $script:ServerHandle) { return }
     Reset-BlockwrightTaskMonitor
-    try { $null = Drain-ProcessLogs -Handle $script:ServerHandle } catch {}
+    try { $script:ServerHandle.Process.WaitForExit() } catch {}
+    $finalLogs = @()
+    try { $finalLogs = @(Drain-ProcessLogs -Handle $script:ServerHandle) } catch {}
     try { $script:LastExitCode = $script:ServerHandle.Process.ExitCode } catch {}
     try { $script:ServerHandle.Process.Dispose() } catch {}
     $script:ServerHandle = $null
@@ -1622,9 +1627,11 @@ function Complete-ConfirmedServerStop {
     $script:CrashRestartDueAt = $null
     $script:CrashRestartPendingAttempt = $null
     if ($RemoveManagedRecord) { Remove-ManagedServerRecord }
+    if ($PassThruLogs) { return @($finalLogs) }
 }
 
 function Stop-BlockwrightServer {
+    param([switch]$PassThruLogs)
     $script:AutoRestartEligible = $false
     $script:CrashRestartDueAt = $null
     $script:CrashRestartPendingAttempt = $null
@@ -1643,8 +1650,9 @@ function Stop-BlockwrightServer {
         $script:ExpectedServerStop = $false
         throw
     }
-    Complete-ConfirmedServerStop -RemoveManagedRecord
+    $finalLogs = @(Complete-ConfirmedServerStop -RemoveManagedRecord -PassThruLogs:$PassThruLogs)
     Add-ControllerLog "Blockwright stopped."
+    if ($PassThruLogs) { return @($finalLogs) }
 }
 
 function Start-DependencyMaintenance {
@@ -2508,7 +2516,7 @@ function Invoke-SmokeTest {
         }
         if ($started -and (Test-ProcessRunning $script:ServerHandle)) {
             foreach ($line in @(Drain-ProcessLogs -Handle $script:ServerHandle)) { $capturedLines.Add($line) }
-            Stop-BlockwrightServer
+            foreach ($line in @(Stop-BlockwrightServer -PassThruLogs)) { $capturedLines.Add($line) }
         }
     }
 
