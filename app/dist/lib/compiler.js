@@ -7,8 +7,15 @@ import { assertPreflightConfirmed, estimateBuild } from "./preflight.js";
 import { calculateBuildHash, normalizeBuildContract, validateBuildContract } from "./contract.js";
 import { BEDROCK_STABLE_VERSION, resolveBedrockBlockPermutation } from "./bedrock-structure.js";
 import { compileDesignProgram } from "./design-kernel.js";
+import { collectProceduralMaterialLeaves } from "./material-distribution.js";
+import { proceduralPrimitiveBounds } from "./procedural-geometry.js";
 import { normalizeBuildInput } from "./input-normalization.js";
 export const normalizeInput = normalizeBuildInput;
+/** Produces canonical input, an architectural plan, and preflight estimates without compiling voxel placements. */
+export function planBuildInput(rawInput) {
+    const input = normalizeInput(rawInput);
+    return { input, plan: planForInput(input), preflight: estimateBuild(input) };
+}
 function materialBlocks(input) {
     return Object.fromEntries(Object.entries(input.materialLibrary).map(([name, material]) => [name, typeof material === "string" ? material : material.block]));
 }
@@ -47,6 +54,8 @@ function baseDesignElementBox(element) {
             max: { x: box.max.x + lateral, y: box.max.y, z: box.max.z + lateral },
         };
     }
+    if (element.kind === "procedural")
+        return proceduralPrimitiveBounds(element.primitive);
     if (element.kind !== "sweep")
         throw new Error(`Unsupported generic design element kind in plan metadata: ${String(element.kind)}.`);
     const width = Math.max(1, Math.round(element.width));
@@ -102,6 +111,8 @@ function designMaterialBlock(input, reference) {
 function designElementMaterialReferences(element) {
     if (element.kind === "carve")
         return [];
+    if (element.kind === "procedural")
+        return element.material ? [element.material] : [];
     if (element.kind === "basin")
         return [element.wallMaterial, element.floorMaterial, element.rimMaterial, element.liquidMaterial];
     if (element.kind === "stairs" || element.kind === "ramp")
@@ -115,7 +126,8 @@ function planForInput(input) {
     if (!input.design.elements.length)
         return legacyPlan;
     const boxes = new Map(input.design.elements.map((element) => [element.id, designElementBox(element, input.dimensions)]));
-    const solidElements = input.design.elements.filter(({ kind }) => kind !== "carve");
+    const solidElements = input.design.elements.filter((element) => element.kind !== "carve"
+        && !(element.kind === "procedural" && ["clear", "subtract", "cut", "intersect"].includes(element.operation ?? "add")));
     const volumes = solidElements.map((element) => ({
         id: element.id,
         ...boxes.get(element.id),
@@ -615,7 +627,11 @@ export function compileBuild(rawInput, limits = {}) {
     if (!input.design.elements.length && requestedVolume > 100_000) {
         throw new Error(`GENERIC_DESIGN_REQUIRED: the ${requestedVolume.toLocaleString()}-block envelope is too large for a legacy shell generator. Supply a sourceBrief and generic design program; no massing substitute was generated.`);
     }
-    const paletteValidation = validatePaletteIdentifiers(input.edition, input.version, { ...input.rolePalette, ...materialBlocks(input) });
+    const proceduralMaterialLeaves = input.design.schemaVersion === 2
+        ? collectProceduralMaterialLeaves(input.design.materials ?? {}, input.materialLibrary, input.rolePalette)
+        : [];
+    const proceduralBlocks = Object.fromEntries(proceduralMaterialLeaves.map((material, index) => [`design.materials.${index}`, material.block]));
+    const paletteValidation = validatePaletteIdentifiers(input.edition, input.version, { ...input.rolePalette, ...materialBlocks(input), ...proceduralBlocks });
     if (!paletteValidation.valid)
         throw new Error(`INVALID_BLOCK_IDENTIFIERS: ${paletteValidation.invalid.map(({ role, block }) => `${role}=${block}`).join(", ")}`);
     if (input.edition === "bedrock") {
@@ -628,6 +644,7 @@ export function compileBuild(rawInput, limits = {}) {
                 block: typeof material === "string" ? material : material.block,
                 state: typeof material === "string" ? undefined : material.state,
             })),
+            ...proceduralMaterialLeaves,
         ];
         for (const material of exactMaterials) {
             try {
@@ -640,7 +657,12 @@ export function compileBuild(rawInput, limits = {}) {
         }
     }
     const plan = planForInput(input);
-    const compileLimits = { maximumPlacements, maximumPlacementAttempts };
+    const compileLimits = {
+        maximumPlacements,
+        maximumPlacementAttempts,
+        componentCache: limits.componentCache,
+        previousComponentGraph: limits.previousComponentGraph,
+    };
     const legacy = input.design.elements.length ? undefined : generateFromPlan(plan, input.dimensions, input.origin, input.rolePalette, compileLimits);
     const generated = input.design.elements.length
         ? compileDesignProgram(input.design, { dimensions: input.dimensions, origin: input.origin, edition: input.edition, rolePalette: input.rolePalette, materialLibrary: input.materialLibrary, ...compileLimits })
@@ -700,6 +722,8 @@ export function compileBuild(rawInput, limits = {}) {
         materialCounts,
         layerCounts,
         phases: Object.entries(phaseCounts).map(([name, count]) => ({ name, count })),
+        ...(generated?.componentGraph ? { componentGraph: generated.componentGraph } : {}),
+        ...(generated?.compileReport ? { compileReport: generated.compileReport } : {}),
         validation: {
             valid: !overBudget,
             blockingIssues: overBudget ? 1 : 0,

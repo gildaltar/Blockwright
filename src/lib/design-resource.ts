@@ -1,4 +1,5 @@
 import type { DesignElement, DesignProgram, Vec3 } from "./types.js";
+import { proceduralPrimitiveBounds } from "./procedural-geometry.js";
 
 const LIMIT = Number.MAX_SAFE_INTEGER;
 
@@ -91,6 +92,15 @@ export function estimateDesignPlacementAttempts(program: DesignProgram) {
         supports = safeMultiply(samples, supportHeight, radius * 2 + 1, radius * 2 + 1);
       }
       perInstance = safeAdd(safeMultiply(samples, crossSection), supports);
+    } else if (element.kind === "procedural") {
+      const primitiveBounds = proceduralPrimitiveBounds(element.primitive);
+      perInstance = safeAdd(
+        boxVolume(primitiveBounds.min, primitiveBounds.max),
+        ...(element.masks ?? []).map(({ primitive }) => {
+          const maskBounds = proceduralPrimitiveBounds(primitive);
+          return boxVolume(maskBounds.min, maskBounds.max);
+        }),
+      );
     } else {
       const dx = Math.abs(element.to.x - element.from.x);
       const dy = Math.abs(element.to.y - element.from.y);

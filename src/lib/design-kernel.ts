@@ -1,8 +1,15 @@
 import type {
+  ComponentCompileReport,
+  ComponentConflict,
+  ComponentConflictSource,
+  ComponentGraphManifest,
   DesignAssertion,
   DesignElement,
   DesignMaterial,
+  ProceduralMaterialDefinition,
   DesignProgram,
+  DesignProgramV1,
+  DesignProgramV2,
   DesignRequirement,
   Dimensions,
   Edition,
@@ -10,6 +17,10 @@ import type {
   RolePalette,
   Vec3,
 } from "./types.js";
+import { ComponentCache } from "./component-cache.js";
+import { resolveComponentGraph } from "./component-graph.js";
+import { resolveProceduralMaterial } from "./material-distribution.js";
+import { compileProceduralGeometry } from "./procedural-geometry.js";
 
 type MaterialLibrary = Record<string, DesignMaterial>;
 
@@ -18,7 +29,22 @@ export type DesignCompileResult = {
   attemptedCollisions: number;
   elementCounts: Record<string, number>;
   requirementCounts: Record<string, number>;
+  componentGraph?: ComponentGraphManifest;
+  compileReport?: ComponentCompileReport;
 };
+
+export type ComponentOperation =
+  | { kind: "put"; placement: Placement }
+  | { kind: "remove"; coordinate: Vec3; source: ComponentConflictSource }
+  | { kind: "intersect"; coordinates: Vec3[]; bounds: { min: Vec3; max: Vec3 }; source: ComponentConflictSource };
+
+export type ComponentOperationCacheEntry = {
+  operations: ComponentOperation[];
+  internalCollisions: number;
+  attempts: number;
+};
+
+const defaultComponentCache = new ComponentCache<ComponentOperationCacheEntry>();
 
 const coordinateKey = ({ x, y, z }: Vec3) => `${x},${y},${z}`;
 const add = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
@@ -30,7 +56,7 @@ const structuralAssertionKinds = new Set<DesignAssertion["kind"]>([
   "axis_span", "distinct_elements", "element_instances", "distinct_materials", "path_geometry",
   "material_tag_count", "support_count", "boundary_contact",
 ]);
-const elementKinds = new Set<DesignElement["kind"]>(["fill", "shell", "carve", "cylinder", "basin", "sweep", "stairs", "ramp"]);
+const elementKinds = new Set<DesignElement["kind"]>(["fill", "shell", "carve", "cylinder", "basin", "sweep", "stairs", "ramp", "procedural"]);
 const boundarySides = new Set(["north", "south", "east", "west", "top", "bottom"]);
 const numberWords: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
@@ -259,9 +285,34 @@ function assertInside(point: Vec3, dimensions: Dimensions, elementId: string) {
   }
 }
 
-function materialValue(reference: string, library: MaterialLibrary, roles: RolePalette): Exclude<DesignMaterial, string> {
-  const value = library[reference] ?? (reference in roles ? roles[reference as keyof RolePalette] : reference);
-  return typeof value === "string" ? { block: value } : { block: value.block, ...(value.state ? { state: { ...value.state } } : {}), ...(value.tags ? { tags: [...value.tags] } : {}) };
+function materialValue(
+  reference: string,
+  library: MaterialLibrary,
+  roles: RolePalette,
+  options: Pick<DesignCompileOptions, "materials" | "componentSeed" | "materialContextBounds" | "allowMaterialDistributions">,
+  coordinate: Vec3,
+) {
+  if (!options.allowMaterialDistributions) {
+    const value = library[reference] ?? (reference in roles ? roles[reference as keyof RolePalette] : reference);
+    return typeof value === "string"
+      ? { block: value }
+      : { block: value.block, ...(value.state ? { state: { ...value.state } } : {}), ...(value.tags ? { tags: [...value.tags] } : {}) };
+  }
+  const bounds = options.materialContextBounds ?? { min: coordinate, max: coordinate };
+  return resolveProceduralMaterial(reference, { materials: options.materials, materialLibrary: library, rolePalette: roles }, {
+    coordinate,
+    bounds,
+    componentSeed: options.componentSeed ?? "legacy-v1",
+    surfaceDirections: surfaceDirectionsAt(coordinate, bounds),
+  }, true);
+}
+
+function surfaceDirectionsAt(point: Vec3, bounds: { min: Vec3; max: Vec3 }) {
+  return [
+    ...(point.x === bounds.min.x ? ["west" as const] : []), ...(point.x === bounds.max.x ? ["east" as const] : []),
+    ...(point.y === bounds.min.y ? ["down" as const] : []), ...(point.y === bounds.max.y ? ["up" as const] : []),
+    ...(point.z === bounds.min.z ? ["north" as const] : []), ...(point.z === bounds.max.z ? ["south" as const] : []),
+  ];
 }
 
 function offsets(element: DesignElement) {
@@ -318,25 +369,38 @@ function pointsAlong(points: Vec3[]) {
   return connected;
 }
 
+export type DesignCompileOptions = {
+  dimensions: Dimensions;
+  origin: Vec3;
+  edition?: Edition;
+  rolePalette: RolePalette;
+  materialLibrary?: MaterialLibrary;
+  maximumPlacements?: number;
+  maximumPlacementAttempts?: number;
+  componentCache?: ComponentCache<ComponentOperationCacheEntry>;
+  previousComponentGraph?: ComponentGraphManifest;
+  /** Internal v2 material environment used while compiling isolated component elements. */
+  materials?: Record<string, ProceduralMaterialDefinition>;
+  componentSeed?: string;
+  materialContextBounds?: { min: Vec3; max: Vec3 };
+  allowMaterialDistributions?: boolean;
+};
+
 export function compileDesignProgram(
   design: DesignProgram,
-  options: {
-    dimensions: Dimensions;
-    origin: Vec3;
-    edition?: Edition;
-    rolePalette: RolePalette;
-    materialLibrary?: MaterialLibrary;
-    maximumPlacements?: number;
-    maximumPlacementAttempts?: number;
-  },
+  options: DesignCompileOptions,
 ): DesignCompileResult {
-  if (design.schemaVersion !== 1) throw new Error(`DESIGN_SCHEMA_UNSUPPORTED: expected schemaVersion 1, received ${String(design.schemaVersion)}.`);
+  if (design.schemaVersion !== 1 && design.schemaVersion !== 2) throw new Error(`DESIGN_SCHEMA_UNSUPPORTED: expected schemaVersion 1 or 2, received ${String((design as { schemaVersion?: unknown }).schemaVersion)}.`);
   if (!design.elements.length) throw new Error("DESIGN_EMPTY: a generic design program must contain at least one element.");
   const elementIds = new Set<string>();
   for (const element of design.elements) {
     if (!/^[a-z0-9][a-z0-9_.-]*$/i.test(element.id)) throw new Error(`DESIGN_ELEMENT_ID_INVALID: ${element.id}`);
     if (elementIds.has(element.id)) throw new Error(`DESIGN_ELEMENT_ID_DUPLICATE: ${element.id}`);
     elementIds.add(element.id);
+  }
+
+  if (design.schemaVersion === 1 && design.elements.some(({ kind }) => kind === "procedural")) {
+    throw new Error("DESIGN_PROCEDURAL_REQUIRES_V2: procedural primitives require component bounds, phase, and seed metadata.");
   }
   const requirementIds = new Set<string>();
   for (const requirement of design.requirements) {
@@ -353,6 +417,8 @@ export function compileDesignProgram(
     if (missing.length) throw new Error(`DESIGN_ELEMENT_REQUIREMENT_UNKNOWN: ${element.id} references ${missing.join(", ")}.`);
   }
 
+  if (design.schemaVersion === 2) return compileComponentDesignProgram(design, options);
+
   const library = options.materialLibrary ?? {};
   const map = new Map<string, Placement>();
   let attemptedCollisions = 0;
@@ -367,7 +433,7 @@ export function compileDesignProgram(
   const put = (local: Vec3, materialRef: string, element: DesignElement, phaseSuffix = "", stateOverride?: Placement["state"]) => {
     countAttempt();
     assertInside(local, options.dimensions, element.id);
-    const resolved = materialValue(materialRef, library, options.rolePalette);
+    const resolved = materialValue(materialRef, library, options.rolePalette, options, local);
     const world = add(local, options.origin);
     const placement: Placement = {
       ...world,
@@ -528,4 +594,306 @@ export function compileDesignProgram(
     for (const requirementId of placement.requirementIds ?? []) requirementCounts[requirementId] = (requirementCounts[requirementId] ?? 0) + 1;
   }
   return { placements, attemptedCollisions, elementCounts, requirementCounts };
+}
+
+function compileComponentDesignProgram(design: DesignProgramV2, options: DesignCompileOptions): DesignCompileResult {
+  const componentCache = options.componentCache ?? defaultComponentCache;
+  const cacheStatsBefore = componentCache.stats();
+  const graph = resolveComponentGraph(design, {
+    edition: options.edition ?? "java",
+    dimensions: options.dimensions,
+    origin: options.origin,
+    rolePalette: options.rolePalette,
+    materialLibrary: options.materialLibrary ?? {},
+    materials: design.materials,
+  });
+  const previousById = new Map((options.previousComponentGraph?.components ?? []).map((entry) => [entry.id, entry]));
+  const changed = graph.components.filter(({ manifest }) => {
+    const previous = previousById.get(manifest.id);
+    return !previous || previous.geometryHash !== manifest.geometryHash || previous.materialHash !== manifest.materialHash
+      || previous.revision.revision !== manifest.revision.revision;
+  }).map(({ manifest }) => manifest.id);
+  for (const previous of options.previousComponentGraph?.components ?? []) {
+    if (!graph.manifest.components.some(({ id }) => id === previous.id)) changed.push(previous.id);
+  }
+
+  const rebuilt: string[] = [];
+  const reused: string[] = [];
+  const compiledComponents: Array<{ id: string; entry: ComponentOperationCacheEntry }> = [];
+  for (const component of graph.components) {
+    const cached = componentCache.get(component.manifest.cacheKey);
+    let entry: ComponentOperationCacheEntry;
+    if (cached) {
+      entry = cloneComponentCacheEntry(cached);
+      reused.push(component.manifest.id);
+    }
+    else {
+      entry = compileComponentOperations(component.definition, component.elements, options, design.materials ?? {});
+      componentCache.set(component.manifest.cacheKey, cloneComponentCacheEntry(entry), Math.max(1, operationWeight(entry.operations)));
+      rebuilt.push(component.manifest.id);
+    }
+    compiledComponents.push({ id: component.manifest.id, entry });
+  }
+
+  const maximumPlacements = Math.max(1, Math.round(options.maximumPlacements ?? 2_000_000));
+  const maximumPlacementAttempts = Math.max(1, Math.round(options.maximumPlacementAttempts ?? 8_000_000));
+  const map = new Map<string, Placement>();
+  const conflicts: ComponentConflict[] = [];
+  let conflictCount = 0;
+  let placementAttempts = 0;
+  let attemptedCollisions = 0;
+  for (const { entry } of compiledComponents) {
+    placementAttempts += entry.attempts;
+    attemptedCollisions += entry.internalCollisions;
+    if (placementAttempts > maximumPlacementAttempts) throw new Error(`DESIGN_OPERATION_LIMIT_EXCEEDED: component compilation exceeded ${maximumPlacementAttempts.toLocaleString()} coordinate attempts.`);
+    for (const operation of entry.operations) {
+      if (operation.kind === "put") {
+        const key = coordinateKey(operation.placement);
+        const previous = map.get(key);
+        if (previous) {
+          attemptedCollisions += 1;
+          conflictCount += 1;
+          if (conflicts.length < 1_000) conflicts.push({
+            coordinate: pointOf(operation.placement),
+            kind: "replacement",
+            previous: sourceForPlacement(previous),
+            incoming: sourceForPlacement(operation.placement),
+          });
+        }
+        map.set(key, operation.placement);
+        if (map.size > maximumPlacements) throw new Error(`BUILD_PLACEMENT_LIMIT_EXCEEDED: component compilation retained more than ${maximumPlacements.toLocaleString()} canonical placements.`);
+      } else if (operation.kind === "remove") {
+        const key = coordinateKey(operation.coordinate);
+        const previous = map.get(key);
+        if (previous) {
+          conflictCount += 1;
+          if (conflicts.length < 1_000) conflicts.push({
+            coordinate: { ...operation.coordinate },
+            kind: "removal",
+            previous: sourceForPlacement(previous),
+            incoming: operation.source,
+          });
+        }
+        map.delete(key);
+      } else {
+        const retained = new Set(operation.coordinates.map(coordinateKey));
+        for (const [key, previous] of [...map.entries()]) {
+          if (!insideBounds(previous, operation.bounds) || retained.has(key)) continue;
+          conflictCount += 1;
+          if (conflicts.length < 1_000) conflicts.push({
+            coordinate: pointOf(previous),
+            kind: "removal",
+            previous: sourceForPlacement(previous),
+            incoming: operation.source,
+          });
+          map.delete(key);
+        }
+      }
+    }
+  }
+
+  const placements = [...map.values()].sort((a, b) => a.y - b.y || a.z - b.z || a.x - b.x || a.block.localeCompare(b.block));
+  const elementCounts: Record<string, number> = {};
+  const requirementCounts: Record<string, number> = {};
+  for (const placement of placements) {
+    if (placement.elementId) elementCounts[placement.elementId] = (elementCounts[placement.elementId] ?? 0) + 1;
+    for (const requirementId of placement.requirementIds ?? []) requirementCounts[requirementId] = (requirementCounts[requirementId] ?? 0) + 1;
+  }
+  const cacheStatsAfter = componentCache.stats();
+  return {
+    placements,
+    attemptedCollisions,
+    elementCounts,
+    requirementCounts,
+    componentGraph: graph.manifest,
+    compileReport: {
+      changed,
+      rebuilt,
+      reused,
+      cacheHits: reused.length,
+      cacheMisses: rebuilt.length,
+      conflicts,
+      conflictCount,
+      evictions: cacheStatsAfter.evictions - cacheStatsBefore.evictions,
+    },
+  };
+}
+
+function compileComponentOperations(
+  component: DesignProgramV2["components"][number],
+  elements: Array<{ element: DesignElement; instancePrefix: string }>,
+  options: DesignCompileOptions,
+  materials: Record<string, ProceduralMaterialDefinition>,
+): ComponentOperationCacheEntry {
+  const operations: ComponentOperation[] = [];
+  let internalCollisions = 0;
+  let attempts = 0;
+  for (const { element, instancePrefix } of elements) {
+    if (element.kind === "procedural") {
+      const operation = element.operation ?? "add";
+      if ((operation === "add" || operation === "union") && !element.material) {
+        throw new Error(`DESIGN_PROCEDURAL_MATERIAL_REQUIRED: ${element.id} needs a material for ${operation}.`);
+      }
+      for (const [offsetIndex, offset] of offsets(element).entries()) {
+        assertIntegerPoint(offset, `${element.id} offset`);
+        const generated = compileProceduralGeometry(element.primitive, {
+          offset,
+          clip: element.clip,
+          masks: element.masks,
+          maximumAttempts: options.maximumPlacementAttempts,
+        });
+        attempts += generated.attempts;
+        internalCollisions += generated.collisions;
+        const source: ComponentConflictSource = {
+          componentId: component.id,
+          elementId: element.id,
+          elementInstanceId: `${instancePrefix}/${element.id}#${offsetIndex + 1}`,
+          operationPhase: component.operationPhase,
+        };
+        for (const { point } of generated.points) {
+          assertInside(point, options.dimensions, element.id);
+          assertInsideComponent(point, component);
+        }
+        if (operation === "intersect") {
+          operations.push({
+            kind: "intersect",
+            coordinates: generated.points.map(({ point }) => add(point, options.origin)),
+            bounds: { min: add(component.bounds.min, options.origin), max: add(component.bounds.max, options.origin) },
+            source,
+          });
+          continue;
+        }
+        for (const { point, surfaceDirections } of generated.points) {
+          if (operation === "clear" || operation === "subtract" || operation === "cut") {
+            operations.push({ kind: "remove", coordinate: add(point, options.origin), source });
+            continue;
+          }
+          const resolved = resolveProceduralMaterial(element.material!, {
+            materials,
+            materialLibrary: options.materialLibrary ?? {},
+            rolePalette: options.rolePalette,
+          }, {
+            coordinate: point,
+            bounds: component.bounds,
+            componentSeed: component.seed,
+            surfaceDirections,
+          }, true);
+          operations.push({ kind: "put", placement: {
+            ...add(point, options.origin),
+            block: resolved.block,
+            ...(resolved.state ? { state: resolved.state } : {}),
+            phase: element.phase || element.intent || element.id,
+            elementId: element.id,
+            elementInstanceId: source.elementInstanceId,
+            requirementIds: [...element.requirementIds].sort(),
+            componentId: component.id,
+            operationPhase: component.operationPhase,
+          } });
+        }
+      }
+      continue;
+    }
+    if (element.kind === "carve") {
+      for (const [offsetIndex, offset] of offsets(element).entries()) {
+        assertIntegerPoint(offset, `${element.id} offset`);
+        const { min, max } = normalizedBox(add(element.min, offset), add(element.max, offset));
+        for (let x = min.x; x <= max.x; x += 1) for (let y = min.y; y <= max.y; y += 1) for (let z = min.z; z <= max.z; z += 1) {
+          const local = { x, y, z };
+          assertInside(local, options.dimensions, element.id);
+          assertInsideComponent(local, component);
+          attempts += 1;
+          operations.push({
+            kind: "remove",
+            coordinate: add(local, options.origin),
+            source: {
+              componentId: component.id,
+              elementId: element.id,
+              elementInstanceId: `${instancePrefix}/${element.id}#${offsetIndex + 1}`,
+              operationPhase: component.operationPhase,
+            },
+          });
+        }
+      }
+      continue;
+    }
+    const isolated = compileDesignProgram(isolatedProgram(element), {
+      dimensions: options.dimensions,
+      origin: options.origin,
+      edition: options.edition,
+      rolePalette: options.rolePalette,
+      materialLibrary: options.materialLibrary,
+      materials,
+      componentSeed: component.seed,
+      materialContextBounds: component.bounds,
+      allowMaterialDistributions: true,
+      maximumPlacements: options.maximumPlacements,
+      maximumPlacementAttempts: options.maximumPlacementAttempts,
+    });
+    internalCollisions += isolated.attemptedCollisions;
+    attempts += isolated.placements.length + isolated.attemptedCollisions;
+    for (const placement of isolated.placements) {
+      const local = { x: placement.x - options.origin.x, y: placement.y - options.origin.y, z: placement.z - options.origin.z };
+      assertInsideComponent(local, component);
+      operations.push({
+        kind: "put",
+        placement: {
+          ...placement,
+          componentId: component.id,
+          operationPhase: component.operationPhase,
+          elementInstanceId: `${instancePrefix}/${placement.elementInstanceId ?? element.id}`,
+        },
+      });
+    }
+  }
+  return { operations, internalCollisions, attempts };
+}
+
+function isolatedProgram(element: DesignElement): DesignProgramV1 {
+  const text = "component operation";
+  const sourceSpan = { start: 0, end: text.length, text };
+  const requirements: DesignRequirement[] = [...new Set(element.requirementIds)].map((id) => ({
+    id,
+    text,
+    elementIds: [element.id],
+    claims: [{ id: `${id}-component-claim`, sourceSpan, predicate: "quantity", status: "asserted" }],
+    assertions: [
+      { kind: "placement_count", claimId: `${id}-component-claim`, sourceSpan, minimum: 1 },
+      { kind: "distinct_elements", claimId: `${id}-component-claim`, sourceSpan, minimum: 1 },
+    ],
+  }));
+  return { schemaVersion: 1, description: `component operation ${element.id}`, requirements, elements: [element] };
+}
+
+function assertInsideComponent(point: Vec3, component: DesignProgramV2["components"][number]) {
+  const { min, max } = component.bounds;
+  if (point.x < min.x || point.y < min.y || point.z < min.z || point.x > max.x || point.y > max.y || point.z > max.z) {
+    throw new Error(`DESIGN_COMPONENT_BOUNDS_VIOLATION: component ${component.id} produced ${point.x},${point.y},${point.z} outside its declared bounds.`);
+  }
+}
+
+function sourceForPlacement(placement: Placement): ComponentConflictSource {
+  return {
+    componentId: placement.componentId ?? "legacy",
+    elementId: placement.elementId,
+    elementInstanceId: placement.elementInstanceId,
+    operationPhase: placement.operationPhase ?? "detail",
+  };
+}
+
+function pointOf(point: Vec3): Vec3 {
+  return { x: point.x, y: point.y, z: point.z };
+}
+
+function insideBounds(point: Vec3, bounds: { min: Vec3; max: Vec3 }) {
+  return point.x >= bounds.min.x && point.x <= bounds.max.x
+    && point.y >= bounds.min.y && point.y <= bounds.max.y
+    && point.z >= bounds.min.z && point.z <= bounds.max.z;
+}
+
+function operationWeight(operations: ComponentOperation[]) {
+  return operations.reduce((total, operation) => total + (operation.kind === "intersect" ? operation.coordinates.length : 1), 0);
+}
+
+function cloneComponentCacheEntry(entry: ComponentOperationCacheEntry): ComponentOperationCacheEntry {
+  return structuredClone(entry);
 }

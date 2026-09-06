@@ -16,10 +16,9 @@ $RegistryClassesRoot = $RegistryClassesRoot.TrimEnd('\')
 $extensionKey = "$RegistryClassesRoot\.schem"
 $programId = "Blockwright.Schematic.1"
 $programKey = "$RegistryClassesRoot\$programId"
-$openScript = Join-Path $resolvedInstallRoot "scripts\windows\Open-BlockwrightSchematic.ps1"
-$powershell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-$openCommand = '"' + $powershell + '" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "' + $openScript + '" -Path "%1" -InstallRoot "' + $resolvedInstallRoot + '"'
-$iconCommand = "$powershell,0"
+$launcher = Join-Path $resolvedInstallRoot "Blockwright.exe"
+$openCommand = '"' + $launcher + '" --open-schematic "%1"'
+$iconCommand = "$launcher,0"
 
 function Get-RegistryDefaultValueState {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -57,6 +56,12 @@ $iconKey = "$programKey\DefaultIcon"
 
 function Test-AssociationMarker {
     param([object]$Marker)
+    if (-not (Test-AssociationMarkerIdentity -Marker $Marker)) { return $false }
+    return ([string]$Marker.command -ceq $openCommand) -and ([string]$Marker.icon -ceq $iconCommand)
+}
+
+function Test-AssociationMarkerIdentity {
+    param([object]$Marker)
     if ($null -eq $Marker -or [int]$Marker.schemaVersion -ne 2 -or [string]$Marker.programId -cne $programId) { return $false }
     $properties = @($Marker.PSObject.Properties.Name)
     foreach ($requiredProperty in @("previousDefaultPresent", "previousProgramId", "extensionKeyCreated", "command", "icon", "installRoot")) {
@@ -68,7 +73,7 @@ function Test-AssociationMarker {
     } catch {
         return $false
     }
-    return ([string]$Marker.command -ceq $openCommand) -and ([string]$Marker.icon -ceq $iconCommand)
+    return $true
 }
 
 function Write-AssociationMarker {
@@ -176,17 +181,28 @@ if ($Remove) {
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $openScript -PathType Leaf)) { throw "The Blockwright schematic launcher is missing: $openScript" }
+if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw "The native Blockwright schematic launcher is missing: $launcher" }
 $previous = Get-RegistryDefaultValueState -Path $extensionKey
 if ($previous.ValueExists -and $previous.Value -eq $programId -and (Test-Path -LiteralPath $markerPath -PathType Leaf)) {
     $existingMarker = Get-Content -Raw -LiteralPath $markerPath | ConvertFrom-Json
     $existingCommand = Get-RegistryDefaultValueState -Path $commandKey
     $existingIcon = Get-RegistryDefaultValueState -Path $iconKey
-    if (-not (Test-AssociationMarker -Marker $existingMarker) -or -not $existingCommand.ValueExists -or $existingCommand.Value -cne $openCommand -or
-        -not $existingIcon.ValueExists -or $existingIcon.Value -cne $iconCommand) {
+    if (-not (Test-AssociationMarkerIdentity -Marker $existingMarker) -or -not $existingCommand.ValueExists -or
+        $existingCommand.Value -cne [string]$existingMarker.command -or -not $existingIcon.ValueExists -or $existingIcon.Value -cne [string]$existingMarker.icon) {
         throw "The existing Blockwright .schem association or ownership marker does not match this installation and was left unchanged."
     }
-    if ($PassThru) { [pscustomobject]@{ Status = "AlreadyAssociated" } }
+    if (Test-AssociationMarker -Marker $existingMarker) {
+        if ($PassThru) { [pscustomobject]@{ Status = "AlreadyAssociated" } }
+        exit 0
+    }
+    if ($PSCmdlet.ShouldProcess(".schem", "Migrate the owned Blockwright association to Blockwright.exe")) {
+        Set-Item -Path $iconKey -Value $iconCommand
+        Set-Item -Path $commandKey -Value $openCommand
+        $existingMarker.command = $openCommand
+        $existingMarker.icon = $iconCommand
+        Write-AssociationMarker -Marker $existingMarker
+        if ($PassThru) { [pscustomobject]@{ Status = "Updated"; Marker = $markerPath } }
+    }
     exit 0
 }
 if ($previous.ValueExists -and $previous.Value -eq $programId -and -not (Test-Path -LiteralPath $markerPath -PathType Leaf)) {

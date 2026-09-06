@@ -642,7 +642,7 @@ describe("Blockwright stdio bridge helpers", () => {
         body: JSON.stringify({ jsonrpc: "2.0", id: "loopback-runtime-test", method: "initialize", params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "loopback-runtime-test", version: "1" } } }),
       });
       expect(authenticatedMcp.status).toBe(200);
-      expect(await authenticatedMcp.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.7.0" } } });
+      expect(await authenticatedMcp.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.8.0" } } });
 
       for (let attempt = 0; attempt < 70; attempt += 1) {
         const unguarded = await fetch(`http://127.0.0.1:${port}/not-an-ingress-route`, {
@@ -1099,7 +1099,7 @@ describe("Blockwright stdio bridge helpers", () => {
       });
       expect(initialized.status).toBe(200);
       expectPublicResponseHeaders(initialized);
-      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.7.0" } } });
+      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.8.0" } } });
 
       const listed = await postMcp({ jsonrpc: "2.0", id: "public-connector-tools", method: "tools/list", params: {} });
       expect(listed.status).toBe(200);
@@ -1107,20 +1107,33 @@ describe("Blockwright stdio bridge helpers", () => {
       const listedPayload = await listed.json() as any;
       const listedNames = (listedPayload.result?.tools ?? []).map(({ name }: { name: string }) => name).sort();
       const explicitPublicAllowlist = [
+        "analyze_terrain_fit",
         "analyze_world_region",
         "audit_build",
+        "cancel_task",
         "compile_build",
+        "compile_procedural_build",
+        "confirm_terrain_install",
         "estimate_build",
         "export_bedrock_project",
         "export_build",
         "generate_build_candidates",
         "get_build_chunk",
+        "get_diagnostics",
         "get_material_list",
+        "get_model_status",
         "get_style_profile",
         "get_supported_versions",
+        "get_task_status",
+        "inspect_procedural_build",
+        "list_tasks",
+        "plan_build",
+        "preview_terrain_fit",
         "review_build",
         "revise_build",
+        "revise_component",
         "search_blocks",
+        "start_compile_task",
         "validate_build",
         "validate_build_contract",
       ];
@@ -1465,7 +1478,7 @@ describe("Blockwright stdio bridge helpers", () => {
 
       const initialized = await postMcp(initializeBody);
       expect(initialized.status).toBe(200);
-      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.7.0" } } });
+      expect(await initialized.json()).toMatchObject({ result: { serverInfo: { name: "blockwright", version: "0.8.0" } } });
 
       const excessiveCandidates = await postMcp({
         jsonrpc: "2.0",
@@ -1786,7 +1799,8 @@ describe("Blockwright stdio bridge helpers", () => {
       processHandle.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} })}\n`);
       processHandle.stdin?.write(`${JSON.stringify({ jsonrpc: "2.0", id: "tools-test", method: "tools/list", params: {} })}\n`);
       const tools = await waitForMessage(messages, ({ id }) => id === "tools-test");
-      expect(tools.result?.tools).toHaveLength(38);
+      expect(tools.result?.tools).toHaveLength(57);
+      expect(Buffer.byteLength(JSON.stringify(tools), "utf8"), "tools/list must stay inside the Control Center's bounded response reader").toBeLessThanOrEqual(4 * 1024 * 1024);
       expect(tools.result?.tools).toEqual(expect.arrayContaining([
         expect.objectContaining({
           name: "validate_build_contract",
@@ -1897,6 +1911,17 @@ describe("Blockwright stdio bridge helpers", () => {
         return waitForMessage(messages, (message) => message.id === id);
       };
 
+      const invalidDesign = await callTool("invalid-design-transport", "compile_build", {
+        name: "Invalid Design Transport",
+        edition: "java",
+        version: "26.2",
+        style: "japanese",
+        dimensions: { width: 9, depth: 9, height: 9 },
+        design: { schemaVersion: 2 },
+      });
+      expect(invalidDesign.result?.isError).toBe(true);
+      expect(JSON.stringify(invalidDesign)).toMatch(/Invalid Design IR/);
+
       processHandle.stdin?.write(`${JSON.stringify({
         jsonrpc: "2.0",
         id: "compile-test",
@@ -1919,6 +1944,54 @@ describe("Blockwright stdio bridge helpers", () => {
       expect(build?.input?.style).toBe("japanese");
       expect(compiled.result?._meta).toBeUndefined();
       expect(JSON.stringify(compiled)).not.toMatch(/viewUUID/);
+
+      const revisionBrief = "Three markers";
+      const revisionSpan = { start: 0, end: revisionBrief.length, text: revisionBrief };
+      const componentBuild = await callTool("component-revision-compile", "compile_procedural_build", {
+        name: "Component Revision Regression",
+        edition: "java",
+        version: "26.2",
+        style: "component-revision-test",
+        sourceBrief: revisionBrief,
+        dimensions: { width: 9, depth: 9, height: 9 },
+        design: {
+          schemaVersion: 2,
+          description: "Three-component dependency graph used to verify incremental revision reporting.",
+          requirements: [{
+            id: "shape",
+            text: revisionBrief,
+            elementIds: ["foundation-op", "wall-op", "landscape-op"],
+            claims: [{ id: "shape-claim", sourceSpan: revisionSpan, predicate: "quantity", status: "asserted" }],
+            assertions: [
+              { kind: "placement_count", claimId: "shape-claim", sourceSpan: revisionSpan, minimum: 3 },
+              { kind: "distinct_elements", claimId: "shape-claim", sourceSpan: revisionSpan, minimum: 3 },
+            ],
+          }],
+          elements: [
+            { id: "foundation-op", kind: "fill", intent: "foundation", requirementIds: ["shape"], min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 }, material: "minecraft:stone" },
+            { id: "wall-op", kind: "fill", intent: "wall", requirementIds: ["shape"], min: { x: 2, y: 0, z: 0 }, max: { x: 2, y: 1, z: 0 }, material: "minecraft:bricks" },
+            { id: "landscape-op", kind: "fill", intent: "landscape", requirementIds: ["shape"], min: { x: 6, y: 0, z: 0 }, max: { x: 6, y: 0, z: 0 }, material: "minecraft:moss_block" },
+          ],
+          templates: [],
+          components: [
+            { id: "walls", name: "Walls", type: "walls", bounds: { min: { x: 2, y: 0, z: 0 }, max: { x: 2, y: 1, z: 0 } }, dependencies: ["foundation"], elementIds: ["wall-op"], seed: "walls-v1", operationPhase: "walls", revision: { revision: 1 } },
+            { id: "landscape", name: "Landscape", type: "landscape", bounds: { min: { x: 6, y: 0, z: 0 }, max: { x: 6, y: 0, z: 0 } }, dependencies: [], elementIds: ["landscape-op"], seed: "landscape-v1", operationPhase: "landscaping", revision: { revision: 1 } },
+            { id: "foundation", name: "Foundation", type: "foundation", bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } }, dependencies: [], elementIds: ["foundation-op"], seed: "foundation-v1", operationPhase: "terrain_foundation", revision: { revision: 1 } },
+          ],
+        },
+      });
+      expect(componentBuild.result?.isError, JSON.stringify(componentBuild)).not.toBe(true);
+      const componentRevision = await callTool("component-revision-update", "revise_component", {
+        build: componentBuild.result?.structuredContent?.build?.id,
+        componentId: "foundation",
+        component: { id: "foundation", name: "Foundation", type: "foundation", bounds: { min: { x: 0, y: 0, z: 0 }, max: { x: 0, y: 0, z: 0 } }, dependencies: [], elementIds: ["foundation-op"], seed: "foundation-v2", operationPhase: "terrain_foundation", revision: { revision: 2, parentRevision: 1 } },
+      });
+      expect(componentRevision.result?.isError, JSON.stringify(componentRevision)).not.toBe(true);
+      expect(componentRevision.result?.structuredContent?.build?.compileReport).toMatchObject({
+        changed: ["foundation"],
+        rebuilt: ["foundation", "walls"],
+        reused: ["landscape"],
+      });
 
       const chunkProbe = await callTool("build-chunk-probe", "get_build_chunk", { build: build.id, offset: 0, limit: 7 });
       expect(chunkProbe.result?.isError).not.toBe(true);

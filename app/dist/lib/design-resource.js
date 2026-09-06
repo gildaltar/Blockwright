@@ -1,3 +1,4 @@
+import { proceduralPrimitiveBounds } from "./procedural-geometry.js";
 const LIMIT = Number.MAX_SAFE_INTEGER;
 function safeAdd(...values) {
     let total = 0;
@@ -81,6 +82,13 @@ export function estimateDesignPlacementAttempts(program) {
                 supports = safeMultiply(samples, supportHeight, radius * 2 + 1, radius * 2 + 1);
             }
             perInstance = safeAdd(safeMultiply(samples, crossSection), supports);
+        }
+        else if (element.kind === "procedural") {
+            const primitiveBounds = proceduralPrimitiveBounds(element.primitive);
+            perInstance = safeAdd(boxVolume(primitiveBounds.min, primitiveBounds.max), ...(element.masks ?? []).map(({ primitive }) => {
+                const maskBounds = proceduralPrimitiveBounds(primitive);
+                return boxVolume(maskBounds.min, maskBounds.max);
+            }));
         }
         else {
             const dx = Math.abs(element.to.x - element.from.x);

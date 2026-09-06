@@ -47,6 +47,13 @@ function validateSboms({ cyclonedx, spdx, packageManifest, version, releaseConfi
   if (!runtimeComponent.licenses?.some(({ license }) => license?.id === "MIT")) throw new Error("CycloneDX bundled Node runtime must declare its MIT license.");
   if (!runtimeComponent.hashes?.some(({ alg, content }) => alg === "SHA-256" && String(content).toLowerCase() === releaseConfig.runtime.sha256.toLowerCase())) throw new Error("CycloneDX bundled runtime hash does not match the pinned runtime archive.");
   if (!runtimeComponent.externalReferences?.some(({ type, url }) => type === "distribution" && url === releaseConfig.runtime.url)) throw new Error("CycloneDX bundled runtime source does not match the pinned runtime archive.");
+  const launcherComponents = cyclonedx.components.filter((component) => component?.properties?.some(({ name, value }) => name === "blockwright:distribution-role" && value === "native-windows-launcher"));
+  if (launcherComponents.length !== 1) throw new Error("CycloneDX SBOM must describe exactly one native Blockwright Windows launcher.");
+  const launcherComponent = launcherComponents[0];
+  if (launcherComponent.name !== "Blockwright Windows Launcher" || launcherComponent.version !== version) throw new Error("CycloneDX native launcher name/version does not match the release.");
+  if (!launcherComponent.licenses?.some(({ license }) => license?.id === "GPL-2.0-only")) throw new Error("CycloneDX native launcher must declare GPL-2.0-only.");
+  if (!launcherComponent.properties?.some(({ name, value }) => name === "blockwright:installed-path" && value === "Blockwright.exe")) throw new Error("CycloneDX native launcher installed path is invalid.");
+  const launcherHash = normalizeEvidenceHash(launcherComponent.hashes?.find(({ alg }) => alg === "SHA-256")?.content, "CycloneDX native launcher SHA-256");
   if (spdx?.spdxVersion !== "SPDX-2.3" || !Array.isArray(spdx?.packages) || !Array.isArray(spdx?.relationships)) throw new Error("SPDX SBOM evidence is missing or invalid.");
   const spdxRoot = spdx.packages.find(({ SPDXID }) => SPDXID === "SPDXRef-RootPackage");
   if (spdxRoot?.name !== packageManifest.name || spdxRoot?.versionInfo !== version) throw new Error("SPDX root package name/version does not match package.json.");
@@ -55,6 +62,12 @@ function validateSboms({ cyclonedx, spdx, packageManifest, version, releaseConfi
   if (spdxRuntime?.name !== releaseConfig.runtime.name || spdxRuntime?.versionInfo !== releaseConfig.runtime.version || spdxRuntime?.downloadLocation !== releaseConfig.runtime.url) throw new Error("SPDX SBOM does not describe the pinned bundled Node runtime.");
   if (spdxRuntime.licenseDeclared !== "MIT" || spdxRuntime.licenseConcluded !== "MIT") throw new Error("SPDX bundled Node runtime must declare and conclude its MIT license.");
   if (!spdxRuntime.checksums?.some(({ algorithm, checksumValue }) => algorithm === "SHA256" && String(checksumValue).toLowerCase() === releaseConfig.runtime.sha256.toLowerCase())) throw new Error("SPDX bundled runtime hash does not match the pinned runtime archive.");
+  const spdxLaunchers = spdx.packages.filter(({ SPDXID }) => SPDXID === "SPDXRef-BlockwrightWindowsLauncher");
+  if (spdxLaunchers.length !== 1) throw new Error("SPDX SBOM must describe exactly one native Blockwright Windows launcher.");
+  const spdxLauncher = spdxLaunchers[0];
+  if (spdxLauncher.name !== "Blockwright Windows Launcher" || spdxLauncher.versionInfo !== version) throw new Error("SPDX native launcher name/version does not match the release.");
+  if (spdxLauncher.licenseDeclared !== "GPL-2.0-only" || spdxLauncher.licenseConcluded !== "GPL-2.0-only") throw new Error("SPDX native launcher must declare and conclude GPL-2.0-only.");
+  if (!spdxLauncher.checksums?.some(({ algorithm, checksumValue }) => algorithm === "SHA256" && normalizeEvidenceHash(checksumValue, "SPDX native launcher SHA-256") === launcherHash)) throw new Error("SPDX native launcher hash does not match CycloneDX.");
 
   validateSbomPartitions({
     cyclonedx,
@@ -64,6 +77,7 @@ function validateSboms({ cyclonedx, spdx, packageManifest, version, releaseConfi
     runtimeName: releaseConfig.runtime.name,
     runtimeVersion: releaseConfig.runtime.version,
   });
+  return { launcherHash };
 }
 
 function verifyUnsignedAuthenticode(installerPath, installerName, spawnProcess) {
@@ -102,7 +116,24 @@ function verifySignedAuthenticode(installerPath, installerName, spawnProcess) {
   };
 }
 
-function validateSignedEvidence({ releaseDirectory, names, checksums, statusArtifact, version, repository, sourceRef, expectedThumbprint }) {
+function verifyPackagedLauncher({ portablePath, portableName, version, expectedStatus, expectedThumbprint, spawnProcess }) {
+  const script = resolve(repositoryRoot, "scripts", "release", "Test-BlockwrightPortableLauncher.ps1");
+  const args = [
+    "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script,
+    "-PortableZip", portablePath, "-Version", version, "-ExpectedAuthenticodeStatus", expectedStatus,
+  ];
+  if (expectedThumbprint) args.push("-ExpectedThumbprint", expectedThumbprint, "-RequireTimestamp");
+  const result = spawnProcess("powershell.exe", args, { encoding: "utf8", windowsHide: true });
+  if (result.error) throw new Error(`Packaged launcher verification could not run for ${portableName}: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`Packaged launcher verification failed for ${portableName}: ${String(result.stderr || result.stdout).trim()}`);
+  try {
+    return JSON.parse(String(result.stdout ?? "").trim());
+  } catch (error) {
+    throw new Error(`Packaged launcher verification returned invalid JSON for ${portableName}: ${error.message}`);
+  }
+}
+
+function validateSignedEvidence({ releaseDirectory, names, checksums, statusArtifact, embeddedLauncher, version, repository, sourceRef, expectedThumbprint }) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? "")) {
     throw new Error("Signed release verification requires --repository as an owner/repository identity.");
   }
@@ -122,6 +153,11 @@ function validateSignedEvidence({ releaseDirectory, names, checksums, statusArti
   const proofSignerThumbprint = normalizeThumbprint(proof.signerThumbprint, "Authenticode proof signer thumbprint");
   const proofSignerSubject = requireNonEmptyString(proof.signerSubject, "Authenticode proof signer subject");
   const proofTimestampSubject = requireNonEmptyString(proof.timestampCertificateSubject, "Authenticode proof timestamp certificate subject");
+  if (!proof.launcher || proof.launcher.file !== "Blockwright.exe" || proof.launcher.container !== names.portable) throw new Error("Authenticode proof does not identify the packaged native launcher.");
+  if (normalizeEvidenceHash(proof.launcher.sha256, "Authenticode proof launcher SHA-256") !== embeddedLauncher.sha256) throw new Error("Authenticode proof launcher hash does not match signature-status evidence.");
+  if (proof.launcher.status !== "Valid") throw new Error("Authenticode proof launcher must report Valid status.");
+  const proofLauncherThumbprint = normalizeThumbprint(proof.launcher.signerThumbprint, "Authenticode proof launcher signer thumbprint");
+  requireNonEmptyString(proof.launcher.timestampCertificateSubject, "Authenticode proof launcher timestamp certificate subject");
 
   const update = readJson(resolve(releaseDirectory, names.update));
   if (update?.schemaVersion !== 1) throw new Error("Update metadata must use schemaVersion 1.");
@@ -142,6 +178,8 @@ function validateSignedEvidence({ releaseDirectory, names, checksums, statusArti
   for (const [label, thumbprint] of [
     ["signature-status", statusSignerThumbprint],
     ["Authenticode proof", proofSignerThumbprint],
+    ["embedded launcher status", normalizeThumbprint(embeddedLauncher.signerThumbprint, "Signature-status launcher signer thumbprint")],
+    ["embedded launcher proof", proofLauncherThumbprint],
     ["update metadata", updateSignerThumbprint],
   ]) {
     if (thumbprint !== expectedSignerThumbprint) throw new Error(`${label} signer thumbprint does not match --expected-thumbprint.`);
@@ -203,7 +241,7 @@ export function verifyReleaseEvidence({
 
   const cyclonedx = readJson(resolve(releaseDirectory, names.cyclonedx));
   const spdx = readJson(resolve(releaseDirectory, names.spdx));
-  validateSboms({ cyclonedx, spdx, packageManifest, version, releaseConfig });
+  const sbomEvidence = validateSboms({ cyclonedx, spdx, packageManifest, version, releaseConfig });
 
   const status = readJson(resolve(releaseDirectory, names.status));
   if (status?.schemaVersion !== 1) throw new Error("Signature-status evidence must use schemaVersion 1.");
@@ -213,6 +251,7 @@ export function verifyReleaseEvidence({
   const expectedGate = status.status === "signed";
   if (status.satisfiesSignedReleaseGate !== expectedGate) throw new Error(`Signature-status ${status.status} must set satisfiesSignedReleaseGate to ${expectedGate}.`);
   if (!Array.isArray(status.artifacts)) throw new Error("Signature-status artifacts must be an array.");
+  if (!Array.isArray(status.embeddedArtifacts)) throw new Error("Signature-status embeddedArtifacts must be an array.");
 
   const statusArtifacts = new Map();
   for (const artifact of status.artifacts) {
@@ -224,6 +263,11 @@ export function verifyReleaseEvidence({
     if (statusHash !== expectedHash) throw new Error(`Signature-status hash for ${artifact.file} does not match SHA256SUMS.txt.`);
     statusArtifacts.set(artifact.file, artifact);
   }
+  if (status.embeddedArtifacts.length !== 1) throw new Error("Signature-status must describe exactly one embedded native launcher.");
+  const embeddedLauncher = status.embeddedArtifacts[0];
+  if (embeddedLauncher?.file !== "Blockwright.exe" || embeddedLauncher.container !== names.portable) throw new Error("Signature-status embedded launcher identity is invalid.");
+  embeddedLauncher.sha256 = normalizeEvidenceHash(embeddedLauncher.sha256, "Signature-status embedded launcher SHA-256");
+  if (embeddedLauncher.sha256 !== sbomEvidence.launcherHash) throw new Error("Signature-status embedded launcher hash does not match the SBOMs.");
 
   let signedEvidence = null;
   if (status.status === "unsigned") {
@@ -231,6 +275,7 @@ export function verifyReleaseEvidence({
     assertExactNames(statusArtifacts.keys(), [names.installer, names.portable], "Unsigned signature-status artifacts");
     if (statusArtifacts.get(names.installer)?.authenticode !== "not-signed") throw new Error("Unsigned installer status must record authenticode as not-signed.");
     if (statusArtifacts.get(names.portable)?.authenticode !== "not-applicable") throw new Error("Unsigned portable ZIP status must record authenticode as not-applicable.");
+    if (embeddedLauncher.authenticode !== "not-signed" || embeddedLauncher.signerThumbprint !== null) throw new Error("Unsigned embedded Blockwright.exe must be explicitly untrusted and not signed.");
     if (typeof status.reason !== "string" || !status.reason.trim()) throw new Error("Unsigned signature-status evidence must explain why the artifacts are unsigned.");
     if (platform === "win32") verifyUnsignedAuthenticode(resolve(releaseDirectory, names.installer), names.installer, spawnProcess);
   } else {
@@ -240,11 +285,13 @@ export function verifyReleaseEvidence({
     assertExactNames(checksums.keys(), [names.installer, names.portable, names.cyclonedx, names.spdx, names.status, names.proof, names.update], "Signed checksum evidence");
     assertExactNames(statusArtifacts.keys(), [names.installer], "Signed signature-status artifacts");
     if (statusArtifacts.get(names.installer)?.authenticode !== "valid") throw new Error("Signed installer status must record authenticode as valid.");
+    if (embeddedLauncher.authenticode !== "valid") throw new Error("Signed release status must record the embedded Blockwright.exe Authenticode signature as valid.");
     signedEvidence = validateSignedEvidence({
       releaseDirectory,
       names,
       checksums,
       statusArtifact: statusArtifacts.get(names.installer),
+      embeddedLauncher,
       version,
       repository,
       sourceRef,
@@ -259,6 +306,19 @@ export function verifyReleaseEvidence({
     if (actualSignature.thumbprint !== signedEvidence.expectedSignerThumbprint) throw new Error("Actual Authenticode signer thumbprint does not match --expected-thumbprint.");
     if (actualSignature.signerSubject !== signedEvidence.proofSignerSubject) throw new Error("Actual Authenticode signer subject does not match authenticode-proof.json.");
     if (actualSignature.timestampCertificateSubject !== signedEvidence.proofTimestampSubject) throw new Error("Actual Authenticode timestamp certificate subject does not match authenticode-proof.json.");
+  }
+  if (platform === "win32") {
+    const expectedLauncherStatus = status.status === "signed" ? "Valid" : "NotSigned";
+    const expectedLauncherThumbprint = status.status === "signed" ? signedEvidence.expectedSignerThumbprint : null;
+    const packagedLauncher = verifyPackagedLauncher({
+      portablePath: resolve(releaseDirectory, names.portable),
+      portableName: names.portable,
+      version,
+      expectedStatus: expectedLauncherStatus,
+      expectedThumbprint: expectedLauncherThumbprint,
+      spawnProcess,
+    });
+    if (normalizeEvidenceHash(packagedLauncher.sha256, "Actual packaged launcher SHA-256") !== embeddedLauncher.sha256) throw new Error("Actual packaged Blockwright.exe hash does not match release evidence.");
   }
   if (requireGitHubAttestation) {
     if (!requireSigned) throw new Error("GitHub provenance verification for the public channel also requires --require-signed.");

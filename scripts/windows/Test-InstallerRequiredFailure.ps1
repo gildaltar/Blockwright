@@ -56,7 +56,7 @@ try {
         $listener = $null
     }
 
-    $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $installRoot + '" /LOG="' + $setupLog + '"'
+    $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /DIR="' + $installRoot + '" /LOG="' + $setupLog + '"'
     $setup = Start-Process -FilePath $resolvedInstaller -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
     if ($setup.ExitCode -ne 100) { throw "Required post-install failure returned $($setup.ExitCode), expected custom setup exit code 100." }
     if (Test-Path -LiteralPath (Join-Path $stateRoot "config.json") -PathType Leaf) { throw "Required-failure fixture unexpectedly created config.json." }

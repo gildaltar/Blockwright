@@ -12,11 +12,11 @@ function Get-BlockwrightStateRoot {
         [string]$StateRoot
     )
     if (-not [string]::IsNullOrWhiteSpace($StateRoot)) { return [System.IO.Path]::GetFullPath($StateRoot) }
-    if (-not [string]::IsNullOrWhiteSpace($env:BLOCKWRIGHT_STATE_ROOT)) { return [System.IO.Path]::GetFullPath($env:BLOCKWRIGHT_STATE_ROOT) }
     $resolvedInstallRoot = Resolve-BlockwrightInstallRoot -InstallRoot $InstallRoot
     if (Test-Path -LiteralPath (Join-Path $resolvedInstallRoot "portable.flag") -PathType Leaf) {
         return [System.IO.Path]::GetFullPath((Join-Path $resolvedInstallRoot "data\state"))
     }
+    if (-not [string]::IsNullOrWhiteSpace($env:BLOCKWRIGHT_STATE_ROOT)) { return [System.IO.Path]::GetFullPath($env:BLOCKWRIGHT_STATE_ROOT) }
     if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { throw "LOCALAPPDATA is required for per-user Blockwright state." }
     return [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Blockwright"))
 }
@@ -122,6 +122,71 @@ function Get-BlockwrightManagedRecordPath {
     return Join-Path (Get-BlockwrightStateRoot -InstallRoot $InstallRoot -StateRoot $StateRoot) "run\managed-server.json"
 }
 
+function Get-BlockwrightManagedProcessStatus {
+    param(
+        [string]$InstallRoot,
+        [string]$StateRoot
+    )
+    $resolvedInstallRoot = Resolve-BlockwrightInstallRoot -InstallRoot $InstallRoot
+    $recordPath = Get-BlockwrightManagedRecordPath -InstallRoot $resolvedInstallRoot -StateRoot $StateRoot
+    if (-not (Test-Path -LiteralPath $recordPath -PathType Leaf)) {
+        return [pscustomobject]@{ Status = "NotRunning"; OwnedRecord = $false; ProcessId = $null; RecordPath = $recordPath; Reason = "No managed-process record exists." }
+    }
+
+    try {
+        $record = Get-Content -Raw -LiteralPath $recordPath | ConvertFrom-Json
+    } catch {
+        return [pscustomobject]@{ Status = "UnsafeRecord"; OwnedRecord = $false; ProcessId = $null; RecordPath = $recordPath; Reason = "Managed-process metadata is unreadable and was left unchanged." }
+    }
+    try {
+        $recordSchemaVersion = [int]$record.schemaVersion
+        $recordProcessId = [int]$record.pid
+    } catch {
+        return [pscustomobject]@{ Status = "UnsafeRecord"; OwnedRecord = $false; ProcessId = $null; RecordPath = $recordPath; Reason = "Managed-process metadata contains invalid numeric fields and was left unchanged." }
+    }
+    if ($recordSchemaVersion -ne 1 -or $recordProcessId -le 0 -or [string]::IsNullOrWhiteSpace([string]$record.processStartUtc) -or
+        [string]::IsNullOrWhiteSpace([string]$record.installRoot) -or [string]::IsNullOrWhiteSpace([string]$record.executable)) {
+        return [pscustomobject]@{ Status = "UnsafeRecord"; OwnedRecord = $false; ProcessId = $null; RecordPath = $recordPath; Reason = "Managed-process metadata is incomplete and was left unchanged." }
+    }
+    try {
+        $recordedInstallRoot = [System.IO.Path]::GetFullPath([string]$record.installRoot)
+        $recordedExecutable = [System.IO.Path]::GetFullPath([string]$record.executable)
+    } catch {
+        return [pscustomobject]@{ Status = "UnsafeRecord"; OwnedRecord = $false; ProcessId = $null; RecordPath = $recordPath; Reason = "Managed-process paths are invalid and were left unchanged." }
+    }
+    if (-not $recordedInstallRoot.Equals($resolvedInstallRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ Status = "UnsafeRecord"; OwnedRecord = $false; ProcessId = $recordProcessId; RecordPath = $recordPath; Reason = "Managed-process metadata belongs to another installation and was left unchanged." }
+    }
+    $expectedNode = Get-BlockwrightPrivateNode -InstallRoot $resolvedInstallRoot
+    if ($null -eq $expectedNode -or -not $recordedExecutable.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ Status = "UnsafeRecord"; OwnedRecord = $false; ProcessId = $recordProcessId; RecordPath = $recordPath; Reason = "Managed-process metadata does not identify this installation's private Node runtime and was left unchanged." }
+    }
+
+    $processIdValue = $recordProcessId
+    $process = Get-Process -Id $processIdValue -ErrorAction SilentlyContinue
+    if ($null -eq $process) {
+        return [pscustomobject]@{ Status = "StaleOwnedRecord"; OwnedRecord = $true; ProcessId = $processIdValue; RecordPath = $recordPath; Reason = "The ownership-validated managed PID is no longer running." }
+    }
+    try {
+        $expectedStart = [datetimeoffset]::Parse([string]$record.processStartUtc).UtcDateTime
+        $actualStart = $process.StartTime.ToUniversalTime()
+    } catch {
+        return [pscustomobject]@{ Status = "UnverifiedOwnedProcess"; OwnedRecord = $true; ProcessId = $processIdValue; RecordPath = $recordPath; Reason = "The recorded process start time could not be verified; no process or metadata was changed." }
+    }
+    if ([math]::Abs(($actualStart - $expectedStart).TotalSeconds) -gt 2) {
+        return [pscustomobject]@{ Status = "StaleOwnedRecord"; OwnedRecord = $true; ProcessId = $processIdValue; RecordPath = $recordPath; Reason = "The recorded PID was reused by another process; only the stale ownership record may be removed." }
+    }
+    try {
+        $actualExecutable = [System.IO.Path]::GetFullPath($process.Path)
+    } catch {
+        return [pscustomobject]@{ Status = "UnverifiedOwnedProcess"; OwnedRecord = $true; ProcessId = $processIdValue; RecordPath = $recordPath; Reason = "The recorded process executable could not be verified; no process or metadata was changed." }
+    }
+    if (-not $actualExecutable.Equals($expectedNode, [StringComparison]::OrdinalIgnoreCase)) {
+        return [pscustomobject]@{ Status = "StaleOwnedRecord"; OwnedRecord = $true; ProcessId = $processIdValue; RecordPath = $recordPath; Reason = "The recorded PID now belongs to another executable; only the stale ownership record may be removed." }
+    }
+    return [pscustomobject]@{ Status = "RunningOwned"; OwnedRecord = $true; ProcessId = $processIdValue; RecordPath = $recordPath; Reason = "The managed process identity matches this installation." }
+}
+
 function Stop-BlockwrightManagedProcess {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
@@ -168,4 +233,4 @@ function Stop-BlockwrightManagedProcess {
     return [pscustomobject]@{ Status = "WhatIf"; ProcessId = $processIdValue; RecordPath = $recordPath }
 }
 
-Export-ModuleMember -Function Resolve-BlockwrightInstallRoot, Get-BlockwrightStateRoot, Get-BlockwrightPrivateNode, Get-BlockwrightPrivateNpm, Get-BlockwrightConfiguration, Test-BlockwrightChildPath, Test-BlockwrightInstalledStateRoot, Test-BlockwrightInstalledRoamingRoot, Get-BlockwrightManagedRecordPath, Stop-BlockwrightManagedProcess
+Export-ModuleMember -Function Resolve-BlockwrightInstallRoot, Get-BlockwrightStateRoot, Get-BlockwrightPrivateNode, Get-BlockwrightPrivateNpm, Get-BlockwrightConfiguration, Test-BlockwrightChildPath, Test-BlockwrightInstalledStateRoot, Test-BlockwrightInstalledRoamingRoot, Get-BlockwrightManagedRecordPath, Get-BlockwrightManagedProcessStatus, Stop-BlockwrightManagedProcess

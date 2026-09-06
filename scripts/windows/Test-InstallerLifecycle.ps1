@@ -214,7 +214,7 @@ function Invoke-Installer {
     param([string]$Path)
     $script:installerInvocationCount++
     $logPath = Join-Path $logRoot ("setup-{0:D2}.log" -f $script:installerInvocationCount)
-    $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + $installRoot + '" /LOG="' + $logPath + '"'
+    $arguments = '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CURRENTUSER /DIR="' + $installRoot + '" /LOG="' + $logPath + '"'
     if ($TestCodexIntegration) { $arguments += ' /TASKS="codexintegration"' }
     $process = Start-Process -FilePath ([System.IO.Path]::GetFullPath($Path)) -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
     if ($process.ExitCode -ne 0) { throw "Installer $Path exited with code $($process.ExitCode)." }
@@ -305,6 +305,7 @@ try {
     }
     if ($TestCodexIntegration) { Assert-CodexConfigurationPresent -Operation "Installed Codex integration" }
     foreach ($required in @(
+        "Blockwright.exe",
         "runtime\node\node.exe",
         "runtime\node\npm.cmd",
         "runtime\node\node_modules\npm\bin\npm-cli.js",
@@ -319,14 +320,26 @@ try {
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $installRoot $required))) { throw "Installed payload is missing $required." }
     }
+    $releaseManifest = Get-Content -Raw -LiteralPath (Join-Path $installRoot "release-manifest.json") | ConvertFrom-Json
+    $nativeLauncher = Join-Path $installRoot "Blockwright.exe"
+    $expectedLauncherStatus = switch ([string]$releaseManifest.launcher.authenticode) {
+        "not-signed" { "NotSigned" }
+        "valid" { "Valid" }
+        default { throw "Installed release manifest has an unsupported native launcher trust state." }
+    }
+    $launcherValidationArguments = @("-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", (Join-Path $PSScriptRoot "..\release\Test-BlockwrightLauncherBinary.ps1"), "-Artifact", $nativeLauncher, "-Version", ([string]$releaseManifest.version), "-ExpectedAuthenticodeStatus", $expectedLauncherStatus)
+    if ($expectedLauncherStatus -eq "Valid") { $launcherValidationArguments += @("-ExpectedThumbprint", ([string]$releaseManifest.launcher.signerThumbprint), "-RequireTimestamp") }
+    $launcherValidation = Invoke-NativeProcess -FileName $windowsPowerShell -Arguments $launcherValidationArguments
+    if ($launcherValidation.ExitCode -ne 0) { throw "Installed native launcher validation failed: $($launcherValidation.StandardError)" }
+    $launcherEvidence = $launcherValidation.StandardOutput | ConvertFrom-Json
+    if ([string]$launcherEvidence.sha256 -cne ([string]$releaseManifest.launcher.sha256).ToLowerInvariant()) { throw "Installed Blockwright.exe does not match release-manifest.json." }
     $diagnosticEvidence = Invoke-PackagedDiagnostics -PackageRoot $installRoot
     $updaterSelfTest = @(& $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $installRoot "scripts\windows\Update-Blockwright.ps1") -InstallRoot $installRoot -StateRoot $stateRoot -SelfTest 2>&1)
     $updaterSelfTestResult = ($updaterSelfTest -join "`n") | ConvertFrom-Json
     if ($LASTEXITCODE -ne 0 -or -not $updaterSelfTestResult.DowngradeRejected -or -not $updaterSelfTestResult.OversizeDownloadRejected -or -not $updaterSelfTestResult.PreservationStateTransitions) { throw "Installed updater downgrade/ProductVersion/bounded-download/execution-state self-test failed: $($updaterSelfTest -join ' ')" }
-    $smokeScript = Join-Path $installRoot "scripts\windows\Blockwright-ControlCenter.ps1"
-    $smokeOutput = @(& $windowsPowerShell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $smokeScript -PluginRoot $installRoot -SmokeTest -SmokeTestSeconds $SmokeTestSeconds -Json 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw "Installed private-runtime smoke test failed: $($smokeOutput -join [Environment]::NewLine)" }
-    $smoke = ($smokeOutput -join [Environment]::NewLine) | ConvertFrom-Json
+    $smokeProcess = Invoke-NativeProcess -FileName $nativeLauncher -Arguments @("-PluginRoot", $installRoot, "-SmokeTest", "-SmokeTestSeconds", [string]$SmokeTestSeconds, "-Json") -TimeoutMilliseconds (($SmokeTestSeconds + 120) * 1000)
+    if ($smokeProcess.ExitCode -ne 0) { throw "Installed private-runtime smoke test failed: $($smokeProcess.StandardOutput) $($smokeProcess.StandardError)" }
+    $smoke = $smokeProcess.StandardOutput | ConvertFrom-Json
     if (-not $smoke.healthy) { throw "Installed server did not become ready." }
     if (-not [bool]$smoke.workflow.passed -or [int]$smoke.workflow.toolCount -lt 4 -or
         -not [bool]$smoke.workflow.deterministicReplay -or -not [bool]$smoke.workflow.validationValid -or

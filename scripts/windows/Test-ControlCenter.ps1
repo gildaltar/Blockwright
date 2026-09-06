@@ -8,6 +8,8 @@ $controllerPath = Join-Path $PSScriptRoot "Blockwright-ControlCenter.ps1"
 $repairPath = Join-Path $PSScriptRoot "Invoke-BlockwrightRuntimeRepair.ps1"
 $pathsModulePath = Join-Path $PSScriptRoot "Blockwright-Paths.psm1"
 $shortcutInstallerPath = Join-Path $PSScriptRoot "Install-BlockwrightShortcut.ps1"
+$launcherVbsPath = Join-Path $PSScriptRoot "Launch-Blockwright-ControlCenter.vbs"
+$launcherBuilderPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\release\Build-BlockwrightLauncher.ps1"))
 $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $testRoot = [System.IO.Path]::GetFullPath((Join-Path ([System.IO.Path]::GetTempPath()) ("Blockwright Control Center Test " + [guid]::NewGuid().ToString("N"))))
 $fixtureRoot = Join-Path $testRoot "plugin fixture with spaces"
@@ -130,8 +132,10 @@ const service = process.env.BLOCKWRIGHT_FIXTURE_SERVICE || "blockwright";
 const token = process.env.BLOCKWRIGHT_LOCAL_MCP_TOKEN;
 const buildHash = "a".repeat(64);
 const buildId = "bw_123456789abc";
-const childPort = Number(process.env.BLOCKWRIGHT_FIXTURE_CHILD_PORT || 0);
-let childProcess;
+  const childPort = Number(process.env.BLOCKWRIGHT_FIXTURE_CHILD_PORT || 0);
+  let childProcess;
+  let taskPollCount = 0;
+  let taskStatusPollCount = 0;
 if (!/^[A-Za-z0-9_-]{43,128}$/.test(token || "")) throw new Error("Fixture did not receive a strong per-launch MCP token.");
 if (Number.isInteger(childPort) && childPort > 0) {
   const childSource = 'const http=require("node:http");const port=Number(process.argv[1]);http.createServer((request,response)=>response.end("child")).listen(port,"127.0.0.1");';
@@ -164,7 +168,7 @@ const server = http.createServer((request, response) => {
       if (message.method === "initialize") {
         result = { protocolVersion: "2025-03-26", capabilities: {}, serverInfo: { name: service, version: "9.9.9" } };
       } else if (message.method === "tools/list") {
-        result = { tools: ["compile_build", "validate_build", "validate_build_contract", "export_build"].map((name) => ({ name })) };
+        result = { tools: ["compile_build", "validate_build", "validate_build_contract", "export_build", "start_compile_task", "get_task_status", "list_tasks"].map((name) => ({ name })) };
       } else if (message.method === "tools/call" && message.params?.name === "compile_build") {
         result = { isError: false, structuredContent: { build: { id: buildId, hash: buildHash, blockCount: 274, validation: { valid: true }, contract: { status: "valid" } } } };
       } else if (message.method === "tools/call" && message.params?.name === "validate_build") {
@@ -173,6 +177,39 @@ const server = http.createServer((request, response) => {
         result = { isError: false, structuredContent: { contract: { status: "valid", buildHash } } };
       } else if (message.method === "tools/call" && message.params?.name === "export_build") {
         result = { isError: false, structuredContent: { format: "schem", filename: "fixture.schem", bytes: 519, dataVersion: 4903, schematicVersion: 3 } };
+      } else if (message.method === "tools/call" && message.params?.name === "start_compile_task") {
+        result = { isError: false, structuredContent: { task: {
+          id: "task_smoke_async001", operation: "Fixture async compile", state: "queued",
+          progress: { sequence: 0, phase: "queued", operation: "Waiting for a worker" },
+          timing: { queuedAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", elapsedMs: 0 },
+          resultAvailable: false,
+        } } };
+      } else if (message.method === "tools/call" && message.params?.name === "get_task_status") {
+        taskStatusPollCount += 1;
+        const completed = taskStatusPollCount >= 2;
+        result = { isError: false, structuredContent: {
+          task: {
+            id: "task_smoke_async001", operation: "Fixture async compile", state: completed ? "completed" : "compiling",
+            progress: { sequence: taskStatusPollCount, phase: completed ? "completed" : "compiling", operation: completed ? "Task completed" : "Compiling fixture", work: { unit: "operations", completedUnits: completed ? 2 : 1, totalUnits: 2 } },
+            timing: { queuedAt: "2026-01-01T00:00:00.000Z", updatedAt: `2026-01-01T00:00:0${taskStatusPollCount}.000Z`, elapsedMs: taskStatusPollCount * 1000 },
+            resultAvailable: completed,
+          },
+          ...(completed ? { build: { id: buildId, hash: buildHash, blockCount: 274 } } : {}),
+        } };
+      } else if (message.method === "tools/call" && message.params?.name === "list_tasks") {
+        taskPollCount += 1;
+        const task = (id, state, code) => ({
+          id,
+          operation: "Fixture compile",
+          state,
+          progress: { sequence: taskPollCount, phase: state, operation: state === "completed" ? "Task completed" : state === "failed" ? "Task failed" : "Compiling fixture", work: { unit: "operations", completedUnits: state === "compiling" ? 1 : 2, totalUnits: 2 } },
+          timing: { queuedAt: "2026-01-01T00:00:00.000Z", updatedAt: `2026-01-01T00:00:0${taskPollCount}.000Z`, elapsedMs: taskPollCount * 1000 },
+          resultAvailable: state === "completed",
+          ...(code ? { diagnostic: { id: "diag_fixture001", code, phase: "failed", operation: "Fixture compile", error: "Fixture failure", likelyCause: "Fixture", retry: { safe: true, reason: "Fixture" }, recommendedAction: "Retry fixture", logReference: "logs/tasks/fixture.log" } } : {}),
+        });
+        result = { isError: false, structuredContent: { tasks: taskPollCount === 1
+          ? [task("task_notify0001", "compiling"), task("task_history0001", "completed")]
+          : [task("task_notify0001", "completed"), task("task_failure001", "failed", "BW-FIXTURE-FAIL"), task("task_history0001", "completed")] } };
       } else {
         response.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, error: { code: -32601, message: "fixture method not found" } }));
         return;
@@ -185,37 +222,264 @@ const server = http.createServer((request, response) => {
 });
 server.listen(port, "127.0.0.1", () => {
   console.log(`ENTRY=__entry NODE_ENV=${process.env.NODE_ENV} __PORT=${process.env.__PORT} PORT=${process.env.PORT}`);
+  console.log(`NPM_ENV_CACHE=${process.env.NPM_CONFIG_CACHE} NPM_ENV_UPDATE_NOTIFIER=${process.env.NPM_CONFIG_UPDATE_NOTIFIER}`);
 });
 if (process.env.BLOCKWRIGHT_FIXTURE_IGNORE_STDIN !== "1") {
   process.stdin.resume();
   process.stdin.on("end", () => server.close(() => process.exit(0)));
 }
 '@
+    $fixtureDiagnostics = @'
+const evidence = {
+  npmCache: process.env.NPM_CONFIG_CACHE || null,
+  npmUpdateNotifier: process.env.NPM_CONFIG_UPDATE_NOTIFIER || null,
+  localAppData: process.env.LOCALAPPDATA || null,
+};
+process.stdout.write(`${JSON.stringify({
+  checks: [{
+    status: "pass",
+    area: "Runtime",
+    name: "Diagnostic child environment",
+    message: `CACHE=${evidence.npmCache} UPDATE=${evidence.npmUpdateNotifier}`,
+  }],
+  evidence,
+})}\n`);
+'@
     [System.IO.File]::WriteAllText((Join-Path $appRoot "package.json"), $packageJson, (New-Object System.Text.UTF8Encoding($false)))
     [System.IO.File]::WriteAllText((Join-Path $appRoot "package-lock.json"), $packageLock, (New-Object System.Text.UTF8Encoding($false)))
     [System.IO.File]::WriteAllText((Join-Path $distRoot "__entry.js"), $fixtureServer, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText((Join-Path $fixtureRoot "scripts\diagnose.mjs"), $fixtureDiagnostics, (New-Object System.Text.UTF8Encoding($false)))
     [System.IO.File]::Copy($repairPath, (Join-Path $fixtureWindowsScripts "Invoke-BlockwrightRuntimeRepair.ps1"), $true)
     [System.IO.File]::Copy($pathsModulePath, (Join-Path $fixtureWindowsScripts "Blockwright-Paths.psm1"), $true)
+    [System.IO.File]::Copy($launcherVbsPath, (Join-Path $fixtureWindowsScripts "Launch-Blockwright-ControlCenter.vbs"), $true)
 
     $controllerAst = $null
-    foreach ($scriptPath in @($controllerPath, $repairPath, $pathsModulePath, $shortcutInstallerPath, $PSCommandPath)) {
+    $repairAst = $null
+    foreach ($scriptPath in @($controllerPath, $repairPath, $pathsModulePath, $shortcutInstallerPath, $launcherBuilderPath, $PSCommandPath)) {
         $tokens = $null
         $parseErrors = $null
         $parsedAst = [System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
         Assert-Condition ($parseErrors.Count -eq 0) "PowerShell parsing failed for $scriptPath`: $($parseErrors.Message -join '; ')"
         if ($scriptPath -eq $controllerPath) { $controllerAst = $parsedAst }
+        if ($scriptPath -eq $repairPath) { $repairAst = $parsedAst }
     }
     Add-Pass "powershell-parse" "Controller, path/runtime module, repair helper, shortcut helper, and this test script parse without errors."
 
     $controllerSource = [System.IO.File]::ReadAllText($controllerPath)
-    foreach ($requiredFragment in @('app\dist\__entry.js', 'Get-BlockwrightPrivateNode', 'Write-ManagedServerRecord', 'BLOCKWRIGHT_STATE_ROOT = $script:StateRoot', 'BLOCKWRIGHT_STATE_DIR = $script:StateRoot', 'BLOCKWRIGHT_LOCAL_MCP_TOKEN = $script:LocalMcpToken', 'New-LocalMcpToken', 'Authorization', 'NODE_ENV = "production"', '__PORT = [string]$Port', 'npm ls', 'TakeDroppedCount', 'MaxLines = 250', 'Invoke-PrimaryWorkflowSmokeTest', 'tools/list', '-MaximumResponseCharacters 4194304', 'compile_build', 'validate_build_contract', 'export_build', 'ProcessTreeSnapshot', 'Complete-ConfirmedServerStop -RemoveManagedRecord', 'process-tree exit could not be confirmed', 'Ownership evidence was retained', 'UpdateButton', 'Update-Blockwright.ps1', 'Start-BlockwrightUpdateProcess -Mode "check"', ' -CheckOnly', 'MessageBoxResult]::Yes', 'Start-BlockwrightUpdateProcess -Mode "install"', 'last-check.json', 'nothing will be installed without confirmation')) {
+    foreach ($requiredFragment in @('app\dist\__entry.js', 'Get-BlockwrightPrivateNode', 'Write-ManagedServerRecord', 'BLOCKWRIGHT_STATE_ROOT = $script:StateRoot', 'BLOCKWRIGHT_STATE_DIR = $script:StateRoot', 'BLOCKWRIGHT_LOCAL_MCP_TOKEN = $script:LocalMcpToken', 'New-LocalMcpToken', 'Authorization', 'NODE_ENV = "production"', '__PORT = [string]$Port', 'npm ls', 'NPM_CONFIG_CACHE', 'NPM_CONFIG_UPDATE_NOTIFIER', 'TakeDroppedCount', 'MaxLines = 250', 'Invoke-PrimaryWorkflowSmokeTest', 'tools/list', '-MaximumResponseCharacters 4194304', 'compile_build', 'validate_build_contract', 'export_build', 'ProcessTreeSnapshot', 'Complete-ConfirmedServerStop -RemoveManagedRecord', 'process-tree exit could not be confirmed', 'Ownership evidence was retained', 'SupervisorSelfTest', 'Local\Blockwright.ControlCenter.', 'Start-BlockwrightActivationListener', 'Blockwright.ControlCenter', 'SetCurrentProcessExplicitAppUserModelID', 'Get-BlockwrightJumpLaunchSpec', '--new-build', '-OpenDiagnostics', 'JumpList]::SetJumpList', 'NotifyIcon', 'New build / Open workbench', 'Settings / Open state location', 'Get-BlockwrightCrashRestartDecision', 'CrashRestartLimit = 3', 'PersistentLogMaximumBytes', 'Protect-BlockwrightLogText', 'Get-BlockwrightManagedProcessStatus', 'TaskPollIntervalSeconds = 5', 'HttpClient', 'name = "list_tasks"', 'Get-BlockwrightTaskNotificationEvents', 'TaskbarItemInfo', 'TaskbarItemProgressState]::Normal', 'TaskbarItemProgressState]::Indeterminate', 'TaskbarItemProgressState]::Error', 'UpdateButton', 'Update-Blockwright.ps1', 'Start-BlockwrightUpdateProcess -Mode "check"', ' -CheckOnly', 'MessageBoxResult]::Yes', 'Start-BlockwrightUpdateProcess -Mode "install"', 'last-check.json', 'nothing will be installed without confirmation')) {
         Assert-Condition ($controllerSource.Contains($requiredFragment)) "Controller contract fragment is missing: $requiredFragment"
     }
     $checkInvocationIndex = $controllerSource.IndexOf('Start-BlockwrightUpdateProcess -Mode "check"')
     $confirmationIndex = $controllerSource.IndexOf('MessageBoxResult]::Yes')
     $installInvocationIndex = $controllerSource.IndexOf('Start-BlockwrightUpdateProcess -Mode "install"')
     Assert-Condition ($checkInvocationIndex -ge 0 -and $confirmationIndex -ge 0 -and $installInvocationIndex -gt $confirmationIndex) "Control Center update installation is not structurally gated behind the explicit confirmation result."
-    Add-Pass "source-contracts" "Direct entry, production port variables, full dependency validation, bounded log drains, and confirmed two-phase updates are present."
+    Assert-Condition (-not $controllerSource.Contains('/api/local/editor/tasks')) "Control Center task notifications bypassed authenticated MCP for the weaker loopback editor route."
+    Add-Pass "source-contracts" "Direct entry, stable Windows identity, native-aware Jump List actions, authenticated bounded task polling, real taskbar progress, install-keyed supervision, sanitized persistence, and confirmed two-phase updates are present."
+
+    $dependencyStatusFunction = $controllerAst.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Get-RuntimeDependencyStatus"
+    }, $true) | Select-Object -First 1
+    Assert-Condition ($null -ne $dependencyStatusFunction) "Controller dependency-status function was unavailable for native npm boundary testing."
+    . ([scriptblock]::Create($dependencyStatusFunction.Extent.Text))
+    $script:NonzeroNpmFixture = Join-Path $testRoot "npm exits nonzero.cmd"
+    $nonzeroNpmSource = @'
+@echo off
+echo CACHE=%NPM_CONFIG_CACHE%
+echo UPDATE=%NPM_CONFIG_UPDATE_NOTIFIER%
+echo forced npm failure 1>&2
+exit /b 17
+'@
+    [System.IO.File]::WriteAllText($script:NonzeroNpmFixture, $nonzeroNpmSource, [System.Text.Encoding]::ASCII)
+    function Get-NpmExecutable { return $script:NonzeroNpmFixture }
+    $ResolvedPluginRoot = $fixtureRoot
+    $script:StateRoot = Join-Path $testRoot "state"
+    $originalTestNpmCache = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+    $originalTestNpmUpdateNotifier = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+    $testPreferenceBefore = $ErrorActionPreference
+    try {
+        $env:NPM_CONFIG_CACHE = "fixture-caller-cache"
+        $env:NPM_CONFIG_UPDATE_NOTIFIER = "fixture-caller-notifier"
+        $nonzeroNpmStatus = Get-RuntimeDependencyStatus
+        $testNpmCacheAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+        $testNpmUpdateNotifierAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+        $testPreferenceAfter = $ErrorActionPreference
+    } finally {
+        try {
+            [Environment]::SetEnvironmentVariable("NPM_CONFIG_CACHE", $originalTestNpmCache, [EnvironmentVariableTarget]::Process)
+        } finally {
+            [Environment]::SetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", $originalTestNpmUpdateNotifier, [EnvironmentVariableTarget]::Process)
+        }
+    }
+    Assert-Condition (-not [bool]$nonzeroNpmStatus.Valid -and [int]$nonzeroNpmStatus.NpmExitCode -eq 17) "A nonzero native npm result was not rejected with its exact exit code."
+    Assert-Condition ([string]$nonzeroNpmStatus.Message -match "npm ls rejected.*exit 17" -and [string]$nonzeroNpmStatus.Message -match [regex]::Escape((Join-Path $script:StateRoot "npm-cache")) -and [string]$nonzeroNpmStatus.Message -match "UPDATE=false") "The native npm failure did not prove state-local cache routing and disabled update notices."
+    Assert-Condition ([string]$testNpmCacheAfter -ceq "fixture-caller-cache" -and [string]$testNpmUpdateNotifierAfter -ceq "fixture-caller-notifier" -and [string]$testPreferenceAfter -ceq [string]$testPreferenceBefore) "Native npm validation did not restore the caller environment and ErrorActionPreference exactly."
+    Add-Pass "npm-validation-boundary" "A benign stderr-capable native boundary preserved explicit caller state, while exit 17 remained an invalid dependency result with state-local cache evidence."
+
+    $script:NonzeroNpmFixture = Join-Path $testRoot "npm notice exits zero.cmd"
+    $noticeNpmSource = @'
+@echo off
+echo {"name":"blockwright-control-center-fixture","version":"9.9.9"}
+echo npm notice 1>&2
+exit /b 0
+'@
+    [System.IO.File]::WriteAllText($script:NonzeroNpmFixture, $noticeNpmSource, [System.Text.Encoding]::ASCII)
+    $originalNoticeNpmCache = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+    $originalNoticeNpmUpdateNotifier = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+    $noticePreferenceBefore = $ErrorActionPreference
+    try {
+        $env:NPM_CONFIG_CACHE = "fixture-notice-caller-cache"
+        $env:NPM_CONFIG_UPDATE_NOTIFIER = "fixture-notice-caller-notifier"
+        $noticeNpmStatus = Get-RuntimeDependencyStatus
+        $noticeNpmCacheAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+        $noticeNpmUpdateNotifierAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+        $noticePreferenceAfter = $ErrorActionPreference
+    } finally {
+        try {
+            [Environment]::SetEnvironmentVariable("NPM_CONFIG_CACHE", $originalNoticeNpmCache, [EnvironmentVariableTarget]::Process)
+        } finally {
+            [Environment]::SetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", $originalNoticeNpmUpdateNotifier, [EnvironmentVariableTarget]::Process)
+        }
+    }
+    Assert-Condition ([bool]$noticeNpmStatus.Valid -and [int]$noticeNpmStatus.NpmExitCode -eq 0) "A native npm notice on stderr with exit 0 was incorrectly treated as an invalid dependency result."
+    Assert-Condition ([string]$noticeNpmCacheAfter -ceq "fixture-notice-caller-cache" -and [string]$noticeNpmUpdateNotifierAfter -ceq "fixture-notice-caller-notifier" -and [string]$noticePreferenceAfter -ceq [string]$noticePreferenceBefore) "Successful native npm validation did not restore the caller environment and ErrorActionPreference exactly."
+    Add-Pass "npm-notice-boundary" "A literal npm notice on stderr with exit 0 remained valid and restored the exact caller environment and ErrorActionPreference."
+
+    $repairNpmFunction = $repairAst.FindAll({
+        param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Invoke-NpmRepairCommands"
+    }, $true) | Select-Object -First 1
+    Assert-Condition ($null -ne $repairNpmFunction) "Repair helper npm boundary function was unavailable for native stderr and restoration testing."
+    . ([scriptblock]::Create($repairNpmFunction.Extent.Text))
+    $stateRoot = Join-Path $testRoot "repair state"
+    $repairExternalLocalAppDataProbe = Join-Path $testRoot "repair external local appdata probe"
+    $null = New-Item -ItemType Directory -Path $repairExternalLocalAppDataProbe -Force
+    $repairEvidencePath = Join-Path $testRoot "repair npm evidence.txt"
+    $repairNoticeNpmPath = Join-Path $testRoot "repair npm notice exits zero.cmd"
+    $repairNoticeNpmSource = @'
+@echo off
+>>"%BLOCKWRIGHT_REPAIR_TEST_EVIDENCE%" echo CACHE=%NPM_CONFIG_CACHE% UPDATE=%NPM_CONFIG_UPDATE_NOTIFIER% ARGS=%*
+echo npm notice 1>&2
+exit /b 0
+'@
+    [System.IO.File]::WriteAllText($repairNoticeNpmPath, $repairNoticeNpmSource, [System.Text.Encoding]::ASCII)
+    $repairNonzeroNpmPath = Join-Path $testRoot "repair npm exits nonzero.cmd"
+    $repairNonzeroNpmSource = @'
+@echo off
+>>"%BLOCKWRIGHT_REPAIR_TEST_EVIDENCE%" echo CACHE=%NPM_CONFIG_CACHE% UPDATE=%NPM_CONFIG_UPDATE_NOTIFIER% ARGS=%*
+echo forced repair npm failure 1>&2
+exit /b 17
+'@
+    [System.IO.File]::WriteAllText($repairNonzeroNpmPath, $repairNonzeroNpmSource, [System.Text.Encoding]::ASCII)
+    $originalRepairLocalAppData = [Environment]::GetEnvironmentVariable("LOCALAPPDATA", [EnvironmentVariableTarget]::Process)
+    $originalRepairNpmCache = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+    $originalRepairNpmUpdateNotifier = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+    $originalRepairEvidence = [Environment]::GetEnvironmentVariable("BLOCKWRIGHT_REPAIR_TEST_EVIDENCE", [EnvironmentVariableTarget]::Process)
+    $originalRepairPreference = $ErrorActionPreference
+    try {
+        $env:LOCALAPPDATA = $repairExternalLocalAppDataProbe
+        $env:BLOCKWRIGHT_REPAIR_TEST_EVIDENCE = $repairEvidencePath
+
+        $env:NPM_CONFIG_CACHE = "repair-notice-caller-cache"
+        $env:NPM_CONFIG_UPDATE_NOTIFIER = "repair-notice-caller-notifier"
+        $repairNoticePreferenceBefore = $ErrorActionPreference
+        $repairNoticeFailure = $null
+        $repairNoticeOutput = @()
+        try {
+            $repairNoticeOutput = @(Invoke-NpmRepairCommands -NpmPath $repairNoticeNpmPath -InstallArguments @("ci", "--omit=dev"))
+        } catch {
+            $repairNoticeFailure = $_.Exception.Message
+        }
+        $repairNoticeNpmCacheAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+        $repairNoticeNpmUpdateNotifierAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+        $repairNoticePreferenceAfter = $ErrorActionPreference
+
+        $env:NPM_CONFIG_CACHE = "repair-failure-caller-cache"
+        $env:NPM_CONFIG_UPDATE_NOTIFIER = "repair-failure-caller-notifier"
+        $repairFailurePreferenceBefore = $ErrorActionPreference
+        $repairFailureMessage = $null
+        try {
+            $null = @(Invoke-NpmRepairCommands -NpmPath $repairNonzeroNpmPath -InstallArguments @("ci", "--omit=dev"))
+        } catch {
+            $repairFailureMessage = $_.Exception.Message
+        }
+        $repairFailureNpmCacheAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+        $repairFailureNpmUpdateNotifierAfter = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+        $repairFailurePreferenceAfter = $ErrorActionPreference
+        $repairExternalProbeEntries = @(Get-ChildItem -LiteralPath $repairExternalLocalAppDataProbe -Force -Recurse)
+        $repairEvidence = if (Test-Path -LiteralPath $repairEvidencePath -PathType Leaf) { Get-Content -Raw -LiteralPath $repairEvidencePath } else { "" }
+    } finally {
+        try {
+            [Environment]::SetEnvironmentVariable("LOCALAPPDATA", $originalRepairLocalAppData, [EnvironmentVariableTarget]::Process)
+        } finally {
+            try {
+                [Environment]::SetEnvironmentVariable("NPM_CONFIG_CACHE", $originalRepairNpmCache, [EnvironmentVariableTarget]::Process)
+            } finally {
+                try {
+                    [Environment]::SetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", $originalRepairNpmUpdateNotifier, [EnvironmentVariableTarget]::Process)
+                } finally {
+                    try {
+                        [Environment]::SetEnvironmentVariable("BLOCKWRIGHT_REPAIR_TEST_EVIDENCE", $originalRepairEvidence, [EnvironmentVariableTarget]::Process)
+                    } finally {
+                        $ErrorActionPreference = $originalRepairPreference
+                    }
+                }
+            }
+        }
+    }
+    $expectedRepairCache = Join-Path $stateRoot "npm-cache"
+    Assert-Condition ([string]::IsNullOrWhiteSpace([string]$repairNoticeFailure) -and (($repairNoticeOutput -join "`n") -match "npm notice")) "The repair helper treated a benign npm notice with exit 0 as a failure: $repairNoticeFailure"
+    Assert-Condition ([string]$repairNoticeNpmCacheAfter -ceq "repair-notice-caller-cache" -and [string]$repairNoticeNpmUpdateNotifierAfter -ceq "repair-notice-caller-notifier" -and [string]$repairNoticePreferenceAfter -ceq [string]$repairNoticePreferenceBefore) "Successful repair npm commands did not restore the exact caller environment and ErrorActionPreference."
+    Assert-Condition ([string]$repairEvidence -match [regex]::Escape("CACHE=$expectedRepairCache UPDATE=false") -and [string]$repairEvidence -match "ARGS=ci --omit=dev" -and [string]$repairEvidence -match "ARGS=ls --omit=dev --depth=0 --json") "Successful repair npm commands did not prove state-local cache routing, disabled notices, and both expected invocations."
+    Add-Pass "repair-npm-notice-boundary" "The repair path accepted literal npm notices with exit 0, used the state-local cache for install and validation, and restored exact caller state."
+
+    Assert-Condition ([string]$repairFailureMessage -ceq "npm dependency repair exited with code 17.") "A nonzero repair npm result did not fail with its exact exit code: $repairFailureMessage"
+    Assert-Condition ([string]$repairFailureNpmCacheAfter -ceq "repair-failure-caller-cache" -and [string]$repairFailureNpmUpdateNotifierAfter -ceq "repair-failure-caller-notifier" -and [string]$repairFailurePreferenceAfter -ceq [string]$repairFailurePreferenceBefore) "Failed repair npm commands did not restore the exact caller environment and ErrorActionPreference."
+    Assert-Condition ($repairExternalProbeEntries.Count -eq 0) "Repair npm commands wrote cache/update state beneath external LOCALAPPDATA."
+    Add-Pass "repair-npm-failure-boundary" "Repair rejected native exit 17, restored exact caller state on failure, and left external LOCALAPPDATA unchanged."
+
+    foreach ($functionName in @("Test-BlockwrightPortAvailable", "Select-BlockwrightPort")) {
+        $functionAst = $controllerAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName
+        }, $true) | Select-Object -First 1
+        Assert-Condition ($null -ne $functionAst) "Controller function was unavailable for port-collision testing: $functionName"
+        . ([scriptblock]::Create($functionAst.Extent.Text))
+    }
+    function Save-BlockwrightPreferredPort {
+        param([int]$PreferredPort)
+        $script:PersistedCollisionPort = $PreferredPort
+    }
+    function Add-ControllerLog { param([string]$Message) }
+
+    $occupiedPortListener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+    try {
+        $occupiedPortListener.Start()
+        $occupiedPort = ([System.Net.IPEndPoint]$occupiedPortListener.LocalEndpoint).Port
+        $script:PortWasExplicit = $false
+        $script:PersistedCollisionPort = $null
+        $selectedPort = Select-BlockwrightPort -PreferredPort $occupiedPort
+        Assert-Condition ($selectedPort -ne $occupiedPort) "Automatic port selection reused the occupied preferred port."
+        Assert-Condition ($selectedPort -eq $script:PersistedCollisionPort) "Automatic port selection did not persist the selected loopback port."
+        Assert-Condition (Test-PortAvailable -Port $selectedPort) "Automatic port selection returned an unavailable candidate."
+
+        $script:PortWasExplicit = $true
+        $explicitFailure = $null
+        try { $null = Select-BlockwrightPort -PreferredPort $occupiedPort } catch { $explicitFailure = $_.Exception.Message }
+        Assert-Condition ([string]$explicitFailure -match "already in use") "An occupied explicit -Port did not fail with an actionable collision error."
+    } finally {
+        $occupiedPortListener.Stop()
+    }
+    Add-Pass "automatic-port-collision" "An occupied preferred port selected and persisted a free loopback successor, while an occupied explicit -Port failed closed."
+
+    $supervisorArguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -SupervisorSelfTest"
+    $supervisorResult = Invoke-WindowsPowerShell -Arguments $supervisorArguments
+    Assert-Condition ($supervisorResult.ExitCode -eq 0) "Headless supervisor self-test failed: $($supervisorResult.StandardError) $($supervisorResult.StandardOutput)"
+    $supervisor = $supervisorResult.StandardOutput | ConvertFrom-Json
+    Assert-Condition ([bool]$supervisor.Valid -and [bool]$supervisor.Redaction -and [bool]$supervisor.Rotation -and [bool]$supervisor.RestartBudget -and [bool]$supervisor.ActivationChannel -and [bool]$supervisor.SafeLauncherFallback -and [bool]$supervisor.TaskNotifications) "Headless supervisor self-test did not verify every declared helper."
+    Assert-Condition ([string]$supervisor.InstallIdentity -match '^[a-f0-9]{24}$') "Install-root supervisor identity was not a bounded deterministic key."
+    Assert-Condition ([string]$supervisor.AppUserModelId -ceq 'Blockwright.ControlCenter' -and [int]$supervisor.JumpListActions -eq 4) "Stable AppUserModelID or Jump List action contract was not verified."
+    Add-Pass "supervisor-headless" "Install identity, AppUserModelID, Jump List fallback mapping, terminal-task deduplication, sanitized rotating logs, crash-restart budget, and named-pipe activation passed without opening the UI."
 
     $validateArguments = "-NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -ValidateUi"
     $validateResult = Invoke-WindowsPowerShell -Arguments $validateArguments
@@ -223,6 +487,21 @@ if (process.env.BLOCKWRIGHT_FIXTURE_IGNORE_STDIN !== "1") {
     $validation = $validateResult.StandardOutput | ConvertFrom-Json
     Assert-Condition ([bool]$validation.valid) "WPF named-control validation reported invalid."
     Add-Pass "wpf-validation" "$($validation.controls) named controls resolved without opening the UI."
+
+    $diagnosticExternalLocalAppDataProbe = Join-Path $testRoot "diagnostic external local appdata probe"
+    $null = New-Item -ItemType Directory -Path $diagnosticExternalLocalAppDataProbe -Force
+    $diagnosticArguments = "-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -Diagnostics -Json"
+    $diagnosticResult = Invoke-WindowsPowerShell -Arguments $diagnosticArguments -EnvironmentVariables @{
+        LOCALAPPDATA = $diagnosticExternalLocalAppDataProbe
+        NPM_CONFIG_CACHE = "diagnostic-caller-cache"
+        NPM_CONFIG_UPDATE_NOTIFIER = "diagnostic-caller-notifier"
+    }
+    Assert-Condition ($diagnosticResult.ExitCode -eq 0) "Headless diagnostics environment isolation failed: $($diagnosticResult.StandardError) $($diagnosticResult.StandardOutput)"
+    $diagnostic = $diagnosticResult.StandardOutput | ConvertFrom-Json
+    $expectedDiagnosticCache = Join-Path (Join-Path $testRoot "state") "npm-cache"
+    Assert-Condition ([string]$diagnostic.status -ceq "PASS" -and [string]$diagnostic.raw.evidence.npmCache -ceq $expectedDiagnosticCache -and [string]$diagnostic.raw.evidence.npmUpdateNotifier -ceq "false") "The diagnostic child did not receive the state-local npm cache and disabled update notifier."
+    Assert-Condition ([string]$diagnostic.raw.evidence.localAppData -ceq $diagnosticExternalLocalAppDataProbe -and @(Get-ChildItem -LiteralPath $diagnosticExternalLocalAppDataProbe -Force -Recurse).Count -eq 0) "Diagnostics mutated the redirected external LOCALAPPDATA probe."
+    Add-Pass "diagnostics-npm-isolation" "Headless diagnostics received child-only state-local npm settings and left redirected external LOCALAPPDATA unchanged."
 
     $capturePath = Join-Path $testRoot "control-center-render.png"
     $captureArguments = "-NoLogo -NoProfile -STA -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -CaptureUiPath $(Quote-NativeArgument $capturePath)"
@@ -233,18 +512,32 @@ if (process.env.BLOCKWRIGHT_FIXTURE_IGNORE_STDIN !== "1") {
 
     $smokePort = Get-FreePort
     $smokeArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $controllerPath) -PluginRoot $(Quote-NativeArgument $fixtureRoot) -SmokeTest -SmokeTestSeconds 10 -Port $smokePort -Json"
-    $smokeResult = Invoke-WindowsPowerShell -Arguments $smokeArguments
+    $externalLocalAppDataProbe = Join-Path $testRoot "external local appdata probe"
+    $null = New-Item -ItemType Directory -Path $externalLocalAppDataProbe -Force
+    $smokeResult = Invoke-WindowsPowerShell -Arguments $smokeArguments -EnvironmentVariables @{
+        LOCALAPPDATA = $externalLocalAppDataProbe
+        NPM_CONFIG_CACHE = "fixture-original-cache"
+        NPM_CONFIG_UPDATE_NOTIFIER = "fixture-original-notifier"
+    }
     Assert-Condition ($smokeResult.ExitCode -eq 0) "Direct-entry smoke failed: $($smokeResult.StandardError) $($smokeResult.StandardOutput)"
     $smoke = $smokeResult.StandardOutput | ConvertFrom-Json
     Assert-Condition ([bool]$smoke.healthy) "Direct-entry smoke did not become healthy."
     Assert-Condition ([bool]$smoke.workflow.passed -and [bool]$smoke.workflow.deterministicReplay -and [bool]$smoke.workflow.validationValid -and [string]$smoke.workflow.contractStatus -eq "valid" -and [string]$smoke.workflow.exportFormat -eq "schem" -and [int]$smoke.workflow.schematicVersion -eq 3) "Direct-entry smoke did not exercise the deterministic compile/validation/export workflow."
+    Assert-Condition ([string]$smoke.workflow.asyncTaskId -ceq "task_smoke_async001" -and [int]$smoke.workflow.asyncTaskPolls -eq 2 -and [string]$smoke.workflow.asyncTaskState -ceq "completed" -and [bool]$smoke.workflow.asyncTaskResultAvailable -and [string]$smoke.workflow.asyncTaskBuildId -ceq "bw_123456789abc" -and [string]$smoke.workflow.asyncTaskBuildHash -ceq ('a' * 64) -and [int]$smoke.workflow.asyncTaskBlockCount -eq 274) "Direct-entry smoke did not start, poll, and verify an asynchronous compile that reproduces the synchronous build."
+    Assert-Condition ([bool]$smoke.taskPolling.authenticatedMcp -and [int]$smoke.taskPolling.observedTasks -eq 3 -and [string]$smoke.taskPolling.finalAttention -ceq "failed") "Authenticated MCP task polling did not establish a quiet baseline and observe terminal transitions."
     $joinedLogs = @($smoke.logs) -join "`n"
     Assert-Condition ($joinedLogs -match "ENTRY=__entry NODE_ENV=production __PORT=$smokePort PORT=$smokePort") "Direct entry did not receive the required production environment."
+    Assert-Condition ($joinedLogs -match "NPM_ENV_CACHE=fixture-original-cache NPM_ENV_UPDATE_NOTIFIER=fixture-original-notifier") "Runtime dependency validation did not restore the caller's exact npm environment before starting the server."
     Assert-Condition ($joinedLogs -match "MCP_AUTH=ok") "Control Center did not authenticate its MCP initialize smoke request."
     Assert-Condition ($joinedLogs -notmatch "BLOCKWRIGHT_LOCAL_MCP_TOKEN=") "The per-launch MCP token was written to a captured log."
     Assert-Condition (Test-PortAvailable -Port $smokePort) "The bounded smoke test left port $smokePort in use."
     Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $testRoot "state\run\managed-server.json"))) "The bounded smoke test removed the process but left its managed-process record behind."
-    Add-Pass "direct-entry-smoke" "Strict /health and /ready plus MCP initialize/tools/list/deterministic compile/validation/export passed on port $smokePort; the process stopped and released the listener."
+    $persistentLog = Join-Path $testRoot "state\logs\control-center.log"
+    Assert-Condition ((Test-Path -LiteralPath $persistentLog -PathType Leaf) -and (Get-Item -LiteralPath $persistentLog).Length -gt 0) "The controller did not persist a session log beneath the state root."
+    $persistentLogText = Get-Content -Raw -LiteralPath $persistentLog
+    Assert-Condition ($persistentLogText -notmatch 'Bearer\s+[A-Za-z0-9_-]{20,}|BLOCKWRIGHT_LOCAL_MCP_TOKEN=') "The persistent controller log retained an access token."
+    Assert-Condition (@(Get-ChildItem -LiteralPath $externalLocalAppDataProbe -Force).Count -eq 0) "Runtime dependency validation wrote npm cache/update state outside the selected Blockwright state root."
+    Add-Pass "direct-entry-smoke" "Strict /health and /ready, MCP initialize/tools/list, deterministic compile/validation/export, an asynchronous compile through terminal result availability and exact build identity, two authenticated list_tasks polls, isolated npm cache placement, and exact npm environment restoration passed on port $smokePort; the process stopped and released the listener."
 
     $forcedTreePort = Get-FreePort
     do { $forcedChildPort = Get-FreePort } while ($forcedChildPort -eq $forcedTreePort)
@@ -376,13 +669,22 @@ if (process.env.BLOCKWRIGHT_FIXTURE_IGNORE_STDIN !== "1") {
     Remove-Item -LiteralPath $lockPath -Recurse -Force
     Add-Pass "active-lock-protection" "The OS-owned mutex and active PID/start-time metadata were preserved; contention exited 23."
 
-    $shortcutArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $shortcutInstallerPath) -ShortcutDirectory $(Quote-NativeArgument $shortcutRoot) -PassThru"
+    $fixtureLauncherPath = Join-Path $fixtureRoot "Blockwright.exe"
+    $launcherBuildArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $launcherBuilderPath) -OutputPath $(Quote-NativeArgument $fixtureLauncherPath) -Version 0.8.0"
+    $launcherBuildResult = Invoke-WindowsPowerShell -Arguments $launcherBuildArguments
+    Assert-Condition ($launcherBuildResult.ExitCode -eq 0 -and (Test-Path -LiteralPath $fixtureLauncherPath -PathType Leaf)) "Fixture native launcher build failed: $($launcherBuildResult.StandardError)"
+
+    $shortcutArguments = "-NoLogo -NoProfile -ExecutionPolicy Bypass -File $(Quote-NativeArgument $shortcutInstallerPath) -InstallRoot $(Quote-NativeArgument $fixtureRoot) -ShortcutDirectory $(Quote-NativeArgument $shortcutRoot) -PassThru"
     $shortcutResult = Invoke-WindowsPowerShell -Arguments $shortcutArguments
     Assert-Condition ($shortcutResult.ExitCode -eq 0) "Temporary shortcut install failed: $($shortcutResult.StandardError)"
     $shortcutPath = Join-Path $shortcutRoot "Blockwright Control Center.lnk"
     Assert-Condition (Test-Path -LiteralPath $shortcutPath -PathType Leaf) "The temporary shortcut was not created."
 
     $shell = New-Object -ComObject WScript.Shell
+    $createdShortcut = $shell.CreateShortcut($shortcutPath)
+    Assert-Condition ([System.IO.Path]::GetFullPath([string]$createdShortcut.TargetPath).Equals([System.IO.Path]::GetFullPath($fixtureLauncherPath), [StringComparison]::OrdinalIgnoreCase)) "The helper-created Start Menu shortcut did not target the native Blockwright launcher."
+    Assert-Condition ([string]::IsNullOrWhiteSpace([string]$createdShortcut.Arguments)) "The helper-created Start Menu shortcut unexpectedly added launcher arguments."
+    Assert-Condition ([string]$createdShortcut.IconLocation -match ('(?i)^' + [regex]::Escape([System.IO.Path]::GetFullPath($fixtureLauncherPath)) + ',0$')) "The helper-created Start Menu shortcut did not use the native Blockwright launcher icon."
     $tamperedShortcut = $shell.CreateShortcut($shortcutPath)
     $tamperedShortcut.Arguments = '//nologo "C:\not-owned-by-blockwright.vbs"'
     $tamperedShortcut.Save()

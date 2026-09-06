@@ -16,13 +16,15 @@ $portableRoot = Join-Path $resolvedTestRoot "Blockwright"
 $windowsPowerShell = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
 $tarExecutable = Join-Path $env:SystemRoot "System32\tar.exe"
 $uninstallRegistrationKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{2D75D5A7-BC78-4BBE-B0BC-5B8D0366C4B4}_is1"
-$perUserInstallRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs\Blockwright"))
-$perUserStateRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Blockwright"))
+$externalLocalAppDataProbe = [System.IO.Path]::GetFullPath((Join-Path $resolvedTestRoot "external-localappdata-probe"))
 $codexConfigPath = [System.IO.Path]::GetFullPath((Join-Path $env:USERPROFILE ".codex\config.toml"))
 $schematicExtensionKey = "HKCU:\Software\Classes\.schem"
 $schematicProgIdKey = "HKCU:\Software\Classes\Blockwright.Schematic.1"
+$externalStateRootProbe = [System.IO.Path]::GetFullPath((Join-Path $resolvedTestRoot "external-state-root-probe"))
+$externalStateDirectoryProbe = [System.IO.Path]::GetFullPath((Join-Path $resolvedTestRoot "external-state-directory-probe"))
 $previousStateRoot = $env:BLOCKWRIGHT_STATE_ROOT
 $previousStateDirectory = $env:BLOCKWRIGHT_STATE_DIR
+$previousLocalAppData = $env:LOCALAPPDATA
 $previousPath = $env:PATH
 $testSucceeded = $false
 
@@ -236,26 +238,37 @@ function Test-AutomaticTestRoot {
     return $actualParent.Equals($expectedParent, [StringComparison]::OrdinalIgnoreCase)
 }
 
-$registrationBefore = Get-RegistrationSnapshot
-$perUserConfigPath = Join-Path $perUserStateRoot "config.json"
-$perUserInstallStatePath = Join-Path $perUserStateRoot "install-state.json"
-$perUserConfigBefore = Get-OptionalFileSnapshot -Path $perUserConfigPath
-$perUserInstallStateBefore = Get-OptionalFileSnapshot -Path $perUserInstallStatePath
-$perUserInstallerStatusPath = Join-Path $perUserStateRoot "integration\installer-status.txt"
-$perUserCodexMarkerPath = Join-Path $perUserStateRoot "integration\codex.json"
-$perUserAssociationMarkerPath = Join-Path $perUserStateRoot "integration\schem-association.json"
-$perUserInstallerStatusBefore = Get-OptionalFileSnapshot -Path $perUserInstallerStatusPath
-$perUserCodexMarkerBefore = Get-OptionalFileSnapshot -Path $perUserCodexMarkerPath
-$perUserAssociationMarkerBefore = Get-OptionalFileSnapshot -Path $perUserAssociationMarkerPath
-$codexConfigBefore = Get-OptionalFileSnapshot -Path $codexConfigPath
-$schematicExtensionBefore = Get-RegistrySubtreeSnapshot -Path $schematicExtensionKey
-$schematicProgIdBefore = Get-RegistrySubtreeSnapshot -Path $schematicProgIdKey
-$perUserInstallExistedBefore = Test-Path -LiteralPath $perUserInstallRoot -PathType Container
-$perUserStateTreeBefore = Get-DirectoryTreeSnapshot -Path $perUserStateRoot
-$perUserInstallTreeBefore = Get-DirectoryTreeSnapshot -Path $perUserInstallRoot
-
 try {
     $null = New-Item -ItemType Directory -Path $resolvedTestRoot -Force
+    $null = New-Item -ItemType Directory -Path $externalLocalAppDataProbe -Force
+    $null = New-Item -ItemType Directory -Path $externalStateRootProbe -Force
+    $null = New-Item -ItemType Directory -Path $externalStateDirectoryProbe -Force
+    $env:LOCALAPPDATA = $externalLocalAppDataProbe
+    $env:BLOCKWRIGHT_STATE_ROOT = $externalStateRootProbe
+    $env:BLOCKWRIGHT_STATE_DIR = $externalStateDirectoryProbe
+    $perUserInstallRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Programs\Blockwright"))
+    $perUserStateRoot = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA "Blockwright"))
+    $registrationBefore = Get-RegistrationSnapshot
+    $perUserConfigPath = Join-Path $perUserStateRoot "config.json"
+    $perUserInstallStatePath = Join-Path $perUserStateRoot "install-state.json"
+    $perUserConfigBefore = Get-OptionalFileSnapshot -Path $perUserConfigPath
+    $perUserInstallStateBefore = Get-OptionalFileSnapshot -Path $perUserInstallStatePath
+    $perUserInstallerStatusPath = Join-Path $perUserStateRoot "integration\installer-status.txt"
+    $perUserCodexMarkerPath = Join-Path $perUserStateRoot "integration\codex.json"
+    $perUserAssociationMarkerPath = Join-Path $perUserStateRoot "integration\schem-association.json"
+    $perUserInstallerStatusBefore = Get-OptionalFileSnapshot -Path $perUserInstallerStatusPath
+    $perUserCodexMarkerBefore = Get-OptionalFileSnapshot -Path $perUserCodexMarkerPath
+    $perUserAssociationMarkerBefore = Get-OptionalFileSnapshot -Path $perUserAssociationMarkerPath
+    $codexConfigBefore = Get-OptionalFileSnapshot -Path $codexConfigPath
+    $schematicExtensionBefore = Get-RegistrySubtreeSnapshot -Path $schematicExtensionKey
+    $schematicProgIdBefore = Get-RegistrySubtreeSnapshot -Path $schematicProgIdKey
+    $perUserInstallExistedBefore = Test-Path -LiteralPath $perUserInstallRoot -PathType Container
+    $perUserStateTreeBefore = Get-DirectoryTreeSnapshot -Path $perUserStateRoot
+    $perUserInstallTreeBefore = Get-DirectoryTreeSnapshot -Path $perUserInstallRoot
+    $externalLocalAppDataProbeBefore = Get-DirectoryTreeSnapshot -Path $externalLocalAppDataProbe
+    $externalStateRootProbeBefore = Get-DirectoryTreeSnapshot -Path $externalStateRootProbe
+    $externalStateDirectoryProbeBefore = Get-DirectoryTreeSnapshot -Path $externalStateDirectoryProbe
+
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($resolvedPortableZip)
     try {
@@ -276,6 +289,7 @@ try {
     if ($extract.ExitCode -ne 0) { throw "Portable ZIP extraction failed with exit $($extract.ExitCode). $($extract.StandardError.Trim())" }
 
     foreach ($required in @(
+        "Blockwright.exe",
         "portable.flag",
         "runtime\node\node.exe",
         "runtime\node\npm.cmd",
@@ -292,19 +306,49 @@ try {
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $portableRoot $required) -PathType Leaf)) { throw "Extracted portable payload is missing $required." }
     }
+    $releaseManifest = Get-Content -Raw -LiteralPath (Join-Path $portableRoot "release-manifest.json") | ConvertFrom-Json
+    $packagedLauncher = Join-Path $portableRoot "Blockwright.exe"
+    if ([string]$releaseManifest.launcher.path -cne "Blockwright.exe" -or [string]::IsNullOrWhiteSpace([string]$releaseManifest.launcher.sha256)) { throw "Portable release manifest does not identify Blockwright.exe." }
+    $expectedLauncherStatus = switch ([string]$releaseManifest.launcher.authenticode) {
+        "not-signed" { "NotSigned" }
+        "valid" { "Valid" }
+        default { throw "Portable release manifest has an unsupported native launcher trust state." }
+    }
+    $launcherValidationArguments = @(
+        "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File",
+        (Join-Path $PSScriptRoot "..\release\Test-BlockwrightLauncherBinary.ps1"),
+        "-Artifact", $packagedLauncher, "-Version", ([string]$releaseManifest.version),
+        "-ExpectedAuthenticodeStatus", $expectedLauncherStatus
+    )
+    if ($expectedLauncherStatus -eq "Valid") {
+        if ([string]::IsNullOrWhiteSpace([string]$releaseManifest.launcher.signerThumbprint)) { throw "Signed portable launcher metadata is missing its publisher thumbprint." }
+        $launcherValidationArguments += @("-ExpectedThumbprint", ([string]$releaseManifest.launcher.signerThumbprint), "-RequireTimestamp")
+    }
+    $launcherValidation = Invoke-NativeProcess -FileName $windowsPowerShell -Arguments $launcherValidationArguments
+    if ($launcherValidation.ExitCode -ne 0) { throw "Portable native launcher validation failed with exit $($launcherValidation.ExitCode). $($launcherValidation.StandardError)" }
+    try { $launcherEvidence = $launcherValidation.StandardOutput | ConvertFrom-Json } catch { throw "Portable native launcher validation did not return machine-readable JSON." }
+    if ([string]$launcherEvidence.sha256 -cne ([string]$releaseManifest.launcher.sha256).ToLowerInvariant()) { throw "Portable Blockwright.exe hash does not match release-manifest.json." }
     Import-Module (Join-Path $portableRoot "scripts\windows\Blockwright-Paths.psm1") -Force
     $portableStateRoot = [System.IO.Path]::GetFullPath((Join-Path $portableRoot "data\state"))
     $resolvedPortableState = Get-BlockwrightStateRoot -InstallRoot $portableRoot
     if (-not $resolvedPortableState.Equals($portableStateRoot, [StringComparison]::OrdinalIgnoreCase)) { throw "Portable state did not resolve beside the extracted package." }
 
-    Remove-Item Env:BLOCKWRIGHT_STATE_ROOT -ErrorAction SilentlyContinue
-    Remove-Item Env:BLOCKWRIGHT_STATE_DIR -ErrorAction SilentlyContinue
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;$env:SystemRoot\System32\WindowsPowerShell\v1.0"
-    $diagnosticEvidence = Invoke-PackagedDiagnostics -PackageRoot $portableRoot
+    $previousDiagnosticNpmCache = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+    $previousDiagnosticNpmUpdateNotifier = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+    try {
+        $env:NPM_CONFIG_CACHE = Join-Path $portableStateRoot "npm-cache"
+        $env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
+        $diagnosticEvidence = Invoke-PackagedDiagnostics -PackageRoot $portableRoot
+    } finally {
+        try {
+            [Environment]::SetEnvironmentVariable("NPM_CONFIG_CACHE", $previousDiagnosticNpmCache, [EnvironmentVariableTarget]::Process)
+        } finally {
+            [Environment]::SetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", $previousDiagnosticNpmUpdateNotifier, [EnvironmentVariableTarget]::Process)
+        }
+    }
     $port = Get-FreePort
-    $controller = Join-Path $portableRoot "scripts\windows\Blockwright-ControlCenter.ps1"
-    $smoke = Invoke-NativeProcess -FileName $windowsPowerShell -Arguments @(
-        "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $controller,
+    $smoke = Invoke-NativeProcess -FileName $packagedLauncher -Arguments @(
         "-PluginRoot", $portableRoot, "-Port", [string]$port, "-SmokeTest", "-SmokeTestSeconds", [string]$SmokeTestSeconds, "-Json"
     ) -TimeoutMilliseconds (($SmokeTestSeconds + 120) * 1000)
     if ($smoke.ExitCode -ne 0) { throw "Portable private-runtime smoke test failed with exit $($smoke.ExitCode). $($smoke.StandardOutput) $($smoke.StandardError)" }
@@ -312,7 +356,14 @@ try {
     if (-not [bool]$smokeEvidence.healthy -or -not [bool]$smokeEvidence.workflow.passed -or
         -not [bool]$smokeEvidence.workflow.deterministicReplay -or -not [bool]$smokeEvidence.workflow.validationValid -or
         [string]$smokeEvidence.workflow.contractStatus -ne "valid" -or [string]$smokeEvidence.workflow.exportFormat -ne "schem" -or
-        [int]$smokeEvidence.workflow.exportBytes -le 0 -or [int]$smokeEvidence.workflow.schematicVersion -ne 3) {
+        [int]$smokeEvidence.workflow.exportBytes -le 0 -or [int]$smokeEvidence.workflow.schematicVersion -ne 3 -or
+        [string]$smokeEvidence.workflow.asyncTaskId -notmatch '^task_[A-Za-z0-9_-]+$' -or
+        [string]$smokeEvidence.workflow.asyncTaskState -cne "completed" -or -not [bool]$smokeEvidence.workflow.asyncTaskResultAvailable -or
+        [string]$smokeEvidence.workflow.asyncTaskBuildId -notmatch '^bw_[a-f0-9]{12}$' -or [int]$smokeEvidence.workflow.asyncTaskBlockCount -le 0 -or
+        [string]$smokeEvidence.workflow.asyncTaskBuildId -cne [string]$smokeEvidence.workflow.buildId -or
+        [string]$smokeEvidence.workflow.asyncTaskBuildHash -cne [string]$smokeEvidence.workflow.buildHash -or
+        [int]$smokeEvidence.workflow.asyncTaskBlockCount -ne [int]$smokeEvidence.workflow.blockCount -or
+        -not [bool]$smokeEvidence.taskPolling.authenticatedMcp -or [int]$smokeEvidence.taskPolling.observedTasks -lt 1) {
         throw "Portable primary workflow evidence is incomplete or invalid."
     }
     if (-not (Test-Path -LiteralPath $portableStateRoot -PathType Container)) { throw "Portable first launch did not create package-local state." }
@@ -339,6 +390,9 @@ try {
     if ([bool](Test-Path -LiteralPath $perUserInstallRoot -PathType Container) -ne [bool]$perUserInstallExistedBefore) { throw "Portable first launch changed the per-user install directory presence." }
     Assert-DirectoryTreeUnchanged -Before $perUserStateTreeBefore -Path $perUserStateRoot -Label "the per-user Blockwright state tree"
     Assert-DirectoryTreeUnchanged -Before $perUserInstallTreeBefore -Path $perUserInstallRoot -Label "the per-user Blockwright installation tree"
+    Assert-DirectoryTreeUnchanged -Before $externalLocalAppDataProbeBefore -Path $externalLocalAppDataProbe -Label "the isolated external LOCALAPPDATA probe"
+    Assert-DirectoryTreeUnchanged -Before $externalStateRootProbeBefore -Path $externalStateRootProbe -Label "the inherited BLOCKWRIGHT_STATE_ROOT probe"
+    Assert-DirectoryTreeUnchanged -Before $externalStateDirectoryProbeBefore -Path $externalStateDirectoryProbe -Label "the inherited BLOCKWRIGHT_STATE_DIR probe"
 
     $testSucceeded = $true
     [pscustomobject][ordered]@{
@@ -347,6 +401,7 @@ try {
         sha256 = (Get-FileHash -LiteralPath $resolvedPortableZip -Algorithm SHA256).Hash.ToLowerInvariant()
         archiveEntries = $entryCount
         privateRuntime = "pass"
+        nativeLauncher = [pscustomobject][ordered]@{ status = "pass"; authenticode = [string]$launcherEvidence.authenticode; sha256 = [string]$launcherEvidence.sha256; fileVersion = [string]$launcherEvidence.fileVersion }
         diagnostics = "pass"
         diagnosticEvidence = $diagnosticEvidence
         portableState = "pass"
@@ -354,9 +409,13 @@ try {
         workflowEvidence = $smokeEvidence.workflow
         stop = "pass"
         perUserLeakCheck = "pass"
+        externalLocalAppDataProbe = "unchanged"
+        inheritedStateRootProbe = "unchanged"
+        inheritedStateDirectoryProbe = "unchanged"
     } | ConvertTo-Json -Depth 8 -Compress
 } finally {
     $env:PATH = $previousPath
+    if ([string]::IsNullOrWhiteSpace($previousLocalAppData)) { Remove-Item Env:LOCALAPPDATA -ErrorAction SilentlyContinue } else { $env:LOCALAPPDATA = $previousLocalAppData }
     if ([string]::IsNullOrWhiteSpace($previousStateRoot)) { Remove-Item Env:BLOCKWRIGHT_STATE_ROOT -ErrorAction SilentlyContinue } else { $env:BLOCKWRIGHT_STATE_ROOT = $previousStateRoot }
     if ([string]::IsNullOrWhiteSpace($previousStateDirectory)) { Remove-Item Env:BLOCKWRIGHT_STATE_DIR -ErrorAction SilentlyContinue } else { $env:BLOCKWRIGHT_STATE_DIR = $previousStateDirectory }
     $managedRecord = Join-Path $portableRoot "data\state\run\managed-server.json"

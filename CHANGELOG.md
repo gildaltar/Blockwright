@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0 - 2026-09-05
+
+- Added canonical procedural IR v2, deterministic primitives and material distributions, component graphs, dependency-aware compilation, bounded component caching, and revision reports while preserving v1 build compatibility.
+- Added preview-first TerrainFit analysis with deterministic candidate scoring, cut/fill and blend planning, protected-feature conflicts, path/water/vegetation integration, and confirmation-bound install plans that perform no unconfirmed world write.
+- Added no-model planning and editing paths, modular local/cloud provider adapters, OS-native credential storage, secret-free model settings, hardware discovery, and privacy/fallback controls.
+- Added journaled long-running tasks with structured progress, resumable interrupted work, hard cancellation, and phase-specific diagnostics, plus local editor/API routes for plan, compile, inspect, revise, task, model, hardware, and diagnostic workflows.
+- Expanded the notification-area Windows supervisor with single-instance activation, rotating redacted logs, bounded crash recovery, and ownership-checked lifecycle control. The installer now offers current-user/all-users scope plus independent visible-UI and minimized-engine sign-in choices; it remains signing-ready but unsigned without an external publisher certificate.
+
 ## 0.7.0 - 2026-09-05
 
 - Added a generic, requirement-mapped Design IR for arbitrary fills, shells, carves, cylinders, basins, sweeps, stairs, ramps, repetition, and supports.

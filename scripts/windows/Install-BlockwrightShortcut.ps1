@@ -2,6 +2,7 @@
 param(
     [switch]$Remove,
     [switch]$BackupExisting,
+    [string]$InstallRoot,
     [string]$ShortcutDirectory,
     [switch]$PassThru
 )
@@ -20,10 +21,13 @@ if (-not $ShortcutPath.Equals($ExpectedShortcutPath, [System.StringComparison]::
     throw "Refusing to modify an unexpected shortcut path: $ShortcutPath"
 }
 
-$launcherPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "Launch-Blockwright-ControlCenter.vbs"))
-$wscriptPath = [System.IO.Path]::GetFullPath((Join-Path $env:SystemRoot "System32\wscript.exe"))
-$windowsPowerShellPath = [System.IO.Path]::GetFullPath((Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"))
-$expectedArguments = '//nologo "' + $launcherPath + '"'
+$installRoot = if ([string]::IsNullOrWhiteSpace($InstallRoot)) { [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..")) } else { [System.IO.Path]::GetFullPath($InstallRoot) }
+$launcherPath = [System.IO.Path]::GetFullPath((Join-Path $installRoot "Blockwright.exe"))
+$legacyLauncherPath = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "Launch-Blockwright-ControlCenter.vbs"))
+$legacyWscriptPath = [System.IO.Path]::GetFullPath((Join-Path $env:SystemRoot "System32\wscript.exe"))
+$legacyArguments = '//nologo "' + $legacyLauncherPath + '"'
+$expectedArguments = ""
+$shortcutIconLocation = "$launcherPath,0"
 $shell = New-Object -ComObject WScript.Shell
 
 function Test-OwnedShortcut {
@@ -32,9 +36,10 @@ function Test-OwnedShortcut {
     try {
         $existingShortcut = $shell.CreateShortcut($Path)
         $existingTargetPath = [System.IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables([string]$existingShortcut.TargetPath))
-        $targetMatches = $existingTargetPath.Equals($wscriptPath, [System.StringComparison]::OrdinalIgnoreCase)
-        $argumentsMatch = ([string]$existingShortcut.Arguments).Equals($expectedArguments, [System.StringComparison]::Ordinal)
-        return $existingShortcut.Description -eq $ShortcutDescription -and $targetMatches -and $argumentsMatch
+        $arguments = [string]$existingShortcut.Arguments
+        $nativeTargetMatches = $existingTargetPath.Equals($launcherPath, [System.StringComparison]::OrdinalIgnoreCase) -and $arguments.Equals($expectedArguments, [System.StringComparison]::Ordinal)
+        $legacyTargetMatches = $existingTargetPath.Equals($legacyWscriptPath, [System.StringComparison]::OrdinalIgnoreCase) -and $arguments.Equals($legacyArguments, [System.StringComparison]::Ordinal)
+        return $existingShortcut.Description -eq $ShortcutDescription -and ($nativeTargetMatches -or $legacyTargetMatches)
     } catch {
         return $false
     }
@@ -57,15 +62,7 @@ if ($Remove) {
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) {
-    throw "The stable Blockwright launcher is missing: $launcherPath"
-}
-if (-not (Test-Path -LiteralPath $wscriptPath -PathType Leaf)) {
-    throw "Windows Script Host was not found: $wscriptPath"
-}
-if (-not (Test-Path -LiteralPath $windowsPowerShellPath -PathType Leaf)) {
-    throw "Windows PowerShell was not found: $windowsPowerShellPath"
-}
+if (-not (Test-Path -LiteralPath $launcherPath -PathType Leaf)) { throw "The native Blockwright launcher is missing: $launcherPath" }
 
 $existingOwned = Test-OwnedShortcut -Path $ShortcutPath
 $backupPath = $null
@@ -91,11 +88,11 @@ if ($PSCmdlet.ShouldProcess($ShortcutPath, "Create or update Blockwright Start M
         $null = New-Item -ItemType Directory -Path $ProgramsDirectory -Force
     }
     $shortcut = $shell.CreateShortcut($ShortcutPath)
-    $shortcut.TargetPath = $wscriptPath
+    $shortcut.TargetPath = $launcherPath
     $shortcut.Arguments = $expectedArguments
-    $shortcut.WorkingDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
+    $shortcut.WorkingDirectory = $installRoot
     $shortcut.Description = $ShortcutDescription
-    $shortcut.IconLocation = "$windowsPowerShellPath,0"
+    $shortcut.IconLocation = $shortcutIconLocation
     $shortcut.Save()
     $status = if ($existingOwned) { "Updated" } elseif ($null -ne $backupPath) { "ReplacedWithBackup" } else { "Installed" }
     Write-Output "$status the Blockwright Start Menu shortcut."

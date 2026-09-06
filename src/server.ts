@@ -7,7 +7,7 @@ import { z } from "zod";
 import minecraftData from "minecraft-data";
 import { REGISTRY_META } from "./data/registry-meta.js";
 import { STYLE_PROFILES, getStyleProfile } from "./data/styles.js";
-import { compileBuild, generateBuildCandidates, summarizeBuild } from "./lib/compiler.js";
+import { compileBuild, generateBuildCandidates, planBuildInput, summarizeBuild } from "./lib/compiler.js";
 import { createBundle, toBlueprint, toCsv, toJson, toMcfunction, type ExportFormat } from "./lib/exports.js";
 import { assertConstructionExportable, type ConstructionExportFormat } from "./lib/export-policy.js";
 import { listJavaRegistries, readJavaRegistry, registryMetadata } from "./lib/java-registry.js";
@@ -21,10 +21,12 @@ import {
   buildPreflightOutputSchema,
   buildSummaryOutputSchema,
   buildValidationOutputSchema,
+  designComponentOutputSchema,
   designMaterialOutputSchema,
   designProgramOutputSchema,
   discoveredWorldOutputSchema,
   installWorldEditResultOutputSchema,
+  normalizedBuildInputOutputSchema,
   outputBoundsSchema,
   paletteInterviewOutputSchema,
   resourcePackVersionOutputSchema,
@@ -47,6 +49,32 @@ import { estimateBuild } from "./lib/preflight.js";
 import { auditBuild } from "./lib/reviewer-audit.js";
 import { reviseSelectedRegion } from "./lib/revision.js";
 import { exportSchematic, importSchematic } from "./lib/schematic.js";
+import { runCompileTask } from "./lib/compile-task-worker.js";
+import { FileTaskJournal, TaskManager } from "./lib/task-manager.js";
+import { TASK_STATES, exposeCommittedTaskResult, sanitizeDiagnosticText, type TaskSnapshot } from "./lib/task-contract.js";
+import {
+  DEFAULT_LOCAL_MODEL_ENDPOINTS,
+  ModelProviderRegistry,
+  discoverLocalModelProviders,
+  publicModelProviderConfig,
+  providerErrorSummary,
+  type ModelPolicyMode,
+  type ModelProviderConfig,
+  type ModelProviderSettings,
+} from "./lib/model-providers.js";
+import { createCredentialStore, credentialErrorSummary, type CredentialReference } from "./lib/credential-store.js";
+import { FileModelSettingsStorage, SecretFreeModelSettingsStore, type ModelSettingsDocument } from "./lib/model-settings-store.js";
+import { discoverLocalHardware } from "./lib/hardware-discovery.js";
+import { resolveRuntimeStateRoot } from "./lib/runtime-state.js";
+import {
+  TERRAIN_INTERFACE_STRATEGIES,
+  analyzeTerrainFit,
+  confirmTerrainFitPreview,
+  verifyTerrainFitPreview,
+  type TerrainFitOptions,
+  type TerrainFitPreview,
+  type TerrainWorldRegion,
+} from "./lib/terrain-fit.js";
 import { discoverWorlds, installWorldEditSchematic } from "./lib/worlds.js";
 import { StripeBillingClient } from "./lib/billing.js";
 import { configureHostedRoutes } from "./lib/hosted-routes.js";
@@ -54,10 +82,10 @@ import { importHostedSchematic } from "./lib/hosted-import.js";
 import { FixedWindowRateLimiter, HostedServiceStore, loadHostedServiceConfig, sessionTokenFromHeaders, validateBase64Upload, type HostedPrincipal } from "./lib/hosted-service.js";
 import { FileProjectStore, HOSTED_PROJECT_STORAGE_LIMITS, createHostedReviewService, type ProjectSnapshot, type ProjectSummary, type ProjectVersion } from "./lib/projects.js";
 import { mcpRequestTargetDisposition, runBlockwrightRuntime } from "./lib/runtime-listener.js";
-import type { ArchitecturalPlan, BuildInput, BuildRecord, Placement, WorldRegion } from "./lib/types.js";
+import type { ArchitecturalPlan, BuildInput, BuildRecord, DesignComponent, Placement, WorldRegion } from "./lib/types.js";
 
 const APP_NAME = "blockwright";
-const APP_VERSION = "0.7.0";
+const APP_VERSION = "0.8.0";
 const startedAt = Date.now();
 type JsonResponse = {
   setHeader(name: string, value: string): void;
@@ -113,12 +141,45 @@ const buildInputSchema = {
   confirmationToken: z.string().max(256).optional().describe("Exact token returned by a red-risk preflight; never invent or paraphrase it."),
 };
 
+// MCP tools/list serializes each tool schema independently, so embedding the complete
+// Design IR union in every build input, reference, and summary duplicates hundreds of
+// kilobytes per tool. Keep the complete schema as the runtime authority, but advertise a
+// compact transport shape at repeated boundaries. The custom refinement still performs
+// the exact Design IR validation whenever an MCP input or output is parsed.
+const designProgramTransportSchema = z.record(z.string(), z.unknown()).superRefine((value, context) => {
+  const parsed = designProgramOutputSchema.safeParse(value);
+  if (!parsed.success) {
+    const detail = parsed.error.issues.slice(0, 3).map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join(".") : "design";
+      return `${path}: ${issue.message}`;
+    }).join("; ");
+    context.addIssue({ code: "custom", message: `Invalid Design IR: ${detail}` });
+  }
+}).describe("Canonical Blockwright Design IR v1 or v2 object. Its full primitive, boolean, clipping, material-distribution, template, repetition, component, dependency, and revision contract is documented in SPEC.md and validated in full at runtime.");
+
+const buildToolInputSchema = {
+  ...buildInputSchema,
+  design: designProgramTransportSchema.optional().describe("Canonical Design IR v1 or v2 object, fully validated at runtime. Use schemaVersion 2 for component graphs, templates, repetition, booleans, clipping, and distributed materials; see SPEC.md for the complete contract."),
+};
+
+const normalizedBuildInputTransportSchema = normalizedBuildInputOutputSchema.extend({
+  design: designProgramTransportSchema,
+});
+
+const buildSummaryTransportSchema = buildSummaryOutputSchema.extend({
+  input: normalizedBuildInputTransportSchema,
+}).describe("Immutable build summary with compactly advertised Design IR; the complete design object is returned and fully validated at runtime.");
+
+const buildCandidateTransportSchema = buildCandidateOutputSchema.extend({
+  build: buildSummaryTransportSchema,
+});
+
 const buildReferenceSchema = z.union([
   z.string().min(1).max(128),
   z.object({
     id: z.string().max(128).optional().describe("Stable build identifier when the caller has one."),
     hash: z.string().max(128).optional().describe("Full immutable build hash when the caller has one."),
-    input: z.object(buildInputSchema).passthrough().describe("Normalized build input used to deterministically reconstruct and integrity-check the build."),
+    input: z.object(buildToolInputSchema).passthrough().describe("Normalized build input used to deterministically reconstruct and integrity-check the build; Design IR is fully validated at runtime."),
   }).passthrough(),
 ]).describe("A PC-local build id, a hosted short-lived cacheRef returned with a build summary, or a canonical build summary/record containing normalized input. Hosted cache references are random capabilities; deterministic ids alone never cross a public cache boundary. Uncached summaries are recompiled and integrity-checked.");
 
@@ -159,8 +220,160 @@ const worldRegionSchema = z.object({
   })).optional().describe("Existing structures recorded in the snapshot."),
 }).describe("Canonical world-region snapshot used for non-mutating conflict analysis.");
 
+const terrainProtectedRegionSchema = z.object({
+  id: z.string().min(1).max(160).optional().describe("Stable protected-region identifier when available."),
+  name: z.string().min(1).max(240).optional().describe("Human-readable protected-region label."),
+  bounds: z.object({ min: vec3Schema.describe("Minimum inclusive protected coordinate."), max: vec3Schema.describe("Maximum inclusive protected coordinate.") }).describe("Inclusive protected cuboid."),
+  reason: z.string().min(1).max(1000).optional().describe("Why the solver must avoid this region."),
+});
+const terrainBlockIdSchema = z.string().max(128).regex(/^[a-z0-9_.-]+:[a-z0-9_./-]+$/).describe("Lowercase namespaced Minecraft block identifier.");
+
+const terrainWorldRegionSchema = worldRegionSchema.extend({
+  surfaceBlocks: z.array(z.array(terrainBlockIdSchema)).optional().describe("Optional top-surface block ids aligned to the height map."),
+  subsurfaceBlocks: z.array(z.array(z.array(terrainBlockIdSchema))).optional().describe("Optional shallow geology samples aligned to the terrain grid."),
+  waterCoordinates: z.array(vec3Schema).max(250_000).optional().describe("Known water columns or water blocks to preserve, bridge, retain, or redirect."),
+  vegetationCoordinates: z.array(vec3Schema).max(250_000).optional().describe("Known vegetation used to estimate native restoration density."),
+  pathCoordinates: z.array(vec3Schema).max(250_000).optional().describe("Known path coordinates used for bounded entrance routing."),
+  protectedRegions: z.array(terrainProtectedRegionSchema).max(4096).optional().describe("Named inclusive cuboids the solver must not disturb."),
+}).describe("Canonical terrain snapshot used for deterministic TerrainFit candidate scoring and procedural preview generation.");
+
+const terrainInterfaceSchema = z.object({
+  strategy: z.enum(TERRAIN_INTERFACE_STRATEGIES).describe("How the build should meet the terrain."),
+  maxCutDepth: z.number().int().min(0).max(256).describe("Maximum permitted excavation depth per terrain column."),
+  maxFillHeight: z.number().int().min(0).max(256).describe("Maximum permitted fill height per terrain column."),
+  allowRetainingWalls: z.boolean().describe("Whether deterministic retaining structures may be planned where grading needs support."),
+  allowTerraces: z.boolean().describe("Whether stepped terrain transitions are permitted."),
+  blendRadius: z.number().int().min(0).max(128).describe("Outer terrain blend radius in blocks."),
+  innerBlendRadius: z.number().int().min(0).max(128).optional().describe("Optional inner high-influence blend radius."),
+  waterPolicy: z.enum(["preserve", "bridge", "culvert", "retain", "redirect"]).optional().describe("Explicit policy for water intersecting the footprint or path."),
+}).superRefine((value, context) => {
+  if (value.innerBlendRadius !== undefined && value.innerBlendRadius > value.blendRadius) {
+    context.addIssue({ code: "custom", path: ["innerBlendRadius"], message: "innerBlendRadius cannot exceed blendRadius." });
+  }
+});
+
+const terrainFitOptionsSchema = {
+  terrainInterface: terrainInterfaceSchema.describe("Explicit grading, blending, retaining, terrace, and water constraints for the terrain boundary."),
+  targetAnchor: vec3Schema.optional().describe("Preferred minimum build coordinate. The solver may adjust it only within the declared search bounds."),
+  lockTargetY: z.boolean().default(false).describe("Keep targetAnchor.y exact instead of testing a lower-impact grade elevation."),
+  maximumHorizontalOffset: z.number().int().min(0).max(32).default(0).describe("Maximum bounded x/z candidate offset around the preferred anchor."),
+  rotations: z.array(z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)])).min(1).max(4).default([0]).describe("Allowed clockwise build rotations."),
+  allowMirror: z.boolean().default(false).describe("Allow a deterministic x-axis mirror candidate."),
+  maximumCandidates: z.number().int().min(1).max(200).default(64).describe("Maximum candidate placements to score before selecting the minimum-impact result."),
+  maximumFootprintColumns: z.number().int().min(25).max(1_048_576).default(262_144).describe("Hard bound on build footprint columns considered by TerrainFit."),
+  retainingThreshold: z.number().int().min(1).max(256).optional().describe("Cut or fill delta at which retaining support is required."),
+  pathSearchLimit: z.number().int().min(100).max(1_000_000).default(100_000).describe("Maximum path-routing states explored before failing closed."),
+};
+
+const terrainCandidateSummarySchema = z.object({
+  id: z.string(),
+  anchor: vec3Schema,
+  rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]),
+  mirrorX: z.boolean(),
+  totalScore: z.number(),
+  excavation: z.number().int().min(0),
+  fill: z.number().int().min(0),
+  protectedConflicts: z.number().int().min(0),
+  structureConflicts: z.number().int().min(0),
+  waterConflicts: z.number().int().min(0),
+});
+
+const terrainOperationCountsSchema = z.object({
+  gradingColumns: z.number().int().min(0),
+  retainingColumns: z.number().int().min(0),
+  pathPoints: z.number().int().min(0),
+  waterCoordinates: z.number().int().min(0),
+  vegetationRestoration: z.boolean(),
+});
+
+const terrainFitSummarySchema = z.object({
+  previewRef: z.string().describe("Short-lived principal-scoped reference required to reopen or confirm this exact preview."),
+  previewId: z.string(),
+  previewHash: z.string(),
+  buildId: z.string(),
+  buildHash: z.string(),
+  regionHash: z.string(),
+  risk: z.enum(["green", "amber", "red"]),
+  selected: terrainCandidateSummarySchema,
+  candidates: z.array(terrainCandidateSummarySchema),
+  cutVolume: z.number().int().min(0),
+  fillVolume: z.number().int().min(0),
+  changedTerrainArea: z.number().int().min(0),
+  maximumCutDepth: z.number().int().min(0),
+  maximumFillHeight: z.number().int().min(0),
+  blendZones: z.object({ footprintColumns: z.number().int().min(0), innerColumns: z.number().int().min(0), outerColumns: z.number().int().min(0) }),
+  retainingWalls: z.object({ required: z.boolean(), columns: z.number().int().min(0) }),
+  pathConnection: z.object({ status: z.enum(["connected", "blocked", "not_requested"]), length: z.number().int().min(0), crossesWater: z.number().int().min(0) }),
+  conflictTotals: z.object({ water: z.number().int().min(0), protected: z.number().int().min(0), structures: z.number().int().min(0) }),
+  sampledNativeMaterials: z.array(z.object({ block: z.string(), count: z.number().int().min(0) })),
+  sampledBiomes: z.array(z.object({ biome: z.string(), count: z.number().int().min(0) })),
+  operationCounts: terrainOperationCountsSchema,
+  warnings: z.array(z.string()),
+});
+
+const taskStateSchema = z.enum(TASK_STATES);
+const taskWorkSchema = z.object({
+  unit: z.string(),
+  completedUnits: z.number().int().min(0).optional(),
+  totalUnits: z.number().int().min(0).optional(),
+  affectedComponent: z.string().optional(),
+  cacheHits: z.number().int().min(0).optional(),
+  cacheReusedUnits: z.number().int().min(0).optional(),
+});
+const taskDiagnosticSchema = z.object({
+  id: z.string(),
+  code: z.string(),
+  phase: taskStateSchema,
+  operation: z.string(),
+  component: z.string().optional(),
+  error: z.string(),
+  likelyCause: z.string(),
+  retry: z.object({ safe: z.boolean(), reason: z.string() }),
+  recommendedAction: z.string(),
+  logReference: z.string(),
+});
+const taskSnapshotSchema = z.object({
+  id: z.string(),
+  operation: z.string(),
+  state: taskStateSchema,
+  progress: z.object({
+    sequence: z.number().int().min(0),
+    phase: taskStateSchema,
+    operation: z.string(),
+    detail: z.string().optional(),
+    work: taskWorkSchema.optional(),
+  }),
+  timing: z.object({
+    queuedAt: z.string(),
+    startedAt: z.string().optional(),
+    updatedAt: z.string(),
+    finishedAt: z.string().optional(),
+    elapsedMs: z.number().int().min(0),
+    queueMs: z.number().int().min(0).optional(),
+    runMs: z.number().int().min(0).optional(),
+  }),
+  resultAvailable: z.boolean(),
+  resultReference: z.string().optional(),
+  diagnostic: taskDiagnosticSchema.optional(),
+  retryOf: z.string().optional(),
+});
+
+const modelProviderStatusSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  kind: z.enum(["none", "ollama", "openai-compatible-local", "openai-compatible-cloud"]),
+  privacy: z.enum(["none", "local", "cloud"]),
+  availability: z.enum(["available", "unavailable", "blocked", "disabled"]),
+  capabilities: z.array(z.enum(["planning", "critique", "revision", "structured-output"])),
+  model: z.string().optional(),
+  endpoint: z.string().optional(),
+  latencyMs: z.number().min(0).optional(),
+  discoveredModels: z.array(z.string()).optional(),
+  errorCode: z.string().optional(),
+});
+
 const buildChangesSchema = z.object({
-  ...buildInputSchema,
+  ...buildToolInputSchema,
   style: styleSchema,
   dimensions: dimensionsSchema.partial().optional().describe("Only the dimensions to change; omitted axes stay locked."),
 }).partial().describe("Explicit build-input fields to change; all omitted constraints remain locked.");
@@ -268,6 +481,8 @@ const HOSTED_BUILD_AXIS_CAP = Object.freeze({ width: 512, depth: 512, height: 25
 const HOSTED_BUILD_CHUNK_COLUMN_CAP = 1_024;
 const HOSTED_IMPORT_PLACEMENT_CAP = 100_000;
 const HOSTED_REVISION_PLACEMENT_CAP = 100_000;
+const HOSTED_TERRAIN_COLUMN_CAP = 262_144;
+const HOSTED_TERRAIN_PLACEMENT_CAP = 250_000;
 const HOSTED_MCP_AUTH_ERROR = "HOSTED_MCP_AUTH_REQUIRED";
 const HOSTED_MCP_RATE_ERROR = "HOSTED_MCP_RATE_LIMITED";
 const HOSTED_MCP_PAYMENT_ERROR = "HOSTED_MCP_STUDIO_REQUIRED";
@@ -291,13 +506,26 @@ const PUBLIC_CONNECTOR_TOOLS = new Set([
   "search_blocks",
   "get_style_profile",
   "estimate_build",
+  "plan_build",
   "generate_build_candidates",
   "compile_build",
+  "compile_procedural_build",
+  "inspect_procedural_build",
+  "revise_component",
   "validate_build",
   "validate_build_contract",
   "audit_build",
   "review_build",
   "analyze_world_region",
+  "analyze_terrain_fit",
+  "preview_terrain_fit",
+  "confirm_terrain_install",
+  "start_compile_task",
+  "get_task_status",
+  "list_tasks",
+  "cancel_task",
+  "get_model_status",
+  "get_diagnostics",
   "export_build",
   "export_bedrock_project",
   "revise_build",
@@ -454,8 +682,73 @@ const runtimeCompileLimits = boundedRemoteMode
   ? { maximumPlacements: HOSTED_BUILD_PLACEMENT_CAP, maximumPlacementAttempts: HOSTED_BUILD_ATTEMPT_CAP }
   : { maximumPlacements: LOCAL_BUILD_PLACEMENT_CAP, maximumPlacementAttempts: 8_000_000 };
 
-function compileBuildForRuntime(input: BuildInput) {
-  return compileBuild(input, runtimeCompileLimits);
+function configuredModelPolicyMode(): ModelPolicyMode {
+  const value = process.env.BLOCKWRIGHT_MODEL_POLICY_MODE?.trim();
+  return value && ["none", "local-only", "cloud-disabled", "allow-cloud"].includes(value)
+    ? value as ModelPolicyMode
+    : "none";
+}
+
+let modelProviderSettings: ModelProviderSettings = {
+  mode: configuredModelPolicyMode(),
+  fallbackPolicy: "disabled",
+  routes: {
+    planning: ["ollama-local", "lm-studio-local", "llama-cpp-local"],
+    critique: ["ollama-local", "lm-studio-local", "llama-cpp-local"],
+    revision: ["ollama-local", "lm-studio-local", "llama-cpp-local"],
+  },
+};
+let modelProviderConfigs: ModelProviderConfig[] = [...DEFAULT_LOCAL_MODEL_ENDPOINTS];
+const runtimeStateRoot = resolveRuntimeStateRoot();
+const modelSettingsPath = resolve(runtimeStateRoot, "settings", "models.json");
+const modelSettingsStore = new SecretFreeModelSettingsStore(new FileModelSettingsStorage(modelSettingsPath));
+const credentialStore = createCredentialStore();
+let modelSettingsStartupIssue: string | undefined;
+if (!boundedRemoteMode) {
+  try {
+    const savedModelSettings = await modelSettingsStore.load();
+    if (savedModelSettings) {
+      modelProviderSettings = savedModelSettings.settings;
+      modelProviderConfigs = savedModelSettings.providers;
+    }
+  } catch (error) {
+    modelSettingsStartupIssue = sanitizeDiagnosticText(error, 1_000);
+  }
+}
+let modelProviderRegistry = new ModelProviderRegistry(modelProviderConfigs, modelProviderSettings, { credentialResolver: credentialStore });
+let localHardwareProfilePromise: ReturnType<typeof discoverLocalHardware> | undefined;
+function localHardwareProfile() {
+  localHardwareProfilePromise ??= discoverLocalHardware();
+  return localHardwareProfilePromise;
+}
+const taskJournalPath = resolve(runtimeStateRoot, "tasks", "tasks.json");
+let taskManagerStartupIssue: string | undefined;
+const taskOwners = new Map<string, string>();
+const taskBuildResults = new Map<string, { build: ReturnType<typeof summarizeBuild> & { cacheRef?: string }; cacheRef: string }>();
+const compileTaskManagerPromise = TaskManager.create<BuildRecord>({
+  concurrency: 1,
+  maximumQueued: boundedRemoteMode ? 4 : 8,
+  maximumRetained: boundedRemoteMode ? 32 : 64,
+  ...(boundedRemoteMode ? {} : { journal: new FileTaskJournal(taskJournalPath) }),
+  logReference: "logs/blockwright.log",
+}).catch(async (error) => {
+  taskManagerStartupIssue = sanitizeDiagnosticText(error);
+  return TaskManager.create<BuildRecord>({
+    concurrency: 1,
+    maximumQueued: boundedRemoteMode ? 4 : 8,
+    maximumRetained: boundedRemoteMode ? 32 : 64,
+    logReference: "logs/blockwright.log",
+  });
+}).then((manager) => {
+  if (!boundedRemoteMode) for (const task of manager.list()) taskOwners.set(task.id, "local");
+  return manager;
+});
+
+function compileBuildForRuntime(input: BuildInput, previousComponentGraph?: BuildRecord["componentGraph"]) {
+  return compileBuild(input, {
+    ...runtimeCompileLimits,
+    ...(previousComponentGraph ? { previousComponentGraph } : {}),
+  });
 }
 let hostedStore: HostedServiceStore | undefined;
 let hostedStartupIssue: string | undefined;
@@ -500,6 +793,17 @@ const hostedBuildViewCache = new PrincipalBuildViewCache({
   maxRecordsPerPrincipal: HOSTED_BUILD_VIEW_CACHE_MAX_RECORDS_PER_PRINCIPAL,
   ttlMs: HOSTED_BUILD_VIEW_CACHE_TTL_MS,
 });
+type TerrainPreviewCacheEntry = {
+  preview: TerrainFitPreview;
+  principalKey: string;
+  expiresAt: number;
+  weight: number;
+};
+const terrainPreviewCache = new Map<string, TerrainPreviewCacheEntry>();
+const TERRAIN_PREVIEW_CACHE_TTL_MS = 15 * 60_000;
+const TERRAIN_PREVIEW_CACHE_MAX_RECORDS = 32;
+const TERRAIN_PREVIEW_CACHE_MAX_WEIGHT = 2_000_000;
+const HOSTED_TERRAIN_PREVIEW_CACHE_MAX_WEIGHT = 500_000;
 let hostedImportsInFlight = 0;
 let hostedArtifactsInFlight = 0;
 const hostedArtifactTenantsInFlight = new Set<string>();
@@ -508,6 +812,238 @@ function hostedCachePrincipal() {
   const principal = hostedRequestContext.getStore();
   if (!principal) throw new Error("HOSTED_MCP_AUTH_REQUIRED: hosted build access requires an authenticated request context.");
   return principal;
+}
+
+function terrainPreviewPrincipalKey() {
+  if (!boundedRemoteMode) return "local";
+  const principal = hostedRequestContext.getStore();
+  if (!principal) throw new Error("HOSTED_MCP_AUTH_REQUIRED: TerrainFit preview access requires an authenticated request context.");
+  return `${principal.tenantId}\0${principal.userId}`;
+}
+
+function terrainPreviewWeight(preview: TerrainFitPreview) {
+  return preview.operations.reduce((total, operation) => {
+    if (operation.op === "grade_surface") return total + operation.columns.length;
+    if (operation.op === "retaining_structure") return total + operation.columns.length;
+    if (operation.op === "connect_path") return total + operation.points.length;
+    if (operation.op === "water_interface") return total + operation.coordinates.length;
+    return total + 1;
+  }, preview.candidates.length + preview.waterConflicts.length + preview.protectedConflicts.length);
+}
+
+function pruneTerrainPreviewCache(now = Date.now()) {
+  for (const [reference, entry] of terrainPreviewCache) {
+    if (entry.expiresAt <= now) terrainPreviewCache.delete(reference);
+  }
+  const maximumWeight = boundedRemoteMode ? HOSTED_TERRAIN_PREVIEW_CACHE_MAX_WEIGHT : TERRAIN_PREVIEW_CACHE_MAX_WEIGHT;
+  let totalWeight = [...terrainPreviewCache.values()].reduce((sum, entry) => sum + entry.weight, 0);
+  while (terrainPreviewCache.size > TERRAIN_PREVIEW_CACHE_MAX_RECORDS || totalWeight > maximumWeight) {
+    const oldest = terrainPreviewCache.entries().next().value as [string, TerrainPreviewCacheEntry] | undefined;
+    if (!oldest) break;
+    terrainPreviewCache.delete(oldest[0]);
+    totalWeight -= oldest[1].weight;
+  }
+}
+
+function cacheTerrainFitPreview(preview: TerrainFitPreview) {
+  verifyTerrainFitPreview(preview);
+  const weight = terrainPreviewWeight(preview);
+  const maximumWeight = boundedRemoteMode ? HOSTED_TERRAIN_PREVIEW_CACHE_MAX_WEIGHT : TERRAIN_PREVIEW_CACHE_MAX_WEIGHT;
+  if (weight > maximumWeight) {
+    throw new Error(`TERRAIN_FIT_PREVIEW_TOO_LARGE: this preview contains ${weight.toLocaleString()} bounded operation records; the current runtime permits at most ${maximumWeight.toLocaleString()} cached records. Reduce the region, footprint, or blend radius.`);
+  }
+  pruneTerrainPreviewCache();
+  const reference = boundedRemoteMode
+    ? `tfc_${randomBytes(24).toString("base64url")}.${preview.id}`
+    : preview.id;
+  terrainPreviewCache.delete(reference);
+  terrainPreviewCache.set(reference, {
+    preview: structuredClone(preview),
+    principalKey: terrainPreviewPrincipalKey(),
+    expiresAt: Date.now() + TERRAIN_PREVIEW_CACHE_TTL_MS,
+    weight,
+  });
+  pruneTerrainPreviewCache();
+  return reference;
+}
+
+function cachedTerrainFitPreview(reference: string, expectedHash?: string) {
+  pruneTerrainPreviewCache();
+  const entry = terrainPreviewCache.get(reference);
+  if (!entry || entry.principalKey !== terrainPreviewPrincipalKey()) {
+    throw new Error("TERRAIN_FIT_PREVIEW_CACHE_MISS: this preview is unavailable or expired. Analyze the terrain again before confirming it.");
+  }
+  if (expectedHash !== undefined && expectedHash !== entry.preview.hash) {
+    throw new Error("TERRAIN_FIT_CONFIRMATION_MISMATCH: confirmation must name the exact immutable preview hash.");
+  }
+  verifyTerrainFitPreview(entry.preview);
+  terrainPreviewCache.delete(reference);
+  terrainPreviewCache.set(reference, { ...entry, expiresAt: Date.now() + TERRAIN_PREVIEW_CACHE_TTL_MS });
+  return structuredClone(entry.preview);
+}
+
+function terrainOperationCounts(preview: TerrainFitPreview) {
+  const counts = {
+    gradingColumns: 0,
+    retainingColumns: 0,
+    pathPoints: 0,
+    waterCoordinates: 0,
+    vegetationRestoration: false,
+  };
+  for (const operation of preview.operations) {
+    if (operation.op === "grade_surface") counts.gradingColumns += operation.columns.length;
+    else if (operation.op === "retaining_structure") counts.retainingColumns += operation.columns.length;
+    else if (operation.op === "connect_path") counts.pathPoints += operation.points.length;
+    else if (operation.op === "water_interface") counts.waterCoordinates += operation.coordinates.length;
+    else if (operation.op === "restore_vegetation") counts.vegetationRestoration = true;
+  }
+  return counts;
+}
+
+function terrainCandidateSummary(candidate: TerrainFitPreview["selected"]) {
+  return {
+    id: candidate.id,
+    anchor: candidate.anchor,
+    rotation: candidate.rotation,
+    mirrorX: candidate.mirrorX,
+    totalScore: candidate.score.total,
+    excavation: candidate.score.excavation,
+    fill: candidate.score.fill,
+    protectedConflicts: candidate.score.protectedConflicts,
+    structureConflicts: candidate.score.structureConflicts,
+    waterConflicts: candidate.score.waterConflicts,
+  };
+}
+
+function terrainFitSummary(preview: TerrainFitPreview, previewRef: string) {
+  return {
+    previewRef,
+    previewId: preview.id,
+    previewHash: preview.hash,
+    buildId: preview.buildId,
+    buildHash: preview.buildHash,
+    regionHash: preview.regionHash,
+    risk: preview.risk,
+    selected: terrainCandidateSummary(preview.selected),
+    candidates: preview.candidates.map(terrainCandidateSummary),
+    cutVolume: preview.cutVolume,
+    fillVolume: preview.fillVolume,
+    changedTerrainArea: preview.changedTerrainArea,
+    maximumCutDepth: preview.maximumCutDepth,
+    maximumFillHeight: preview.maximumFillHeight,
+    blendZones: preview.blendZones,
+    retainingWalls: preview.retainingWalls,
+    pathConnection: {
+      status: preview.pathConnection.status,
+      length: preview.pathConnection.length,
+      crossesWater: preview.pathConnection.crossesWater,
+    },
+    conflictTotals: {
+      water: preview.waterConflicts.length,
+      protected: preview.protectedConflicts.length,
+      structures: preview.structureConflicts.length,
+    },
+    sampledNativeMaterials: preview.sampledNativeMaterials,
+    sampledBiomes: preview.sampledBiomes,
+    operationCounts: terrainOperationCounts(preview),
+    warnings: preview.warnings,
+  };
+}
+
+function terrainDetailPage(preview: TerrainFitPreview, offset: number, limit: number) {
+  const groups = preview.operations.map((operation) => {
+    if (operation.op === "grade_surface") return { op: operation.op, items: operation.columns };
+    if (operation.op === "retaining_structure") return { op: operation.op, items: operation.columns };
+    if (operation.op === "connect_path") return { op: operation.op, items: operation.points };
+    if (operation.op === "water_interface") return { op: operation.op, items: operation.coordinates };
+    return { op: operation.op, items: [operation] };
+  });
+  const total = groups.reduce((sum, group) => sum + group.items.length, 0);
+  const detail: Array<{ operation: string; operationIndex: number; value: unknown }> = [];
+  let cursor = 0;
+  for (const group of groups) {
+    if (detail.length >= limit) break;
+    const groupEnd = cursor + group.items.length;
+    if (offset < groupEnd && offset + limit > cursor) {
+      const first = Math.max(0, offset - cursor);
+      const last = Math.min(group.items.length, offset + limit - cursor);
+      for (let index = first; index < last; index += 1) {
+        detail.push({ operation: group.op, operationIndex: index, value: group.items[index] });
+      }
+    }
+    cursor = groupEnd;
+  }
+  const grading = preview.operations.find((operation) => operation.op === "grade_surface");
+  return {
+    page: { offset, returned: detail.length, total },
+    detail,
+    context: {
+      interface: preview.interface,
+      selected: preview.selected,
+      grading: grading?.op === "grade_surface" ? { bounds: grading.bounds, strataByBiome: grading.strataByBiome } : undefined,
+    },
+  };
+}
+
+function taskPrincipalKey() {
+  if (!boundedRemoteMode) return "local";
+  const principal = hostedRequestContext.getStore();
+  if (!principal) throw new Error("HOSTED_MCP_AUTH_REQUIRED: task access requires an authenticated request context.");
+  return `${principal.tenantId}\0${principal.userId}`;
+}
+
+function assertTaskOwner(taskId: string) {
+  if (taskOwners.get(taskId) !== taskPrincipalKey()) throw new Error("TASK_NOT_FOUND: the requested task is unavailable in this workspace.");
+}
+
+function pruneTaskAuxiliaryState(tasks: TaskSnapshot[]) {
+  const retained = new Set(tasks.map(({ id }) => id));
+  for (const taskId of taskOwners.keys()) if (!retained.has(taskId)) taskOwners.delete(taskId);
+  for (const taskId of taskBuildResults.keys()) if (!retained.has(taskId)) taskBuildResults.delete(taskId);
+}
+
+async function taskResultForClient(taskId: string) {
+  assertTaskOwner(taskId);
+  const manager = await compileTaskManagerPromise;
+  let task = manager.get(taskId);
+  if (!task) throw new Error("TASK_NOT_FOUND: the requested task is unavailable in this workspace.");
+  let committed = taskBuildResults.get(taskId);
+  const result = manager.getResult(taskId);
+  if (!committed && result) {
+    const build = rememberBuild(result);
+    const cacheRef = cacheBuildForView(build);
+    committed = { build: buildSummaryForClient(build, cacheRef), cacheRef };
+    taskBuildResults.set(taskId, committed);
+    manager.takeResult(taskId);
+    task = manager.get(taskId)!;
+  }
+  // Once the manager result has been committed into the bounded build cache it
+  // is intentionally consumed from worker memory. At the API boundary the
+  // result is still available, now as the immutable build summary below, so do
+  // not expose the manager's post-consumption bookkeeping flag as a false
+  // client-facing claim.
+  const clientTask = exposeCommittedTaskResult(task, Boolean(committed));
+  return { task: clientTask, ...(committed ? { build: committed.build } : {}) };
+}
+
+async function submitCompileTask(input: BuildInput, owner: string, retryOf?: string) {
+  const manager = await compileTaskManagerPromise;
+  if (retryOf) {
+    const currentOwner = taskOwners.get(retryOf);
+    if (currentOwner !== owner) throw new Error("TASK_NOT_FOUND: the requested retry task is unavailable in this workspace.");
+  }
+  const task = await manager.submit({
+    operation: `Compile ${input.name}`,
+    ...(retryOf ? { retryOf } : {}),
+    resultReference: (build) => build.id,
+    run: ({ signal, report }) => runCompileTask(input, {
+      signal,
+      onProgress: report,
+      compileLimits: runtimeCompileLimits,
+    }),
+  });
+  taskOwners.set(task.id, owner);
+  return task;
 }
 
 const PUBLIC_CACHE_REFERENCE_PATTERN = /^bwc_([A-Za-z0-9_-]{32})\.(bw_[a-f0-9]{12})$/;
@@ -1008,6 +1544,180 @@ const server = new McpServer(
   )
   .registerTool(
     {
+      ...toolPresentation("Get Model Status", "Checking model policy…", "Model status ready"),
+      name: "get_model_status",
+      description: "Return the active model privacy policy and sanitized provider health. No provider is invoked for design automatically; deterministic compile, edit, TerrainFit, validation, and export remain fully model-independent.",
+      inputSchema: { providerId: z.string().min(1).max(80).optional().describe("Optional exact provider id; omit to list every configured provider status.") },
+      outputSchema: { policy: z.object({ mode: z.enum(["none", "local-only", "cloud-disabled", "allow-cloud"]), fallbackPolicy: z.enum(["disabled", "same-privacy", "explicit"]) }), providers: z.array(modelProviderStatusSchema) },
+      annotations: { title: "Get Model Status", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ providerId }) => {
+      if (boundedRemoteMode && providerId && providerId !== "none") throw new Error("MODEL_PROVIDER_UNAVAILABLE: this remote runtime has no configured tenant model provider.");
+      const providers = providerId
+        ? [await modelProviderRegistry.getStatus(providerId)]
+        : boundedRemoteMode
+          ? [await modelProviderRegistry.getStatus("none")]
+          : await modelProviderRegistry.listStatus();
+      const available = providers.filter(({ availability }) => availability === "available").length;
+      return {
+        structuredContent: { policy: { mode: modelProviderSettings.mode, fallbackPolicy: modelProviderSettings.fallbackPolicy ?? "disabled" }, providers },
+        content: [{ type: "text", text: `Model policy is ${modelProviderSettings.mode}; ${available} of ${providers.length} reported provider(s) are available. Models are optional and were not invoked.` }],
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Discover Local Models", "Probing loopback model servers…", "Local model discovery complete"),
+      name: "discover_local_models",
+      description: "Probe only the conventional loopback endpoints for Ollama, LM Studio, and llama.cpp. Returns sanitized endpoints, discovered model names, and measured latency; it never sends a build or prompt.",
+      inputSchema: { timeoutMs: z.number().int().min(100).max(30_000).default(2_500).describe("Per-provider discovery deadline in milliseconds.") },
+      outputSchema: {
+        providers: z.array(z.object({
+          id: z.string(), label: z.string(), kind: z.enum(["ollama", "openai-compatible-local"]), family: z.enum(["generic", "lm-studio", "llama.cpp"]).optional(), baseUrl: z.string(), available: z.boolean(), latencyMs: z.number().min(0).optional(), models: z.array(z.string()), errorCode: z.string().optional(),
+        })),
+      },
+      annotations: { title: "Discover Local Models", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ timeoutMs }) => {
+      assertLocalOperation("local model discovery");
+      const providers = await discoverLocalModelProviders({ timeoutMs });
+      return {
+        structuredContent: { providers },
+        content: [{ type: "text", text: `Probed ${providers.length} loopback model endpoint(s); ${providers.filter(({ available }) => available).length} are available. No build content or prompt was sent.` }],
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Test Model Provider", "Testing provider health…", "Provider test complete"),
+      name: "test_model_provider",
+      description: "Run the selected provider's sanitized health/model-list probe only. This does not submit a planning, critique, or revision prompt.",
+      inputSchema: { providerId: z.string().min(1).max(80).describe("Exact configured provider id returned by get_model_status.") },
+      outputSchema: { provider: modelProviderStatusSchema, error: z.object({ code: z.string(), message: z.string(), retrySafe: z.boolean(), recommendedAction: z.string() }).optional() },
+      annotations: { title: "Test Model Provider", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ providerId }) => {
+      assertLocalOperation("model provider testing");
+      try {
+        const provider = await modelProviderRegistry.getStatus(providerId);
+        return { structuredContent: { provider }, content: [{ type: "text", text: `${provider.label} is ${provider.availability}${provider.latencyMs === undefined ? "" : ` at ${provider.latencyMs} ms`}. No model prompt was submitted.` }] };
+      } catch (error) {
+        const summary = providerErrorSummary(error);
+        const provider = await modelProviderRegistry.getStatus("none");
+        return { structuredContent: { provider, error: summary }, content: [{ type: "text", text: `${summary.code}: ${summary.message}` }], isError: true };
+      }
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Get Runtime Diagnostics", "Collecting bounded diagnostics…", "Runtime diagnostics ready"),
+      name: "get_diagnostics",
+      description: "Return a bounded, secret-free operational snapshot: readiness checks, truthful task-state counts, model privacy mode, compile limits, uptime, and sanitized startup issues. It never includes prompts, credentials, environment-variable values, or build placements.",
+      inputSchema: {},
+      outputSchema: {
+        diagnostics: z.object({
+          version: z.string(),
+          mode: z.enum(["local", "remote"]),
+          uptimeSeconds: z.number().int().nonnegative(),
+          readiness: z.record(z.string(), z.object({ ok: z.boolean(), code: z.string() })),
+          taskCounts: z.record(z.string(), z.number().int().nonnegative()),
+          modelPolicy: z.enum(["none", "local-only", "cloud-disabled", "allow-cloud"]),
+          compileLimits: z.object({ maximumPlacements: z.number().int().positive(), maximumPlacementAttempts: z.number().int().positive() }),
+          startupIssues: z.array(z.object({ component: z.string(), message: z.string() })),
+        }),
+      },
+      annotations: { title: "Get Runtime Diagnostics", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async () => {
+      const manager = await compileTaskManagerPromise;
+      const visibleTasks = manager.list().filter(({ id }) => taskOwners.get(id) === taskPrincipalKey());
+      const startupIssues = [
+        ...(taskManagerStartupIssue ? [{ component: "task-journal", message: taskManagerStartupIssue }] : []),
+        ...(modelSettingsStartupIssue && !boundedRemoteMode ? [{ component: "model-settings", message: modelSettingsStartupIssue }] : []),
+        ...(hostedStartupIssue ? [{ component: "hosted-storage", message: sanitizeDiagnosticText(hostedStartupIssue, 1_000) }] : []),
+      ];
+      const diagnostics = {
+        version: APP_VERSION,
+        mode: boundedRemoteMode ? "remote" as const : "local" as const,
+        uptimeSeconds: Math.floor((Date.now() - startedAt) / 1_000),
+        readiness: readinessChecks(),
+        taskCounts: Object.fromEntries(TASK_STATES.map((state) => [state, visibleTasks.filter((task) => task.state === state).length])),
+        modelPolicy: modelProviderSettings.mode,
+        compileLimits: runtimeCompileLimits,
+        startupIssues,
+      };
+      return { structuredContent: { diagnostics }, content: [{ type: "text", text: `Blockwright ${APP_VERSION} reports ${startupIssues.length ? `${startupIssues.length} sanitized startup issue(s)` : "no startup issues"}; ${visibleTasks.length} retained task(s) are visible in this workspace.` }] };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Discover Local Hardware", "Reading local hardware facts…", "Hardware facts ready"),
+      name: "discover_local_hardware",
+      description: "Read CPU, memory, disk, and Windows-reported GPU facts for model-fit guidance. Unknown or unreported values remain explicitly unknown; this tool never fabricates VRAM or benchmark estimates.",
+      inputSchema: {},
+      outputSchema: { hardware: z.unknown() },
+      annotations: { title: "Discover Local Hardware", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async () => {
+      assertLocalOperation("local hardware discovery");
+      const hardware = await localHardwareProfile();
+      return { structuredContent: { hardware }, content: [{ type: "text", text: "Returned OS-reported hardware facts. Any unavailable metric is marked unknown rather than estimated." }] };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Get Model Configuration", "Reading secret-free model settings…", "Model settings ready"),
+      name: "get_model_configuration",
+      description: "Return the local model privacy/routing policy, sanitized provider configurations, and operating-system credential references. Credential values are never read into the response.",
+      inputSchema: {},
+      outputSchema: { document: z.unknown(), credentialReferences: z.array(z.object({ reference: z.string() })) },
+      annotations: { title: "Get Model Configuration", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async () => {
+      assertLocalOperation("model configuration reading");
+      const document = { schemaVersion: 1 as const, settings: modelProviderSettings, providers: modelProviderConfigs.map((provider) => publicModelProviderConfig(provider)) };
+      const credentialReferences = await credentialStore.list();
+      return { structuredContent: { document, credentialReferences }, content: [{ type: "text", text: `Returned ${document.providers.length} secret-free provider configuration(s) and ${credentialReferences.length} credential reference(s).` }] };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Save Model Configuration", "Validating model policy…", "Model policy saved"),
+      name: "save_model_configuration",
+      description: "Validate and atomically persist a complete local model settings document. Plaintext credential fields are rejected; cloud providers may contain only an operating-system credentialRef. Replaces the in-memory registry only after the file commit succeeds.",
+      inputSchema: { document: z.unknown().describe("Complete schemaVersion 1 model settings document containing settings and provider definitions; never include a secret value.") },
+      outputSchema: { document: z.unknown(), providers: z.array(modelProviderStatusSchema) },
+      annotations: { title: "Save Model Configuration", readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ document }) => {
+      assertLocalOperation("model configuration saving");
+      const saved = await modelSettingsStore.save(document as ModelSettingsDocument);
+      modelProviderSettings = saved.settings;
+      modelProviderConfigs = saved.providers;
+      modelProviderRegistry = new ModelProviderRegistry(modelProviderConfigs, modelProviderSettings, { credentialResolver: credentialStore });
+      modelSettingsStartupIssue = undefined;
+      const providers = await modelProviderRegistry.listStatus();
+      return { structuredContent: { document: saved, providers }, content: [{ type: "text", text: "Saved the secret-free model configuration atomically. Credential values remain in the operating-system credential service." }] };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Open Procedural Editor", "Preparing editor address…", "Editor address ready"),
+      name: "open_procedural_editor",
+      description: "Return the PC-local no-model procedural editor address. The editor can create, inspect, compile, and revise Design IR without invoking a model.",
+      inputSchema: {},
+      outputSchema: { url: z.string(), modelsRequired: z.literal(false) },
+      annotations: { title: "Open Procedural Editor", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async () => {
+      assertLocalOperation("procedural editor");
+      const port = /^\d{1,5}$/.test(process.env.__PORT ?? "") ? process.env.__PORT! : "3000";
+      const url = `http://127.0.0.1:${port}/assets/blockwright/index.html#editor`;
+      return { structuredContent: { url, modelsRequired: false as const }, content: [{ type: "text", text: `Open the PC-local procedural editor at ${url}. It does not require or invoke a model.` }] };
+    },
+  )
+  .registerTool(
+    {
       ...toolPresentation("Check Java Updates", "Checking Mojang releases…", "Java update check complete"),
       name: "check_java_updates",
       description: "Check Mojang's live Java release manifest and compare it with Blockwright's locally synchronized registries. This does not download a client JAR or change files.",
@@ -1241,7 +1951,7 @@ const server = new McpServer(
       name: "estimate_build",
       description: "Run a safety preflight before generation: volume, occupied blocks, materials, chunks, commands, export bytes, memory, time, and Minecraft/WorldEdit risk.",
       inputSchema: {
-        ...buildInputSchema,
+        ...buildToolInputSchema,
         riskThresholds: z.object({
           amberOccupiedBlocks: z.number().int().positive().optional().describe("Occupied-block count that begins amber risk."),
           redOccupiedBlocks: z.number().int().positive().optional().describe("Occupied-block count that begins red risk."),
@@ -1262,15 +1972,80 @@ const server = new McpServer(
   )
   .registerTool(
     {
+      ...toolPresentation("Plan Build", "Normalizing intent and constraints…", "Build plan ready"),
+      name: "plan_build",
+      description: "Normalize the full build intent into a deterministic architectural plan and safety preflight without expanding voxels. Model assistance is off by default and, when explicitly requested, returns advisory text only; it never replaces the canonical Design IR or deterministic compiler.",
+      inputSchema: {
+        ...buildToolInputSchema,
+        modelAssistance: z.object({
+          use: z.enum(["none", "optional", "required"]).default("none").describe("Explicitly controls whether any configured provider may receive the bounded planning context."),
+          providerId: z.string().min(1).max(80).optional().describe("Optional exact configured provider id; omission lets capability routing select an eligible provider."),
+          model: z.string().min(1).max(240).optional().describe("Optional provider-specific model override."),
+          temperature: z.number().min(0).max(2).optional().describe("Optional provider sampling temperature from zero to two."),
+          maximumOutputTokens: z.number().int().min(64).max(16_384).optional().describe("Maximum advisory model output tokens."),
+        }).optional().describe("Explicit opt-in advisory model assistance; deterministic planning remains canonical."),
+      },
+      outputSchema: {
+        input: normalizedBuildInputTransportSchema,
+        plan: architecturalPlanOutputSchema,
+        preflight: buildPreflightOutputSchema,
+        modelAssist: z.unknown(),
+      },
+      annotations: { title: "Plan Build", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async (input) => {
+      const { modelAssistance, ...buildInput } = input;
+      const planned = planBuildInput(buildInput as BuildInput);
+      const use = modelAssistance?.use ?? "none";
+      let modelAssist: unknown = { status: "not_used", reason: "not_requested", attemptedProviderIds: [] };
+      if (use !== "none") {
+        const context = {
+          sourceBrief: planned.input.sourceBrief,
+          style: planned.input.style,
+          edition: planned.input.edition,
+          version: planned.input.version,
+          dimensions: planned.input.dimensions,
+          features: planned.input.features,
+          palette: planned.input.palette,
+          seed: planned.input.seed,
+          componentIds: planned.input.design.schemaVersion === 2 ? planned.input.design.components.map(({ id }) => id) : [],
+        };
+        try {
+          modelAssist = await modelProviderRegistry.invoke({
+            task: "planning",
+            providerId: modelAssistance?.providerId,
+            model: modelAssistance?.model,
+            temperature: modelAssistance?.temperature,
+            maximumOutputTokens: modelAssistance?.maximumOutputTokens,
+            required: use === "required",
+            allowRetry: false,
+            messages: [
+              { role: "system", content: "You are an optional Blockwright design critic. Give concise architectural risks and improvements. Do not emit voxel arrays, claim compilation, or alter locked constraints." },
+              { role: "user", content: JSON.stringify(context) },
+            ],
+          });
+        } catch (error) {
+          if (use === "required") throw error;
+          modelAssist = { status: "unavailable", error: providerErrorSummary(error) };
+        }
+      }
+      return {
+        structuredContent: { ...planned, modelAssist },
+        content: [{ type: "text", text: `Planned ${planned.input.name} without voxel expansion. Preflight is ${planned.preflight.overallRisk} risk across approximately ${planned.preflight.estimatedOccupiedBlocks.toLocaleString()} occupied blocks. Model assistance: ${use === "none" ? "not requested" : (modelAssist as { status?: string }).status ?? "completed"}.` }],
+      };
+    },
+  )
+  .registerTool(
+    {
       ...toolPresentation("Generate Build Candidates", "Generating distinct plans…", "Build candidates ready"),
       name: "generate_build_candidates",
       description: "Generate and compare deterministic architectural candidates. Style changes plan geometry, room organization, structure, roof, openings, and landscape—not only blocks.",
       inputSchema: {
-        ...buildInputSchema,
+        ...buildToolInputSchema,
         candidateCount: z.number().int().min(1).max(5).default(1).describe("Number of structurally distinct candidates to generate. Local mode supports up to five; hosted MCP permits exactly one per request."),
         recentPlans: z.array(architecturalPlanOutputSchema).max(20).optional().describe("Recent architectural plans to penalize for similarity."),
       },
-      outputSchema: { candidates: z.array(buildCandidateOutputSchema).describe("Candidate summaries, plans, fingerprints, and maximum structural similarity scores.") },
+      outputSchema: { candidates: z.array(buildCandidateTransportSchema).describe("Candidate summaries, plans, fingerprints, and maximum structural similarity scores.") },
       annotations: { title: "Generate Build Candidates", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     },
     async (input) => {
@@ -1298,8 +2073,8 @@ const server = new McpServer(
       ...toolPresentation("Compile Exact Build", "Compiling exact placements…", "Exact build compiled"),
       name: "compile_build",
       description: "Compile one exact deterministic Minecraft voxel record. Complex or large briefs must include the complete sourceBrief plus a generic design program whose hard requirements map to generated elements. Unsupported or omitted coverage is rejected; no generic shell is substituted. This tool returns data only and never opens a webpage or 3D viewer. Call review_build once only when the user explicitly requests visual review.",
-      inputSchema: buildInputSchema,
-      outputSchema: { build: buildSummaryOutputSchema.describe("Immutable build summary with hash, bounds, plan, counts, validation, and registry provenance.") },
+      inputSchema: buildToolInputSchema,
+      outputSchema: { build: buildSummaryTransportSchema.describe("Immutable build summary with hash, bounds, plan, counts, validation, and registry provenance.") },
       annotations: { title: "Compile Exact Build", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
     },
     async (input) => {
@@ -1311,6 +2086,181 @@ const server = new McpServer(
         ? `Contract valid: ${build.contract.summary.passed} hard requirement(s) passed.`
         : `Contract invalid: ${build.contract.summary.failed} failed, ${build.contract.summary.unsupported} unsupported, ${build.contract.summary.unevaluated} unevaluated.`;
       return { structuredContent: { build: buildSummaryForClient(build, cacheRef) }, content: [{ type: "text", text: `${build.input.name} compiled to ${build.placements.length.toLocaleString()} exact placements. ${contractStatus} Hash: ${build.hash.slice(0, 12)}. No viewer was opened.` }] };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Compile Procedural Build", "Compiling component graph…", "Procedural build compiled"),
+      name: "compile_procedural_build",
+      description: "Compile a canonical Design IR v2 component graph into exact deterministic Minecraft blocks. Templates remain referenced until expansion, destructive geometry stays sparse, and the summary reports component hashes, cache reuse, rebuilds, and conflicts. Large placements remain server-side.",
+      inputSchema: buildToolInputSchema,
+      outputSchema: { build: buildSummaryTransportSchema },
+      annotations: { title: "Compile Procedural Build", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async (input) => {
+      if (input.design?.schemaVersion !== 2) throw new Error("DESIGN_IR_V2_REQUIRED: compile_procedural_build requires a schemaVersion 2 design with canonical components and templates.");
+      assertHostedBuildWorkload(input as BuildInput, "procedural build compilation");
+      consumeHostedBuildWork("procedural build compilation");
+      const build = rememberBuild(compileBuildForRuntime(input as BuildInput));
+      const cacheRef = cacheBuildForView(build);
+      return {
+        structuredContent: { build: buildSummaryForClient(build, cacheRef) },
+        content: [{ type: "text", text: `${build.input.name} compiled from ${build.componentGraph?.components.length ?? 0} components to ${build.placements.length.toLocaleString()} exact placements; ${build.compileReport?.reused.length ?? 0} component(s) were reused and ${build.compileReport?.rebuilt.length ?? 0} rebuilt. Hash: ${build.hash.slice(0, 12)}.` }],
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Inspect Procedural Build", "Reading component evidence…", "Procedural evidence ready"),
+      name: "inspect_procedural_build",
+      description: "Inspect a cached procedural build summary and one bounded placement page, optionally narrowed to a component. Exact placement data is returned only in private tool metadata; the structured response stays compact.",
+      inputSchema: {
+        build: buildReferenceSchema,
+        componentId: z.string().min(1).max(160).optional().describe("Optional stable component id used to narrow the placement page and component evidence."),
+        offset: z.number().int().nonnegative().default(0).describe("Zero-based placement-page offset after optional component filtering."),
+        limit: z.number().int().min(1).max(BUILD_VIEW_PAGE_SIZE).default(BUILD_VIEW_INITIAL_PAGE_SIZE).describe("Maximum exact placements returned in private tool metadata."),
+      },
+      outputSchema: {
+        build: buildSummaryTransportSchema,
+        component: z.unknown().optional(),
+        page: z.object({ buildId: z.string(), offset: z.number().int().nonnegative(), returned: z.number().int().nonnegative(), total: z.number().int().nonnegative() }),
+      },
+      annotations: { title: "Inspect Procedural Build", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ build: value, componentId, offset, limit }) => {
+      const { build, pageReference } = cachedBuildForView(value);
+      if (!build.componentGraph) throw new Error("PROCEDURAL_COMPONENT_GRAPH_REQUIRED: this build has no Design IR v2 component graph.");
+      const component = componentId ? build.componentGraph.components.find(({ id }) => id === componentId) : undefined;
+      if (componentId && !component) throw new Error(`COMPONENT_NOT_FOUND: ${componentId} is not part of this build.`);
+      const filtered = componentId ? build.placements.filter((placement) => placement.componentId === componentId) : build.placements;
+      const placements = filtered.slice(offset, offset + limit);
+      const page = { buildId: pageReference, offset, returned: placements.length, total: filtered.length };
+      return {
+        structuredContent: { build: buildSummaryForClient(build, pageReference), ...(component ? { component } : {}), page },
+        content: [{ type: "text", text: component ? `${component.name} contains ${filtered.length.toLocaleString()} exact placements in this immutable build.` : `The build contains ${build.componentGraph.components.length} components and ${filtered.length.toLocaleString()} exact placements.` }],
+        _meta: { placements },
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Revise Procedural Component", "Recompiling affected dependencies…", "Component revision compiled"),
+      name: "revise_component",
+      description: "Replace exactly one Design IR v2 component definition, require a monotonic revision, and deterministically recompile the affected dependency closure. Unchanged geometry/material hashes are reused through the bounded component cache.",
+      inputSchema: {
+        build: buildReferenceSchema,
+        componentId: z.string().min(1).max(160).describe("Stable id of the one component to replace."),
+        component: designComponentOutputSchema.describe("Complete replacement component with an exact one-step monotonic revision."),
+      },
+      outputSchema: { build: buildSummaryTransportSchema },
+      annotations: { title: "Revise Procedural Component", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ build: value, componentId, component }) => {
+      const prior = asBuild(value);
+      if (prior.input.design.schemaVersion !== 2) throw new Error("DESIGN_IR_V2_REQUIRED: component revision requires a schemaVersion 2 build.");
+      const current = prior.input.design.components.find(({ id }) => id === componentId);
+      if (!current) throw new Error(`COMPONENT_NOT_FOUND: ${componentId} is not part of this build.`);
+      const replacement = component as DesignComponent;
+      if (replacement.id !== componentId) throw new Error("COMPONENT_ID_IMMUTABLE: replacement component id must exactly match componentId.");
+      if (replacement.revision.revision !== current.revision.revision + 1 || replacement.revision.parentRevision !== current.revision.revision) {
+        throw new Error(`COMPONENT_REVISION_INVALID: ${componentId} must advance from revision ${current.revision.revision} to ${current.revision.revision + 1} and name ${current.revision.revision} as parentRevision.`);
+      }
+      const design = {
+        ...prior.input.design,
+        components: prior.input.design.components.map((candidate) => candidate.id === componentId ? replacement : candidate),
+      };
+      const nextInput = { ...prior.input, design } as BuildInput;
+      assertHostedBuildWorkload(nextInput, "component revision");
+      consumeHostedBuildWork("component revision");
+      const next = rememberBuild(compileBuildForRuntime(nextInput, prior.componentGraph));
+      const cacheRef = cacheBuildForView(next);
+      return {
+        structuredContent: { build: buildSummaryForClient(next, cacheRef) },
+        content: [{ type: "text", text: `Revised ${componentId} to revision ${replacement.revision.revision}. Rebuilt ${next.compileReport?.rebuilt.length ?? 0} component(s), reused ${next.compileReport?.reused.length ?? 0}, with ${next.compileReport?.conflictCount ?? 0} attributed merge conflict(s). New hash: ${next.hash.slice(0, 12)}.` }],
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Start Compile Task", "Queueing isolated compile…", "Compile task queued"),
+      name: "start_compile_task",
+      description: "Queue a long-running deterministic build compilation in an isolated worker. Returns a stable task id immediately; use get_task_status for truthful phase/work evidence and cancel_task to terminate queued or running work. No model is invoked.",
+      inputSchema: {
+        ...buildToolInputSchema,
+        retryOf: z.string().min(1).max(96).optional().describe("Optional prior task id when the caller is explicitly retrying after reviewing its diagnostic."),
+      },
+      outputSchema: { task: taskSnapshotSchema },
+      annotations: { title: "Start Compile Task", readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    },
+    async (input) => {
+      const { retryOf, ...buildInput } = input;
+      assertHostedBuildWorkload(buildInput as BuildInput, "asynchronous build compilation");
+      consumeHostedBuildWork("asynchronous build compilation");
+      const task = await submitCompileTask(buildInput as BuildInput, taskPrincipalKey(), retryOf);
+      return {
+        structuredContent: { task },
+        content: [{ type: "text", text: `Queued deterministic compile task ${task.id}. Progress reports real phases and known work units; no model was invoked.` }],
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Get Task Status", "Reading task progress…", "Task status ready"),
+      name: "get_task_status",
+      description: "Read one owned compile task's current state, monotonic progress, timing, redacted diagnostic, and completed immutable build summary when available. Large voxel results stay in the server cache.",
+      inputSchema: { taskId: z.string().min(1).max(96).describe("Stable task id returned by start_compile_task.") },
+      outputSchema: { task: taskSnapshotSchema, build: buildSummaryTransportSchema.optional() },
+      annotations: { title: "Get Task Status", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ taskId }) => {
+      const result = await taskResultForClient(taskId);
+      const text = result.task.state === "completed"
+        ? `Task ${taskId} completed${result.build ? ` with immutable build ${result.build.id}` : ""}.`
+        : result.task.state === "failed" || result.task.state === "interrupted"
+          ? `Task ${taskId} ${result.task.state}: ${result.task.diagnostic?.code ?? "TASK_FAILED"}. ${result.task.diagnostic?.recommendedAction ?? "Review the diagnostic before retrying."}`
+          : `Task ${taskId} is ${result.task.state}: ${result.task.progress.operation}.`;
+      return { structuredContent: result, content: [{ type: "text", text }] };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("List Compile Tasks", "Loading task history…", "Task history ready"),
+      name: "list_tasks",
+      description: "List bounded metadata for compile tasks owned by the current local user or hosted principal. Inputs and large results are never journaled or returned here.",
+      inputSchema: {},
+      outputSchema: { tasks: z.array(taskSnapshotSchema), startupIssue: z.string().optional() },
+      annotations: { title: "List Compile Tasks", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async () => {
+      const manager = await compileTaskManagerPromise;
+      const allTasks = manager.list();
+      pruneTaskAuxiliaryState(allTasks);
+      const principalKey = taskPrincipalKey();
+      const tasks = allTasks.filter(({ id }) => taskOwners.get(id) === principalKey);
+      return {
+        structuredContent: { tasks, ...(taskManagerStartupIssue ? { startupIssue: taskManagerStartupIssue } : {}) },
+        content: [{ type: "text", text: `Found ${tasks.length} retained compile task(s) for this workspace.${taskManagerStartupIssue ? " The persistent journal could not be loaded, so this run is using an in-memory fallback." : ""}` }],
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Cancel Compile Task", "Requesting task cancellation…", "Cancellation state updated"),
+      name: "cancel_task",
+      description: "Cancel an owned queued or running compile task. Running synchronous compilation is stopped by terminating its isolated worker; no partial build is published.",
+      inputSchema: { taskId: z.string().min(1).max(96).describe("Stable task id returned by start_compile_task.") },
+      outputSchema: { task: taskSnapshotSchema },
+      annotations: { title: "Cancel Compile Task", readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ taskId }) => {
+      assertTaskOwner(taskId);
+      const manager = await compileTaskManagerPromise;
+      const task = await manager.cancel(taskId);
+      if (!task) throw new Error("TASK_NOT_FOUND: the requested task is unavailable in this workspace.");
+      return {
+        structuredContent: { task },
+        content: [{ type: "text", text: task.state === "cancelled" ? `Task ${taskId} was cancelled; no partial result was published.` : `Task ${taskId} is ${task.state}.` }],
+      };
     },
   )
   .registerTool(
@@ -1445,6 +2395,141 @@ const server = new McpServer(
       const occupiedConflicts = build.placements.filter((p) => occupied.has(keyOf(p))).map(({ x, y, z }) => ({ x, y, z }));
       const protectedConflicts = build.placements.filter((p) => protectedSet.has(keyOf(p))).map(({ x, y, z }) => ({ x, y, z }));
       return { structuredContent: { buildId: build.id, occupiedConflicts: occupiedConflicts.slice(0, 250), protectedConflicts: protectedConflicts.slice(0, 250), totals: { occupied: occupiedConflicts.length, protected: protectedConflicts.length }, cutFill: { cutBlocks: occupiedConflicts.length, estimatedFillBlocks: 0 } }, content: [{ type: "text", text: `World analysis found ${occupiedConflicts.length} occupied and ${protectedConflicts.length} protected-coordinate conflicts.` }] };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Analyze TerrainFit", "Scoring terrain placements…", "TerrainFit analysis ready"),
+      name: "analyze_terrain_fit",
+      description: "Score bounded build placements against terrain height, biome, surface, water, path, protected-region, and structure evidence. Produces an immutable, principal-scoped preview reference with explicit cut/fill, blend, retaining, path, water, vegetation, and risk evidence. This tool never writes a world or schematic.",
+      inputSchema: {
+        build: buildReferenceSchema,
+        region: terrainWorldRegionSchema,
+        ...terrainFitOptionsSchema,
+        detailLimit: z.number().int().min(0).max(5_000).default(500).describe("Maximum display-only operation records attached to the initial response metadata."),
+      },
+      outputSchema: {
+        terrain: terrainFitSummarySchema,
+        detailPage: z.object({ offset: z.number().int().min(0), returned: z.number().int().min(0), total: z.number().int().min(0) }),
+      },
+      annotations: { title: "Analyze TerrainFit", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ build: value, region: regionValue, terrainInterface, targetAnchor, lockTargetY, maximumHorizontalOffset, rotations, allowMirror, maximumCandidates, maximumFootprintColumns, retainingThreshold, pathSearchLimit, detailLimit }) => {
+      const build = asBuild(value);
+      const region = regionValue as TerrainWorldRegion;
+      const columns = region.dimensions.width * region.dimensions.depth;
+      if (!Number.isSafeInteger(columns) || columns > 1_048_576) {
+        throw new Error("TERRAIN_FIT_LIMIT: terrain analysis is limited to 1,048,576 snapshot columns.");
+      }
+      if (boundedRemoteMode && columns > HOSTED_TERRAIN_COLUMN_CAP) {
+        throw new Error(`HOSTED_TERRAIN_LIMIT_EXCEEDED: remote TerrainFit is limited to ${HOSTED_TERRAIN_COLUMN_CAP.toLocaleString()} snapshot columns; use a smaller snapshot or the local app.`);
+      }
+      if (boundedRemoteMode && (region.blocks?.length ?? 0) > HOSTED_TERRAIN_PLACEMENT_CAP) {
+        throw new Error(`HOSTED_TERRAIN_LIMIT_EXCEEDED: remote TerrainFit is limited to ${HOSTED_TERRAIN_PLACEMENT_CAP.toLocaleString()} explicit snapshot placements; use height, biome, and surface maps or the local app.`);
+      }
+      assertHostedBuildWorkload(build.input, "TerrainFit analysis");
+      consumeHostedBuildWork("TerrainFit analysis");
+      const preview = analyzeTerrainFit(build, region, {
+        terrainInterface,
+        targetAnchor,
+        lockTargetY,
+        maximumHorizontalOffset,
+        rotations,
+        allowMirror,
+        maximumCandidates,
+        maximumFootprintColumns,
+        retainingThreshold,
+        pathSearchLimit,
+      } as TerrainFitOptions);
+      const previewRef = cacheTerrainFitPreview(preview);
+      const detail = terrainDetailPage(preview, 0, detailLimit);
+      const terrain = terrainFitSummary(preview, previewRef);
+      return {
+        structuredContent: { terrain, detailPage: detail.page },
+        content: [{
+          type: "text",
+          text: `TerrainFit scored ${terrain.candidates.length} candidate(s) and selected ${terrain.selected.anchor.x}, ${terrain.selected.anchor.y}, ${terrain.selected.anchor.z} at ${terrain.selected.rotation}°. Risk is ${terrain.risk}; cut ${terrain.cutVolume.toLocaleString()}, fill ${terrain.fillVolume.toLocaleString()}, protected conflicts ${terrain.conflictTotals.protected}, structure conflicts ${terrain.conflictTotals.structures}. No world or file was changed.`,
+        }],
+        _meta: { terrainDetail: detail.detail, terrainContext: detail.context },
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Preview TerrainFit Plan", "Loading immutable terrain preview…", "TerrainFit preview ready"),
+      name: "preview_terrain_fit",
+      description: "Reopen a cached immutable TerrainFit preview and page through its display-only grading, retaining, path, water, and vegetation records without changing the preview or world.",
+      inputSchema: {
+        previewRef: z.string().min(1).max(256).describe("Principal-scoped preview reference returned by analyze_terrain_fit."),
+        previewHash: z.string().length(64).regex(/^[a-f0-9]+$/).optional().describe("Optional exact hash integrity assertion for the cached preview."),
+        offset: z.number().int().min(0).default(0).describe("Zero-based operation-detail offset."),
+        limit: z.number().int().min(1).max(5_000).default(1_000).describe("Maximum display-only operation records to attach."),
+      },
+      outputSchema: {
+        terrain: terrainFitSummarySchema,
+        detailPage: z.object({ offset: z.number().int().min(0), returned: z.number().int().min(0), total: z.number().int().min(0) }),
+      },
+      annotations: { title: "Preview TerrainFit Plan", readOnlyHint: true, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ previewRef, previewHash, offset, limit }) => {
+      const preview = cachedTerrainFitPreview(previewRef, previewHash);
+      const detail = terrainDetailPage(preview, offset, limit);
+      return {
+        structuredContent: { terrain: terrainFitSummary(preview, previewRef), detailPage: detail.page },
+        content: [{ type: "text", text: `Loaded ${detail.page.returned.toLocaleString()} of ${detail.page.total.toLocaleString()} immutable TerrainFit operation records. Risk remains ${preview.risk}; no world or file was changed.` }],
+        _meta: { terrainDetail: detail.detail, terrainContext: detail.context },
+      };
+    },
+  )
+  .registerTool(
+    {
+      ...toolPresentation("Confirm TerrainFit Plan", "Verifying exact terrain preview…", "TerrainFit plan confirmed"),
+      name: "confirm_terrain_install",
+      description: "Confirm the exact hash of a cached non-red TerrainFit preview and return its deterministic procedural install plan. Confirmation does not write a world, region file, or schematic; the existing guarded WorldEdit preview/confirm flow remains the separate final file-write boundary.",
+      inputSchema: {
+        previewRef: z.string().min(1).max(256).describe("Principal-scoped preview reference returned by analyze_terrain_fit."),
+        confirmationHash: z.string().length(64).regex(/^[a-f0-9]+$/).describe("Exact immutable preview hash shown to the user; stale or altered hashes fail closed."),
+      },
+      outputSchema: {
+        plan: z.object({
+          schemaVersion: z.literal(1),
+          previewId: z.string(),
+          previewHash: z.string(),
+          buildId: z.string(),
+          buildHash: z.string(),
+          status: z.literal("confirmed"),
+          transform: z.object({ anchor: vec3Schema, rotation: z.union([z.literal(0), z.literal(90), z.literal(180), z.literal(270)]), mirrorX: z.boolean(), yAdjustment: z.number().int() }),
+          operationCounts: terrainOperationCountsSchema,
+          installationBoundary: z.literal("procedural_plan_only"),
+          worldWritePerformed: z.literal(false),
+          nextStep: z.string(),
+        }),
+      },
+      annotations: { title: "Confirm TerrainFit Plan", readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+    },
+    async ({ previewRef, confirmationHash }) => {
+      const preview = cachedTerrainFitPreview(previewRef, confirmationHash);
+      const confirmed = confirmTerrainFitPreview(preview, confirmationHash);
+      const counts = terrainOperationCounts(preview);
+      const detail = terrainDetailPage(preview, 0, 5_000);
+      const plan = {
+        schemaVersion: 1 as const,
+        previewId: confirmed.previewId,
+        previewHash: confirmed.previewHash,
+        buildId: confirmed.buildId,
+        buildHash: confirmed.buildHash,
+        status: "confirmed" as const,
+        transform: confirmed.transform,
+        operationCounts: counts,
+        installationBoundary: confirmed.installationBoundary,
+        worldWritePerformed: false as const,
+        nextStep: "Generate the terrain/build artifact, then use the guarded WorldEdit installation tool first with confirmed=false and only repeat with confirmed=true after reviewing that exact file-write preview.",
+      };
+      return {
+        structuredContent: { plan },
+        content: [{ type: "text", text: `Confirmed TerrainFit preview ${confirmed.previewHash.slice(0, 12)} as a procedural plan only. No world or file was changed; the separate WorldEdit preview is still required before installation.` }],
+        _meta: { terrainDetail: detail.detail, terrainContext: detail.context, detailPage: detail.page },
+      };
     },
   )
   .registerTool(
@@ -1968,7 +3053,7 @@ const server = new McpServer(
       outputSchema: {
         mode: z.enum(["whole_build", "selected_region"]).describe("Revision mode that produced the new build."),
         previousHash: z.string().describe("Full immutable hash of the source build."),
-        build: buildSummaryOutputSchema.describe("New immutable build summary after applying only the explicit changes."),
+        build: buildSummaryTransportSchema.describe("New immutable build summary after applying only the explicit changes."),
         region: inclusiveCuboidSchema.optional().describe("Normalized inclusive region used by a selected-region revision."),
         preservedOutsideCount: z.number().int().min(0).optional().describe("Placements copied byte-for-byte from outside the selected region."),
         diff: buildDiffSummarySchema.optional().describe("Exact before/after change counts for a selected-region revision."),
@@ -2546,6 +3631,240 @@ function readinessChecks() {
   }
   return checks;
 }
+
+type LocalEditorRequest = {
+  body?: unknown;
+  params: Record<string, string>;
+  query: Record<string, unknown>;
+};
+type LocalEditorResponse = JsonResponse;
+type LocalEditorHandler = (request: LocalEditorRequest, response: LocalEditorResponse) => unknown;
+type LocalEditorExpress = {
+  use(path: string, handler: (request: LocalEditorRequest, response: LocalEditorResponse, next: () => void) => unknown): unknown;
+  get(path: string, handler: LocalEditorHandler): unknown;
+  post(path: string, handler: LocalEditorHandler): unknown;
+};
+
+const localEditorApp = server.express as unknown as LocalEditorExpress;
+const localEditorRoute = (handler: LocalEditorHandler): LocalEditorHandler => async (request, response) => {
+  response.setHeader("cache-control", "no-store");
+  response.setHeader("x-content-type-options", "nosniff");
+  try {
+    await handler(request, response);
+  } catch (error) {
+    response.status(400).json({
+      ok: false,
+      error: sanitizeDiagnosticText(error instanceof Error ? error.message : "The local editor request could not be completed.", 1_000),
+    });
+  }
+};
+
+localEditorApp.use("/api/local/editor", (_request, response, next) => {
+  if (boundedRemoteMode) {
+    response.status(404).json({ ok: false, error: "The procedural editor API is available only on a PC-local Blockwright instance." });
+    return;
+  }
+  next();
+});
+
+localEditorApp.get("/api/local/editor/bootstrap", localEditorRoute(async (_request, response) => {
+  assertLocalOperation("procedural editor bootstrap");
+  const manager = await compileTaskManagerPromise;
+  const tasks = manager.list().filter(({ id }) => taskOwners.get(id) === "local");
+  pruneTaskAuxiliaryState(manager.list());
+  const [providers, hardware] = await Promise.all([modelProviderRegistry.listStatus(), localHardwareProfile()]);
+  response.json({
+    ok: true,
+    version: APP_VERSION,
+    mode: "local",
+    tasks,
+    providers,
+    hardware,
+    diagnostics: {
+      readiness: readinessChecks(),
+      taskJournal: taskManagerStartupIssue ? { ok: false, issue: taskManagerStartupIssue } : { ok: true },
+      modelSettings: modelSettingsStartupIssue ? { ok: false, issue: modelSettingsStartupIssue } : { ok: true },
+      compileLimits: runtimeCompileLimits,
+      modelsOptional: true,
+    },
+  });
+}));
+
+localEditorApp.post("/api/local/editor/compile", localEditorRoute(async (request, response) => {
+  assertLocalOperation("procedural editor compilation");
+  const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+  const candidate = body.buildInput ?? body.design;
+  const buildInput = z.object(buildInputSchema).parse(candidate) as BuildInput;
+  const retryOf = typeof body.retryOf === "string" ? body.retryOf : undefined;
+  const task = await submitCompileTask(buildInput, "local", retryOf);
+  response.status(202).json({ ok: true, task, taskId: task.id });
+}));
+
+localEditorApp.get("/api/local/editor/tasks", localEditorRoute(async (_request, response) => {
+  assertLocalOperation("procedural editor task listing");
+  const manager = await compileTaskManagerPromise;
+  const allTasks = manager.list();
+  pruneTaskAuxiliaryState(allTasks);
+  response.json({ ok: true, tasks: allTasks.filter(({ id }) => taskOwners.get(id) === "local") });
+}));
+
+localEditorApp.get("/api/local/editor/tasks/:taskId", localEditorRoute(async (request, response) => {
+  assertLocalOperation("procedural editor task status");
+  const result = await taskResultForClient(request.params.taskId);
+  response.json({ ok: true, ...result, ...(result.build ? { result: result.build } : {}) });
+}));
+
+localEditorApp.post("/api/local/editor/tasks/:taskId/cancel", localEditorRoute(async (request, response) => {
+  assertLocalOperation("procedural editor task cancellation");
+  if (taskOwners.get(request.params.taskId) !== "local") throw new Error("TASK_NOT_FOUND: the requested task is unavailable in this workspace.");
+  const manager = await compileTaskManagerPromise;
+  const task = await manager.cancel(request.params.taskId);
+  if (!task) throw new Error("TASK_NOT_FOUND: the requested task is unavailable in this workspace.");
+  response.json({ ok: true, task });
+}));
+
+localEditorApp.get("/api/local/editor/builds/:buildId/placements", localEditorRoute((request, response) => {
+  assertLocalOperation("procedural editor placement paging");
+  const offset = typeof request.query.offset === "string" ? Number.parseInt(request.query.offset, 10) : 0;
+  const limit = typeof request.query.limit === "string" ? Number.parseInt(request.query.limit, 10) : BUILD_VIEW_INITIAL_PAGE_SIZE;
+  const { build } = cachedBuildForView(request.params.buildId);
+  const page = createBuildPlacementPage(build, offset, limit);
+  response.json({ ok: true, ...page, limit: Math.min(Math.max(1, Number.isSafeInteger(limit) ? limit : BUILD_VIEW_INITIAL_PAGE_SIZE), BUILD_VIEW_PAGE_SIZE) });
+}));
+
+localEditorApp.post("/api/local/editor/builds/:buildId/terrain-fit", localEditorRoute((request, response) => {
+  assertLocalOperation("procedural editor TerrainFit preview");
+  const parsed = z.object({
+    region: terrainWorldRegionSchema,
+    options: z.object(terrainFitOptionsSchema).strict(),
+    detailOffset: z.number().int().min(0).default(0),
+    detailLimit: z.number().int().min(0).max(5_000).default(500),
+  }).strict().parse(request.body);
+  const columns = parsed.region.dimensions.width * parsed.region.dimensions.depth;
+  if (!Number.isSafeInteger(columns) || columns > 1_048_576) {
+    throw new Error("TERRAIN_FIT_LIMIT: local editor terrain analysis is limited to 1,048,576 snapshot columns.");
+  }
+  if ((parsed.region.blocks?.length ?? 0) > LOCAL_BUILD_PLACEMENT_CAP) {
+    throw new Error(`TERRAIN_FIT_LIMIT: local editor terrain analysis is limited to ${LOCAL_BUILD_PLACEMENT_CAP.toLocaleString()} explicit snapshot placements.`);
+  }
+  const { build } = cachedBuildForView(request.params.buildId);
+  const preview = analyzeTerrainFit(build, parsed.region as TerrainWorldRegion, parsed.options as TerrainFitOptions);
+  const previewRef = cacheTerrainFitPreview(preview);
+  const detail = terrainDetailPage(preview, parsed.detailOffset, parsed.detailLimit);
+  response.json({
+    ok: true,
+    terrain: terrainFitSummary(preview, previewRef),
+    detailPage: detail.page,
+    terrainDetail: detail.detail,
+    terrainContext: detail.context,
+    snapshotValidated: true,
+    installationBoundary: "read_only_preview",
+    worldWritePerformed: false,
+  });
+}));
+
+localEditorApp.get("/api/local/editor/terrain-fit/:previewRef/details", localEditorRoute((request, response) => {
+  assertLocalOperation("procedural editor TerrainFit detail paging");
+  const query = z.object({
+    previewHash: z.string().length(64).regex(/^[a-f0-9]+$/).optional(),
+    offset: z.coerce.number().int().min(0).default(0),
+    limit: z.coerce.number().int().min(1).max(5_000).default(1_000),
+  }).parse(request.query);
+  const preview = cachedTerrainFitPreview(request.params.previewRef, query.previewHash);
+  const detail = terrainDetailPage(preview, query.offset, query.limit);
+  response.json({
+    ok: true,
+    terrain: terrainFitSummary(preview, request.params.previewRef),
+    detailPage: detail.page,
+    terrainDetail: detail.detail,
+    terrainContext: detail.context,
+    installationBoundary: "read_only_preview",
+    worldWritePerformed: false,
+  });
+}));
+
+localEditorApp.get("/api/local/editor/models", localEditorRoute(async (_request, response) => {
+  assertLocalOperation("procedural editor model status");
+  response.json({
+    ok: true,
+    policy: { mode: modelProviderSettings.mode, fallbackPolicy: modelProviderSettings.fallbackPolicy ?? "disabled" },
+    configurations: modelProviderConfigs.map((provider) => publicModelProviderConfig(provider)),
+    providers: await modelProviderRegistry.listStatus(),
+  });
+}));
+
+localEditorApp.post("/api/local/editor/models/settings", localEditorRoute(async (request, response) => {
+  assertLocalOperation("procedural editor model settings");
+  const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+  const candidate = (body.document ?? body) as ModelSettingsDocument;
+  const saved = await modelSettingsStore.save(candidate);
+  modelProviderSettings = saved.settings;
+  modelProviderConfigs = saved.providers;
+  modelProviderRegistry = new ModelProviderRegistry(modelProviderConfigs, modelProviderSettings, { credentialResolver: credentialStore });
+  modelSettingsStartupIssue = undefined;
+  response.json({
+    ok: true,
+    document: saved,
+    providers: await modelProviderRegistry.listStatus(),
+    note: "Only secret-free provider settings were persisted. Credential values remain in the operating-system credential service.",
+  });
+}));
+
+localEditorApp.post("/api/local/editor/models/discover", localEditorRoute(async (request, response) => {
+  assertLocalOperation("procedural editor local model discovery");
+  const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+  const timeoutMs = typeof body.timeoutMs === "number" ? body.timeoutMs : 2_500;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > 30_000) throw new Error("timeoutMs must be an integer from 100 through 30000.");
+  const providers = await discoverLocalModelProviders({ timeoutMs });
+  response.json({ ok: true, providers });
+}));
+
+localEditorApp.get("/api/local/editor/models/credentials", localEditorRoute(async (_request, response) => {
+  assertLocalOperation("procedural editor credential listing");
+  response.json({ ok: true, credentials: await credentialStore.list() });
+}));
+
+localEditorApp.post("/api/local/editor/models/credentials/:providerId", localEditorRoute(async (request, response) => {
+  assertLocalOperation("procedural editor credential storage");
+  if (!/^[A-Za-z][A-Za-z0-9._-]{0,79}$/.test(request.params.providerId)) throw new Error("Provider id is invalid.");
+  const body = request.body && typeof request.body === "object" ? request.body as Record<string, unknown> : {};
+  if (typeof body.secret !== "string" || !body.secret) throw new Error("A non-empty credential value is required.");
+  const reference = `wincred:blockwright/${request.params.providerId}` as CredentialReference;
+  try {
+    const credential = await credentialStore.set(reference, body.secret);
+    response.json({ ok: true, credential });
+  } catch (error) {
+    const summary = credentialErrorSummary(error);
+    response.status(400).json({ ok: false, error: summary.message, diagnostic: summary });
+  }
+}));
+
+localEditorApp.post("/api/local/editor/models/credentials/:providerId/remove", localEditorRoute(async (request, response) => {
+  assertLocalOperation("procedural editor credential removal");
+  if (!/^[A-Za-z][A-Za-z0-9._-]{0,79}$/.test(request.params.providerId)) throw new Error("Provider id is invalid.");
+  const reference = `wincred:blockwright/${request.params.providerId}` as CredentialReference;
+  response.json({ ok: true, credential: await credentialStore.remove(reference) });
+}));
+
+localEditorApp.get("/api/local/editor/hardware", localEditorRoute(async (_request, response) => {
+  assertLocalOperation("procedural editor hardware discovery");
+  response.json({ ok: true, hardware: await localHardwareProfile() });
+}));
+
+localEditorApp.get("/api/local/editor/diagnostics", localEditorRoute(async (_request, response) => {
+  assertLocalOperation("procedural editor diagnostics");
+  const manager = await compileTaskManagerPromise;
+  response.json({
+    ok: true,
+    version: APP_VERSION,
+    uptimeSeconds: Math.floor((Date.now() - startedAt) / 1_000),
+    readiness: readinessChecks(),
+    taskJournal: taskManagerStartupIssue ? { ok: false, issue: taskManagerStartupIssue } : { ok: true },
+    modelSettings: modelSettingsStartupIssue ? { ok: false, issue: modelSettingsStartupIssue } : { ok: true },
+    taskCounts: Object.fromEntries(TASK_STATES.map((state) => [state, manager.list().filter((task) => task.state === state).length])),
+    compileLimits: runtimeCompileLimits,
+  });
+}));
 
 server.express.get("/health", (_request: unknown, response: JsonResponse) => {
   response.setHeader("cache-control", "no-store");

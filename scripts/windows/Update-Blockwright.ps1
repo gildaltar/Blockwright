@@ -305,9 +305,9 @@ try {
 
     $stage = "relaunch"
     if (-not $NoRelaunch) {
-        $launcher = Join-Path $resolvedInstallRoot "scripts\windows\Launch-Blockwright-ControlCenter.vbs"
-        if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw "Update installed, but the Control Center launcher is missing: $launcher" }
-        Start-Process -FilePath (Join-Path $env:SystemRoot "System32\wscript.exe") -ArgumentList @('//nologo', ('"' + $launcher + '"')) -WindowStyle Hidden
+        $launcher = Join-Path $resolvedInstallRoot "Blockwright.exe"
+        if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) { throw "Update installed, but the native Blockwright launcher is missing: $launcher" }
+        Start-Process -FilePath $launcher -WindowStyle Hidden
     }
     $stage = "complete"
     Write-UpdateReport -Status "success" -Message "Installed Blockwright $($metadata.version) after checksum and trusted Authenticode verification." -Path $successPath

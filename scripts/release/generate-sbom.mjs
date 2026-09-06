@@ -9,6 +9,7 @@ import {
   readJson,
   readReleaseConfig,
   repositoryRoot,
+  sha256File,
   writeJson,
 } from "./release-lib.mjs";
 
@@ -28,6 +29,7 @@ const runtimeExecutable = resolve(stageRoot, "runtime", "node", "node.exe");
 const runtimeNpmWrapper = resolve(stageRoot, "runtime", "node", "npm.cmd");
 const runtimeNpmManifest = resolve(runtimeNodeModules, "npm", "package.json");
 const runtimeNpmCli = resolve(runtimeNodeModules, "npm", "bin", "npm-cli.js");
+const launcherExecutable = resolve(stageRoot, "Blockwright.exe");
 for (const requiredFile of [
   packagePath,
   releaseManifestPath,
@@ -36,6 +38,7 @@ for (const requiredFile of [
   resolve(stageRoot, "runtime", "node", "LICENSE"),
   runtimeNpmManifest,
   runtimeNpmCli,
+  launcherExecutable,
   resolve(runtimeNodeModules, "npm", "LICENSE"),
 ]) {
   if (!existsSync(requiredFile) || !statSync(requiredFile).isFile()) throw new Error(`Exact staged runtime file is missing: ${requiredFile}`);
@@ -45,6 +48,7 @@ const manifest = readJson(packagePath);
 const stagedRelease = readJson(releaseManifestPath);
 const releaseConfig = readReleaseConfig();
 const stagedRuntime = stagedRelease.packagedRuntime;
+const stagedLauncher = stagedRelease.launcher;
 if (stagedRelease.schemaVersion !== 1 || stagedRelease.version !== manifest.version) throw new Error("Staged release manifest does not match the staged application version.");
 if (stagedRuntime?.private !== true
   || stagedRuntime.name !== releaseConfig.runtime.name
@@ -52,6 +56,11 @@ if (stagedRuntime?.private !== true
   || stagedRuntime.source !== releaseConfig.runtime.url
   || String(stagedRuntime.archiveSha256 ?? "").toLowerCase() !== releaseConfig.runtime.sha256.toLowerCase()) {
   throw new Error("Staged release manifest does not match the pinned private Node runtime.");
+}
+if (stagedLauncher?.path !== "Blockwright.exe"
+  || stagedLauncher.fileVersion !== `${manifest.version}.0`
+  || String(stagedLauncher.sha256 ?? "").toLowerCase() !== sha256File(launcherExecutable)) {
+  throw new Error("Staged release manifest does not match the exact native Blockwright.exe launcher.");
 }
 const npmWrapper = readFileSync(runtimeNpmWrapper, "utf8");
 if (!/node\.exe/i.test(npmWrapper) || !/node_modules[\\/]npm[\\/]bin[\\/]npm-cli\.js/i.test(npmWrapper)) {
@@ -78,6 +87,13 @@ const { cyclonedx, spdx } = createSboms({
     source: stagedRuntime.source,
     archiveSha256: stagedRuntime.archiveSha256,
     license: "MIT",
+  },
+  bundledLauncher: {
+    name: "Blockwright Windows Launcher",
+    version: manifest.version,
+    sha256: stagedLauncher.sha256,
+    license: manifest.license,
+    path: stagedLauncher.path,
   },
   serial: `urn:uuid:${randomUUID()}`,
 });

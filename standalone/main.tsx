@@ -1,7 +1,9 @@
-import { StrictMode, useEffect, useState, type FormEvent } from "react";
+import { StrictMode, Suspense, lazy, useEffect, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import heroUrl from "../assets/github/blockwright-hero-v060.png";
 import "./styles.css";
+
+const ProceduralEditor = lazy(() => import("./editor"));
 
 type ServiceStatus = {
   mode: "local" | "hosted";
@@ -432,6 +434,7 @@ function App() {
     <header className="site-header">
       <a className="brand" href="#top"><BrandMark /><span>Blockwright</span><small>0.6</small></a>
       <nav aria-label="Primary navigation">
+        <a href="#editor">Editor</a>
         <a href="#workflow">Workflow</a>
         <a href="#proof">Proof</a>
         <a href="#pricing">Pricing</a>
@@ -592,4 +595,16 @@ function App() {
   </>;
 }
 
-createRoot(document.getElementById("root")!).render(<StrictMode><App /></StrictMode>);
+function RootRouter() {
+  const [route, setRoute] = useState(window.location.hash);
+  useEffect(() => {
+    const updateRoute = () => setRoute(window.location.hash);
+    window.addEventListener("hashchange", updateRoute);
+    return () => window.removeEventListener("hashchange", updateRoute);
+  }, []);
+  return route === "#editor" || route.startsWith("#editor/")
+    ? <Suspense fallback={<main className="editor-loading" role="status">Loading the PC-local editor…</main>}><ProceduralEditor /></Suspense>
+    : <App />;
+}
+
+createRoot(document.getElementById("root")!).render(<StrictMode><RootRouter /></StrictMode>);

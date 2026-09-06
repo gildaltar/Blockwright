@@ -15,6 +15,10 @@ export type Placement = Vec3 & {
   elementInstanceId?: string;
   /** Hard requirements for which this exact placement is evidence. */
   requirementIds?: string[];
+  /** Stable Design IR v2 component which produced this placement. */
+  componentId?: string;
+  /** Deterministic component merge phase used by Design IR v2. */
+  operationPhase?: DesignOperationPhase;
   blockEntity?: { id: string; data?: Record<string, unknown> };
 };
 
@@ -26,7 +30,68 @@ export type DesignMaterial = string | {
   tags?: string[];
 };
 
-export type DesignElementKind = "fill" | "shell" | "carve" | "cylinder" | "basin" | "sweep" | "stairs" | "ramp";
+export type DesignElementKind = "fill" | "shell" | "carve" | "cylinder" | "basin" | "sweep" | "stairs" | "ramp" | "procedural";
+
+export type DesignSurfaceDirection = "up" | "down" | "north" | "south" | "east" | "west";
+export type DesignBooleanOperation = "add" | "union" | "clear" | "subtract" | "cut" | "intersect";
+export type DesignVec2 = { u: number; v: number };
+
+export type DesignProfile = {
+  plane: "xy" | "xz" | "yz";
+  points: DesignVec2[];
+  filled?: boolean;
+};
+
+export type DesignPrimitive =
+  | { type: "line"; from: Vec3; to: Vec3; thickness?: number }
+  | { type: "plane"; min: Vec3; max: Vec3; filled?: boolean; thickness?: number }
+  | { type: "circle"; center: Vec3; radius: number; axis?: "x" | "y" | "z"; filled?: boolean; thickness?: number }
+  | { type: "ellipse"; center: Vec3; radiusU: number; radiusV: number; axis?: "x" | "y" | "z"; filled?: boolean; thickness?: number }
+  | { type: "sphere"; center: Vec3; radius: number; hollow?: boolean; thickness?: number }
+  | { type: "cone"; baseCenter: Vec3; radius: number; height: number; direction?: "up" | "down"; hollow?: boolean; thickness?: number }
+  | { type: "pyramid"; min: Vec3; max: Vec3; hollow?: boolean; thickness?: number }
+  | { type: "polygon"; points: Vec3[]; filled?: boolean }
+  | { type: "rounded_rectangle"; min: Vec3; max: Vec3; radius: number; filled?: boolean; thickness?: number }
+  | { type: "rounded_square"; min: Vec3; max: Vec3; radius: number; filled?: boolean; thickness?: number }
+  | { type: "extrusion"; origin: Vec3; profile: DesignProfile; offset: Vec3 }
+  | { type: "profile_extrusion"; profile: DesignProfile; path: Vec3[] }
+  | { type: "roof_plane"; min: Vec3; max: Vec3; slopeAxis: "x" | "z"; highSide?: "min" | "max"; thickness?: number }
+  | { type: "roof_ridge"; min: Vec3; max: Vec3; ridgeAxis: "x" | "z"; ridgeOffset?: number; thickness?: number }
+  | { type: "terrain_surface"; min: Vec3; max: Vec3; baseY: number; amplitude: number; scale: number; seed: string; fillToY?: number };
+
+export type DesignGeometryMask = {
+  primitive: DesignPrimitive;
+  invert?: boolean;
+};
+
+export type ProceduralMaterialTarget = string | {
+  id: string;
+  state?: Record<string, string | number | boolean>;
+  tags?: string[];
+};
+
+export type ProceduralWeightedMaterial =
+  | { material: string; weight: number }
+  | { id: string; state?: Record<string, string | number | boolean>; tags?: string[]; weight: number };
+
+export type ProceduralMaterialDefinition =
+  | DesignMaterial
+  | { distribution: "weighted_random"; seed: string; blocks: ProceduralWeightedMaterial[] }
+  | { distribution: "weighted_noise"; seed: string; scale: number; blocks: ProceduralWeightedMaterial[] }
+  | { distribution: "clustered_noise"; seed: string; scale: number; blocks: ProceduralWeightedMaterial[] }
+  | { distribution: "gradient"; axis: "x" | "y" | "z"; stops: Array<{ at: number; material: ProceduralMaterialTarget }> }
+  | { distribution: "checker"; size: Vec3; materials: ProceduralMaterialTarget[] }
+  | { distribution: "pattern"; axis: "x" | "y" | "z"; stride?: number; materials: ProceduralMaterialTarget[] }
+  | {
+      distribution: "weathering";
+      seed: string;
+      base: ProceduralMaterialTarget;
+      weathered: ProceduralMaterialTarget;
+      amount: number;
+      edge?: { exposedAxesAtLeast?: 2 | 3; weight: number };
+      height?: { minY?: number; maxY?: number; weight: number };
+      surfaceDirection?: { directions: DesignSurfaceDirection[]; weight: number };
+    };
 
 /** Exact half-open character range within DesignRequirement.text. */
 export type DesignSourceSpan = {
@@ -127,13 +192,143 @@ export type DesignElement =
       width: number;
       material: string;
       railingMaterial?: string;
+    })
+  | (DesignElementBase & {
+      kind: "procedural";
+      primitive: DesignPrimitive;
+      operation?: DesignBooleanOperation;
+      /** Required for add/union and ignored by destructive operations. */
+      material?: string;
+      /** Inclusive clip box applied before the operation is emitted. */
+      clip?: { min: Vec3; max: Vec3 };
+      /** All masks are combined as an intersection; inverted masks exclude their volume. */
+      masks?: DesignGeometryMask[];
     });
 
-export type DesignProgram = {
+export type DesignProgramV1 = {
   schemaVersion: 1;
   description: string;
   requirements: DesignRequirement[];
   elements: DesignElement[];
+};
+
+export type DesignOperationPhase =
+  | "terrain_foundation"
+  | "primary_mass"
+  | "structure"
+  | "walls"
+  | "roof"
+  | "cuts_openings"
+  | "trim"
+  | "detail"
+  | "lighting"
+  | "landscaping"
+  | "explicit_overrides";
+
+export type DesignTemplate = {
+  id: string;
+  name?: string;
+  /** References canonical top-level elements; definitions are never duplicated per use. */
+  elementIds: string[];
+};
+
+export type DesignRepetition =
+  | { kind: "linear"; count: number; step: Vec3 }
+  | { kind: "grid"; count: { x: number; y: number; z: number }; step: Vec3 }
+  | { kind: "radial"; count: number; center: Vec3; radius: number; startAngleDegrees?: number }
+  | { kind: "mirrored"; axis: "x" | "z"; coordinate: number }
+  | { kind: "alternating"; count: number; step: Vec3; alternateOffset: Vec3 }
+  | { kind: "position_list"; positions: Vec3[] };
+
+export type DesignTemplateInstance = {
+  id: string;
+  templateId: string;
+  origin?: Vec3;
+  repetition?: DesignRepetition;
+  /** Rebinds a template's named material references without changing its geometry. */
+  materialOverrides?: Record<string, string>;
+};
+
+export type DesignComponentRevision = {
+  revision: number;
+  parentRevision?: number;
+  message?: string;
+};
+
+export type DesignComponent = {
+  id: string;
+  name: string;
+  type: string;
+  bounds: { min: Vec3; max: Vec3 };
+  dependencies: string[];
+  /** Canonical operations owned directly by this component. */
+  elementIds: string[];
+  /** Reusable procedural operation groups instantiated by reference. */
+  templateInstances?: DesignTemplateInstance[];
+  seed: string;
+  operationPhase: DesignOperationPhase;
+  revision: DesignComponentRevision;
+};
+
+export type DesignProgramV2 = {
+  schemaVersion: 2;
+  description: string;
+  requirements: DesignRequirement[];
+  /** Canonical primitive definitions referenced by components and templates. */
+  elements: DesignElement[];
+  /** V2-only named exact or distributed materials; legacy materialLibrary remains readable unchanged. */
+  materials?: Record<string, ProceduralMaterialDefinition>;
+  templates: DesignTemplate[];
+  components: DesignComponent[];
+};
+
+export type DesignProgram = DesignProgramV1 | DesignProgramV2;
+
+export type ComponentGraphEntry = {
+  id: string;
+  name: string;
+  type: string;
+  dependencies: string[];
+  bounds: { min: Vec3; max: Vec3 };
+  seed: string;
+  operationPhase: DesignOperationPhase;
+  revision: DesignComponentRevision;
+  geometryHash: string;
+  materialHash: string;
+  combinedHash: string;
+  cacheKey: string;
+};
+
+export type ComponentGraphManifest = {
+  schemaVersion: 1;
+  order: string[];
+  components: ComponentGraphEntry[];
+  graphHash: string;
+};
+
+export type ComponentConflictSource = {
+  componentId: string;
+  elementId?: string;
+  elementInstanceId?: string;
+  operationPhase: DesignOperationPhase;
+};
+
+export type ComponentConflict = {
+  coordinate: Vec3;
+  kind: "replacement" | "removal";
+  previous?: ComponentConflictSource;
+  incoming: ComponentConflictSource;
+};
+
+export type ComponentCompileReport = {
+  changed: string[];
+  rebuilt: string[];
+  reused: string[];
+  cacheHits: number;
+  cacheMisses: number;
+  conflicts: ComponentConflict[];
+  conflictCount: number;
+  evictions: number;
 };
 
 export type BuildInput = {
@@ -281,6 +476,10 @@ export type BuildRecord = {
   materialCounts: Record<string, number>;
   layerCounts: Record<string, number>;
   phases: { name: string; count: number }[];
+  /** Present for Design IR v2 builds. */
+  componentGraph?: ComponentGraphManifest;
+  /** Present for Design IR v2 builds. */
+  compileReport?: ComponentCompileReport;
   validation: {
     valid: boolean;
     blockingIssues: number;

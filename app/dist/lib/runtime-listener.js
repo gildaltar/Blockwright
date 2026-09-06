@@ -206,11 +206,11 @@ function createProductionRequestBoundary(application, port, options, token) {
             return;
         }
         if (!options.hostedMode) {
+            if (guardedJsonPath(request) && !isAllowedOrigin(request.headers.origin, port)) {
+                reject(response, 403, "Cross-origin access to the local Blockwright API is not permitted.");
+                return;
+            }
             if (isMcpRequest) {
-                if (!isAllowedOrigin(request.headers.origin, port)) {
-                    reject(response, 403, "Cross-origin access to the local Blockwright MCP endpoint is not permitted.");
-                    return;
-                }
                 if (!token || !secureTokenEqual(token, bearerToken(request.headers.authorization))) {
                     reject(response, 401, "A valid per-launch Blockwright token is required.", true);
                     return;

@@ -4,11 +4,17 @@ param(
     [switch]$SkipSourceBuild,
     [string]$RuntimeArchive,
     [string]$OutputDirectory,
+    [string]$LauncherBinary,
     [string]$TrustedPublisherThumbprint
 )
 
 $ErrorActionPreference = "Stop"
 if ($env:OS -ne "Windows_NT") { throw "The Windows installer release wrapper requires Windows." }
+$hasLauncherBinary = -not [string]::IsNullOrWhiteSpace($LauncherBinary)
+$hasTrustedPublisher = -not [string]::IsNullOrWhiteSpace($TrustedPublisherThumbprint)
+if ($hasLauncherBinary -xor $hasTrustedPublisher) {
+    throw "A signed Windows package requires both -LauncherBinary and -TrustedPublisherThumbprint; omit both for an explicitly unsigned local build."
+}
 $repositoryRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.."))
 $toolchain = & (Join-Path $PSScriptRoot "Install-PinnedInnoSetup.ps1") -PassThru
 try {
@@ -17,7 +23,8 @@ try {
     if ($SkipSourceBuild) { $arguments += "--skip-source-build" }
     if (-not [string]::IsNullOrWhiteSpace($RuntimeArchive)) { $arguments += @("--runtime-archive", [System.IO.Path]::GetFullPath($RuntimeArchive)) }
     if (-not [string]::IsNullOrWhiteSpace($OutputDirectory)) { $arguments += @("--out-dir", [System.IO.Path]::GetFullPath($OutputDirectory)) }
-    if (-not [string]::IsNullOrWhiteSpace($TrustedPublisherThumbprint)) { $arguments += @("--trusted-publisher-thumbprint", $TrustedPublisherThumbprint) }
+    if ($hasLauncherBinary) { $arguments += @("--launcher-binary", [System.IO.Path]::GetFullPath($LauncherBinary)) }
+    if ($hasTrustedPublisher) { $arguments += @("--trusted-publisher-thumbprint", $TrustedPublisherThumbprint) }
     Push-Location $repositoryRoot
     try {
         & node @arguments

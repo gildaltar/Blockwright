@@ -158,7 +158,46 @@ function installProductionDependencies(stageRoot) {
   run(privateNpm, ["ls", "--omit=dev", "--depth=0", "--json"], { cwd: resolve(stageRoot, "app"), capture: true });
 }
 
-function writeBundleMetadata(stageRoot, config, version, trustedPublisherThumbprint) {
+function inspectLauncher(artifact, version, trustedPublisherThumbprint) {
+  const powershell = resolve(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  const validator = resolve(repositoryRoot, "scripts", "release", "Test-BlockwrightLauncherBinary.ps1");
+  const expectedStatus = trustedPublisherThumbprint ? "Valid" : "NotSigned";
+  const args = [
+    "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", validator,
+    "-Artifact", artifact, "-Version", version, "-ExpectedAuthenticodeStatus", expectedStatus,
+  ];
+  if (trustedPublisherThumbprint) args.push("-ExpectedThumbprint", trustedPublisherThumbprint, "-RequireTimestamp");
+  const result = run(powershell, args, { capture: true });
+  try {
+    return JSON.parse(String(result.stdout ?? "").trim());
+  } catch (error) {
+    throw new Error(`Native launcher validation returned invalid JSON: ${error.message}`);
+  }
+}
+
+function stageLauncher({ stageRoot, workDirectory, version, trustedPublisherThumbprint, launcherOverride }) {
+  let source;
+  if (launcherOverride) {
+    source = resolve(launcherOverride);
+    if (!existsSync(source) || !statSync(source).isFile()) throw new Error(`Provided native launcher is missing: ${source}`);
+  } else {
+    if (trustedPublisherThumbprint) throw new Error("A trusted Windows release requires --launcher-binary containing the already signed and timestamped Blockwright.exe.");
+    source = resolve(workDirectory, "launcher", "Blockwright.exe");
+    mkdirSync(dirname(source), { recursive: true });
+    const powershell = resolve(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+    const builder = resolve(repositoryRoot, "scripts", "release", "Build-BlockwrightLauncher.ps1");
+    run(powershell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", builder, "-OutputPath", source, "-Version", version]);
+  }
+
+  const sourceEvidence = inspectLauncher(source, version, trustedPublisherThumbprint);
+  const destination = resolve(stageRoot, "Blockwright.exe");
+  cpSync(source, destination);
+  const stagedEvidence = inspectLauncher(destination, version, trustedPublisherThumbprint);
+  if (sourceEvidence.sha256 !== stagedEvidence.sha256) throw new Error("The staged Blockwright.exe does not match the validated native launcher input.");
+  return stagedEvidence;
+}
+
+function writeBundleMetadata(stageRoot, config, version, trustedPublisherThumbprint, launcherEvidence) {
   mkdirSync(resolve(stageRoot, "config"), { recursive: true });
   writeJson(resolve(stageRoot, "config", "defaults.json"), {
     schemaVersion: 1,
@@ -181,7 +220,21 @@ function writeBundleMetadata(stageRoot, config, version, trustedPublisherThumbpr
       archiveSha256: config.runtime.sha256,
       private: true,
     },
-    signing: { status: trustedPublisherThumbprint ? "awaiting-external-authenticode" : "unsigned", trustedPublisherThumbprint: trustedPublisherThumbprint ?? null },
+    launcher: {
+      path: launcherEvidence.file,
+      sha256: launcherEvidence.sha256,
+      sizeBytes: launcherEvidence.sizeBytes,
+      architecture: launcherEvidence.architecture,
+      subsystem: launcherEvidence.subsystem,
+      fileVersion: launcherEvidence.fileVersion,
+      authenticode: launcherEvidence.authenticode,
+      signerThumbprint: launcherEvidence.signerThumbprint ?? null,
+      timestampCertificateSubject: launcherEvidence.timestampCertificateSubject ?? null,
+    },
+    signing: {
+      status: trustedPublisherThumbprint ? "nested-launcher-signed-installer-pending" : "unsigned-local-build",
+      trustedPublisherThumbprint: trustedPublisherThumbprint ?? null,
+    },
   });
   writeJson(resolve(stageRoot, ".mcp.json"), {
     mcpServers: {
@@ -217,6 +270,7 @@ const rootPackage = readJson(resolve(repositoryRoot, "package.json"));
 const version = semverFromTag(argument("--version", rootPackage.version));
 const trustedPublisherArgument = argument("--trusted-publisher-thumbprint", null);
 const trustedPublisherThumbprint = trustedPublisherArgument ? normalizeThumbprint(trustedPublisherArgument) : null;
+const launcherOverride = argument("--launcher-binary", null);
 if (version !== rootPackage.version) throw new Error(`Requested release ${version} does not match package.json ${rootPackage.version}. Align manifests before release packaging.`);
 if (process.platform !== "win32") throw new Error("The Windows release must be assembled on Windows so runtime dependencies and installer evidence match the target platform.");
 
@@ -249,10 +303,11 @@ try {
   const stageRoot = resolve(workDirectory, "installer", "Blockwright");
   mkdirSync(stageRoot, { recursive: true });
   copySourcePayload(stageRoot);
+  const launcherEvidence = stageLauncher({ stageRoot, workDirectory, version, trustedPublisherThumbprint, launcherOverride });
   extractRuntime(runtimeArchive, config, workDirectory, stageRoot);
   installProductionDependencies(stageRoot);
   assertNoRedistributionRestrictedResourceArchives(stageRoot);
-  writeBundleMetadata(stageRoot, config, version, trustedPublisherThumbprint);
+  writeBundleMetadata(stageRoot, config, version, trustedPublisherThumbprint, launcherEvidence);
   assertPluginManifestReferences(stageRoot);
   clearReleaseCandidateOutputs(outputDirectory, version);
 
@@ -285,6 +340,13 @@ try {
       archiveSha256: config.runtime.sha256,
       license: "MIT",
     },
+    bundledLauncher: {
+      name: "Blockwright Windows Launcher",
+      version,
+      sha256: launcherEvidence.sha256,
+      license: rootPackage.license,
+      path: launcherEvidence.file,
+    },
     serial,
   });
   const cyclonedxPath = resolve(outputDirectory, `blockwright-${version}-cyclonedx.json`);
@@ -309,11 +371,20 @@ try {
     generatedAt: new Date().toISOString(),
     status: "unsigned",
     satisfiesSignedReleaseGate: false,
-    reason: "No external Authenticode signing identity was supplied to this local build.",
+    reason: trustedPublisherThumbprint
+      ? "The nested launcher is signed, but the outer installer has not yet been signed and this intermediate candidate does not satisfy the signed-release gate."
+      : "No external Authenticode signing identity was supplied to this local build.",
     artifacts: artifacts.map((path) => ({ file: basename(path), sha256: sha256File(path), authenticode: extnameForAuthenticode(path) })),
+    embeddedArtifacts: [{
+      file: launcherEvidence.file,
+      container: basename(portableZip),
+      sha256: launcherEvidence.sha256,
+      authenticode: launcherEvidence.authenticode,
+      signerThumbprint: launcherEvidence.signerThumbprint ?? null,
+    }],
   });
   writeChecksums(outputDirectory, [...artifacts, cyclonedxPath, spdxPath, statusPath]);
-  console.log(JSON.stringify({ version, stageRoot, portableZip, installerPath, signatureStatus: "unsigned", signedReleaseGate: false }, null, 2));
+  console.log(JSON.stringify({ version, stageRoot, portableZip, installerPath, launcher: launcherEvidence, signatureStatus: "unsigned", signedReleaseGate: false }, null, 2));
 } finally {
   if (!hasFlag("--keep-work")) rmSync(workDirectory, { recursive: true, force: true });
 }

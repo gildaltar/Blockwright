@@ -16,6 +16,7 @@ $pathsModule = Join-Path $PSScriptRoot "Blockwright-Paths.psm1"
 if (-not (Test-Path -LiteralPath $pathsModule -PathType Leaf)) { throw "The Windows path/runtime helper is missing: $pathsModule" }
 Import-Module $pathsModule -Force
 $appRoot = [System.IO.Path]::GetFullPath((Join-Path $resolvedPluginRoot "app"))
+$stateRoot = Get-BlockwrightStateRoot -InstallRoot $resolvedPluginRoot
 $lockPath = [System.IO.Path]::GetFullPath((Join-Path $appRoot ".blockwright-runtime-repair.lock"))
 $expectedLockPath = Join-Path $appRoot ".blockwright-runtime-repair.lock"
 $ownerPath = Join-Path $lockPath "owner.json"
@@ -69,6 +70,47 @@ function Get-NpmExecutable {
     if ($null -eq $npmCommand) { return $null }
     if (-not [string]::IsNullOrWhiteSpace($npmCommand.Path)) { return $npmCommand.Path }
     return $npmCommand.Source
+}
+
+function Invoke-NpmRepairCommands {
+    param(
+        [Parameter(Mandatory = $true)][string]$NpmPath,
+        [Parameter(Mandatory = $true)][string[]]$InstallArguments
+    )
+
+    $previousNpmCache = [Environment]::GetEnvironmentVariable("NPM_CONFIG_CACHE", [EnvironmentVariableTarget]::Process)
+    $previousNpmUpdateNotifier = [Environment]::GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", [EnvironmentVariableTarget]::Process)
+    $previousErrorActionPreference = $ErrorActionPreference
+    Push-Location $appRoot
+    try {
+        $env:NPM_CONFIG_CACHE = Join-Path $stateRoot "npm-cache"
+        $env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
+        $ErrorActionPreference = "Continue"
+
+        $installOutput = @(& $NpmPath @InstallArguments 2>&1)
+        $installExitCode = $LASTEXITCODE
+        $installOutput | ForEach-Object { Write-Output ([string]$_) }
+        if ($installExitCode -ne 0) { throw "npm dependency repair exited with code $installExitCode." }
+
+        $listOutput = @(& $NpmPath ls --omit=dev --depth=0 --json 2>&1)
+        $listExitCode = $LASTEXITCODE
+        $listOutput | ForEach-Object { Write-Output ([string]$_) }
+        if ($listExitCode -ne 0) { throw "npm ls rejected the repaired production dependency tree (exit $listExitCode)." }
+    } finally {
+        try {
+            Pop-Location
+        } finally {
+            try {
+                [Environment]::SetEnvironmentVariable("NPM_CONFIG_CACHE", $previousNpmCache, [EnvironmentVariableTarget]::Process)
+            } finally {
+                try {
+                    [Environment]::SetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER", $previousNpmUpdateNotifier, [EnvironmentVariableTarget]::Process)
+                } finally {
+                    $ErrorActionPreference = $previousErrorActionPreference
+                }
+            }
+        }
+    }
 }
 
 function Acquire-RuntimeRepairMutex {
@@ -288,18 +330,7 @@ try {
         Write-Warning "app/package-lock.json is missing; falling back to npm install."
     }
 
-    Push-Location $appRoot
-    try {
-        & $npmPath @npmArguments 2>&1 | ForEach-Object { Write-Output ([string]$_) }
-        $installExitCode = $LASTEXITCODE
-        if ($installExitCode -ne 0) { throw "npm dependency repair exited with code $installExitCode." }
-
-        & $npmPath ls --omit=dev --depth=0 --json 2>&1 | ForEach-Object { Write-Output ([string]$_) }
-        $listExitCode = $LASTEXITCODE
-        if ($listExitCode -ne 0) { throw "npm ls rejected the repaired production dependency tree (exit $listExitCode)." }
-    } finally {
-        Pop-Location
-    }
+    Invoke-NpmRepairCommands -NpmPath $npmPath -InstallArguments $npmArguments
     Assert-DirectDependencies
     Write-Output "Blockwright runtime dependencies are ready."
     exit 0

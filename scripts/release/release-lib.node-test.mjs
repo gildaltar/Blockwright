@@ -36,6 +36,18 @@ test("release configuration primitives fail closed", () => {
   assert.equal(releaseConfig.innoSetup.publisherThumbprint, "E0AB19C8D38CBF9C44709925122A7A02F8C70CB7");
 });
 
+test("source, runtime, lock, and plugin release manifests share one semantic version", () => {
+  const manifests = [
+    ["package.json", JSON.parse(readFileSync(resolve(repositoryRoot, "package.json"), "utf8")).version],
+    ["package-lock.json", JSON.parse(readFileSync(resolve(repositoryRoot, "package-lock.json"), "utf8")).packages?.[""]?.version],
+    ["app/package.json", JSON.parse(readFileSync(resolve(repositoryRoot, "app", "package.json"), "utf8")).version],
+    ["app/package-lock.json", JSON.parse(readFileSync(resolve(repositoryRoot, "app", "package-lock.json"), "utf8")).packages?.[""]?.version],
+    [".codex-plugin/plugin.json", JSON.parse(readFileSync(resolve(repositoryRoot, ".codex-plugin", "plugin.json"), "utf8")).version],
+  ];
+  for (const [name, version] of manifests) assert.match(version ?? "", /^\d+\.\d+\.\d+$/, `${name} does not contain a release semantic version`);
+  assert.deepEqual(new Set(manifests.map(([, version]) => version)), new Set([manifests[0][1]]));
+});
+
 test("child path guard rejects equality and traversal", () => {
   const root = resolve(tmpdir(), "blockwright-release-guard");
   assert.equal(assertChildPath(root, resolve(root, "child")), resolve(root, "child"));
@@ -95,6 +107,7 @@ test("Windows lifecycle pull-request triggers cover every staged payload and bui
     "assets/github/**",
     "data/java/**",
     "installer/windows/**",
+    "launcher/**",
     "LICENSE",
     "mcp/**",
     "package.json",
@@ -163,6 +176,10 @@ test("Windows workflows acquire and invoke only the byte-pinned Inno toolchain",
   assert.match(releaseWorkflow, /Install-PinnedInnoSetup\.ps1/);
   assert.match(lifecycleWorkflow, /Install-PinnedInnoSetup\.ps1/);
   assert.match(lifecycleWorkflow, /Invoke-PinnedInnoCompile\.ps1/);
+  assert.match(lifecycleWorkflow, /Build-BlockwrightLauncher\.ps1[\s\S]+-Version "0\.0\.1"/);
+  assert.match(lifecycleWorkflow, /\$manifest\.launcher\.sha256 = \[string\]\$launcherEvidence\.sha256/);
+  assert.match(lifecycleWorkflow, /\$manifest\.launcher\.fileVersion = "0\.0\.1\.0"/);
+  assert.match(lifecycleWorkflow, /WriteAllBytes\(\$launcherPath, \$launcherOriginal\)/);
   assert.match(releaseWorkflow, /Test-InstallerRequiredFailure\.ps1[\s\S]+Test-InstallerLifecycle\.ps1/);
   assert.match(builder, /Invoke-PinnedInnoCompile\.ps1/);
   assert.doesNotMatch(builder, /run\(isccPath/);
@@ -173,14 +190,38 @@ test("Windows workflows acquire and invoke only the byte-pinned Inno toolchain",
   assert.match(compilerWrapper, /& \$resolvedCompiler/);
   assert.doesNotMatch(acquisition, /\[string\]\$ConfigPath/);
   assert.doesNotMatch(compilerWrapper, /\[string\]\$ConfigPath/);
+
+  const releaseWrapper = readFileSync(resolve(repositoryRoot, "scripts", "release", "Build-BlockwrightWindowsRelease.ps1"), "utf8");
+  assert.match(releaseWrapper, /\[string\]\$LauncherBinary/);
+  assert.match(releaseWrapper, /\$hasLauncherBinary -xor \$hasTrustedPublisher/);
+  assert.match(releaseWrapper, /--launcher-binary/);
+  assert.match(releaseWrapper, /--trusted-publisher-thumbprint/);
 });
 
-test("installer never elevates and validates lifecycle-only root overrides before execution", () => {
+test("installer supports explicit current-user and all-user scopes and validates lifecycle-only root overrides", () => {
   const installer = readFileSync(resolve(repositoryRoot, "installer", "windows", "Blockwright.iss"), "utf8");
-  assert.match(installer, /^PrivilegesRequired=lowest$/m);
-  assert.doesNotMatch(installer, /^PrivilegesRequiredOverridesAllowed=/m);
+  assert.match(installer, /^DefaultDirName=\{autopf\}\\Blockwright$/m);
+  assert.match(installer, /^PrivilegesRequired=admin$/m);
+  assert.match(installer, /^PrivilegesRequiredOverridesAllowed=dialog commandline$/m);
+  assert.match(installer, /^Name: "startupui";[^\r\n]+Flags: unchecked$/m);
+  assert.match(installer, /^Name: "startupengine";[^\r\n]+Flags: unchecked$/m);
+  assert.match(installer, /^Name: "codexintegration";[^\r\n]+Check: IsCurrentUserInstall$/m);
+  assert.match(installer, /^Name: "schemassociation";[^\r\n]+Check: IsCurrentUserInstall$/m);
+  assert.match(installer, /^\[Registry\]$/m);
+  assert.match(installer, /Root: HKA;[^\r\n]+ValueName: "Blockwright Control Center";[^\r\n]+Tasks: startupui/);
+  assert.match(installer, /Root: HKA;[^\r\n]+ValueName: "Blockwright Background Engine";[^\r\n]+-StartMinimized[^\r\n]+Tasks: startupengine/);
+  assert.match(installer, /ValueName: "Blockwright Control Center"; Flags: deletevalue; Check: IsStartupUiDisabled/);
+  assert.match(installer, /ValueName: "Blockwright Background Engine"; Flags: deletevalue; Check: IsStartupEngineDisabled/);
+  assert.match(installer, /Flags: nowait postinstall skipifsilent runasoriginaluser/);
+  assert.match(installer, /if IsAdminInstallMode then[\s\S]+deferring per-user state and integrations/);
+  assert.doesNotMatch(installer, /\{(?:localappdata|userappdata)\}/i);
   assert.match(installer, /^SetupIconFile=assets\\blockwright-v060\.ico$/m);
-  assert.match(installer, /^UninstallDisplayIcon=\{app\}\\assets\\blockwright-v060\.ico$/m);
+  assert.match(installer, /^UninstallDisplayIcon=\{app\}\\Blockwright\.exe$/m);
+  assert.match(installer, /^Name: "\{group\}\\Blockwright Control Center"; Filename: "\{app\}\\Blockwright\.exe";/m);
+  assert.match(installer, /^Name: "\{autodesktop\}\\Blockwright"; Filename: "\{app\}\\Blockwright\.exe";/m);
+  assert.match(installer, /ValueName: "Blockwright Control Center"; ValueData: """\{app\}\\Blockwright\.exe"""/);
+  assert.match(installer, /ValueName: "Blockwright Background Engine"; ValueData: """\{app\}\\Blockwright\.exe"" -StartMinimized/);
+  assert.match(installer, /^Filename: "\{app\}\\Blockwright\.exe"; Description: "Launch Blockwright Control Center";/m);
   assert.doesNotMatch(installer, /^\[UninstallRun\]$/m);
   assert.match(installer, /GetValidatedLifecycleTestRoot[\s\S]+ExpandFileName\(RawValue\)/);
   assert.match(installer, /TemporaryRoot := RemoveBackslashUnlessRoot\(ExpandFileName\(GetTempDir\)\)/);

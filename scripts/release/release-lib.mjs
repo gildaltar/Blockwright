@@ -167,9 +167,13 @@ export function validateSbomPartitions({ cyclonedx, spdx, rootName, rootVersion,
   const runtimeComponents = components.filter((component) => component?.["bom-ref"] === runtimeRef);
   if (runtimeComponents.length !== 1 || runtimeComponents[0].name !== runtimeName || runtimeComponents[0].version !== runtimeVersion) throw new Error("CycloneDX bundled runtime component is missing or duplicated in the partition model.");
   const [runtimeComponent] = runtimeComponents;
+  const launcherComponents = components.filter((component) => component?.properties?.some(({ name, value }) => name === "blockwright:distribution-role" && value === "native-windows-launcher"));
+  if (launcherComponents.length > 1) throw new Error("CycloneDX native Windows launcher component is duplicated.");
+  const launcherComponent = launcherComponents[0] ?? null;
+  const launcherRef = launcherComponent?.["bom-ref"] ?? null;
   const componentByPartition = new Map(Object.values(sbomPartitions).map((partition) => [partition, new Map()]));
   const componentByRef = new Map();
-  for (const component of components.filter((item) => item !== runtimeComponent)) {
+  for (const component of components.filter((item) => item !== runtimeComponent && item !== launcherComponent)) {
     const expectedPurl = npmPackagePurl(component?.name, component?.version);
     if (component.purl !== expectedPurl) throw new Error(`CycloneDX npm component does not use its canonical purl: ${component?.name}@${component?.version}`);
     const partitionProperty = component.properties?.filter(({ name }) => name === "blockwright:distribution-partitions") ?? [];
@@ -204,15 +208,16 @@ export function validateSbomPartitions({ cyclonedx, spdx, rootName, rootVersion,
     if (!Array.isArray(dependsOn) || new Set(dependsOn).size !== dependsOn.length) throw new Error(`CycloneDX dependency graph contains duplicate or invalid targets for ${ref}.`);
   }
   const dependencyMap = new Map(dependencyRecords.map(({ ref, dependsOn }) => [ref, dependsOn ?? []]));
-  assertExactValues(dependencyMap.keys(), [rootRef, runtimeRef, ...componentByRef.keys()], "CycloneDX dependency graph refs");
+  assertExactValues(dependencyMap.keys(), [rootRef, runtimeRef, ...(launcherRef ? [launcherRef] : []), ...componentByRef.keys()], "CycloneDX dependency graph refs");
   const applicationRefs = new Set([...applicationComponents.values()].map((component) => component["bom-ref"]));
   const runtimeNpmRefs = new Set([...runtimeNpmComponents.values()].map((component) => component["bom-ref"]));
   const rootTargets = dependencyMap.get(rootRef) ?? [];
-  if (!rootTargets.includes(runtimeRef) || rootTargets.some((target) => target !== runtimeRef && !applicationRefs.has(target))) {
-    throw new Error("CycloneDX root dependencies must contain only direct application packages plus the bundled Node runtime.");
+  if (!rootTargets.includes(runtimeRef) || (launcherRef && !rootTargets.includes(launcherRef)) || rootTargets.some((target) => target !== runtimeRef && target !== launcherRef && !applicationRefs.has(target))) {
+    throw new Error("CycloneDX root dependencies must contain only direct application packages, the native launcher, and the bundled Node runtime.");
   }
-  const directApplicationRefs = rootTargets.filter((target) => target !== runtimeRef);
+  const directApplicationRefs = rootTargets.filter((target) => target !== runtimeRef && target !== launcherRef);
   assertExactValues(dependencyMap.get(runtimeRef) ?? [], [npmRef], "CycloneDX Node runtime dependency partition");
+  if (launcherRef) assertExactValues(dependencyMap.get(launcherRef) ?? [], [], "CycloneDX native launcher dependency record");
   for (const [partition, references] of [[sbomPartitions.application, applicationRefs], [sbomPartitions.runtimeNpm, runtimeNpmRefs]]) {
     for (const reference of references) {
       const targets = dependencyMap.get(reference) ?? [];
@@ -226,13 +231,16 @@ export function validateSbomPartitions({ cyclonedx, spdx, rootName, rootVersion,
   if (spdxRoots.length !== 1 || spdxRuntimes.length !== 1) throw new Error("SPDX partition model must contain exactly one root package and one bundled runtime package.");
   const [spdxRoot] = spdxRoots;
   const [spdxRuntime] = spdxRuntimes;
+  const spdxLaunchers = spdxPackages.filter(({ SPDXID }) => SPDXID === "SPDXRef-BlockwrightWindowsLauncher");
+  if (spdxLaunchers.length !== (launcherComponent ? 1 : 0)) throw new Error("CycloneDX/SPDX native Windows launcher inventory does not match.");
+  const spdxLauncher = spdxLaunchers[0] ?? null;
   const spdxByPartition = new Map(Object.values(sbomPartitions).map((partition) => [partition, new Map()]));
   const spdxIds = new Set();
   for (const { SPDXID } of spdxPackages) {
     if (spdxIds.has(SPDXID)) throw new Error(`SPDX package identifier is duplicated: ${SPDXID}`);
     spdxIds.add(SPDXID);
   }
-  for (const item of spdxPackages.filter(({ SPDXID }) => ![spdxRoot.SPDXID, spdxRuntime.SPDXID].includes(SPDXID))) {
+  for (const item of spdxPackages.filter(({ SPDXID }) => ![spdxRoot.SPDXID, spdxRuntime.SPDXID, spdxLauncher?.SPDXID].filter(Boolean).includes(SPDXID))) {
     const purlReferences = item.externalRefs?.filter(({ referenceType }) => referenceType === "purl") ?? [];
     const partitionReferences = item.externalRefs?.filter(({ referenceType }) => referenceType === "blockwright-distribution-partition") ?? [];
     if (purlReferences.length !== 1 || partitionReferences.length !== 1) throw new Error(`SPDX npm package must declare exactly one purl and one distribution partition: ${item.name}@${item.versionInfo}`);
@@ -257,7 +265,7 @@ export function validateSbomPartitions({ cyclonedx, spdx, rootName, rootVersion,
   };
   const directApplicationSpdxIds = directApplicationRefs.map((reference) => spdxForComponentRef(reference).SPDXID);
   const runtimeSpdxIds = runtimeNpmPurls.map((purl) => spdxByPartition.get(sbomPartitions.runtimeNpm).get(purl).SPDXID);
-  assertExactValues(relationshipTargets(spdxRoot.SPDXID, "DEPENDS_ON"), [...directApplicationSpdxIds, spdxRuntime.SPDXID], "SPDX application direct dependencies");
+  assertExactValues(relationshipTargets(spdxRoot.SPDXID, "DEPENDS_ON"), [...directApplicationSpdxIds, spdxRuntime.SPDXID, ...(spdxLauncher ? [spdxLauncher.SPDXID] : [])], "SPDX application direct dependencies");
   assertExactValues(relationshipTargets(spdxRuntime.SPDXID, "CONTAINS"), runtimeSpdxIds, "SPDX Node runtime containment partition");
   for (const [reference, component] of componentByRef) {
     const sourceId = spdxForComponentRef(reference).SPDXID;
@@ -271,6 +279,7 @@ export function validateSbomPartitions({ cyclonedx, spdx, rootName, rootVersion,
     npmPurl,
     npmRef,
     runtimeRef,
+    launcherRef,
   };
 }
 
@@ -453,6 +462,7 @@ export function createSboms({
   version,
   license = "NOASSERTION",
   bundledRuntime,
+  bundledLauncher,
   serial = `urn:uuid:00000000-0000-4000-8000-000000000000`,
 }) {
   const applicationPackages = suppliedApplicationInventory?.packages ?? suppliedApplicationPackages ?? suppliedPackages ?? packagesFromLock(lock);
@@ -467,6 +477,7 @@ export function createSboms({
   const rootLicense = normalizePackageLicense(license);
   const rootRef = npmPackagePurl(name, version);
   const runtimeRef = bundledRuntime ? `pkg:generic/${encodeURIComponent(bundledRuntime.name)}@${encodeURIComponent(bundledRuntime.version)}` : null;
+  const launcherRef = bundledLauncher ? `pkg:generic/${encodeURIComponent(bundledLauncher.name)}@${encodeURIComponent(bundledLauncher.version)}` : null;
   const packagesByPartition = new Map(Object.values(sbomPartitions).map((partition) => [
     partition,
     new Map(packages.filter((item) => item.partition === partition).map((item) => [item.purl, item])),
@@ -533,7 +544,21 @@ export function createSboms({
     properties: [{ name: "blockwright:distribution-role", value: "bundled-private-runtime" }],
   } : null;
   if (runtimeComponent && runtimeComponent.licenses === undefined) delete runtimeComponent.licenses;
-  const components = runtimeComponent ? [...dependencyComponents, runtimeComponent] : dependencyComponents;
+  const launcherComponent = bundledLauncher ? {
+    type: "application",
+    "bom-ref": launcherRef,
+    name: bundledLauncher.name,
+    version: bundledLauncher.version,
+    purl: launcherRef,
+    licenses: cyclonedxLicense(bundledLauncher.license) ? [cyclonedxLicense(bundledLauncher.license)] : undefined,
+    hashes: [{ alg: "SHA-256", content: normalizeSha256(bundledLauncher.sha256, "native launcher SHA-256") }],
+    properties: [
+      { name: "blockwright:distribution-role", value: "native-windows-launcher" },
+      { name: "blockwright:installed-path", value: bundledLauncher.path },
+    ],
+  } : null;
+  if (launcherComponent && launcherComponent.licenses === undefined) delete launcherComponent.licenses;
+  const components = [...dependencyComponents, ...(runtimeComponent ? [runtimeComponent] : []), ...(launcherComponent ? [launcherComponent] : [])];
   const cyclonedx = {
     bomFormat: "CycloneDX",
     specVersion: "1.6",
@@ -542,8 +567,9 @@ export function createSboms({
     metadata: { component: { type: "application", "bom-ref": rootRef, name, version, licenses: rootLicense === "NOASSERTION" ? undefined : [{ license: { id: rootLicense } }] } },
     components,
     dependencies: [
-      { ref: rootRef, dependsOn: [...new Set([...directApplicationRefs, ...(runtimeRef ? [runtimeRef] : [])])] },
+      { ref: rootRef, dependsOn: [...new Set([...directApplicationRefs, ...(runtimeRef ? [runtimeRef] : []), ...(launcherRef ? [launcherRef] : [])])] },
       ...(runtimeRef ? [{ ref: runtimeRef, dependsOn: [npmRef] }] : []),
+      ...(launcherRef ? [{ ref: launcherRef, dependsOn: [] }] : []),
       ...[...applicationDependencyMap.entries()].map(([ref, dependsOn]) => ({ ref, dependsOn: [...dependsOn].sort() })),
       ...[...runtimeDependencyMap.entries()].map(([ref, dependsOn]) => ({ ref, dependsOn: [...dependsOn].sort() })),
     ],
@@ -590,6 +616,7 @@ export function createSboms({
       for (const target of targets) addRelationship(spdxByComponentRef.get(source).SPDXID, "DEPENDS_ON", spdxByComponentRef.get(target).SPDXID);
     }
   }
+  if (bundledLauncher) addRelationship("SPDXRef-RootPackage", "DEPENDS_ON", "SPDXRef-BlockwrightWindowsLauncher");
   const spdx = {
     spdxVersion: "SPDX-2.3",
     dataLicense: "CC0-1.0",
@@ -610,6 +637,20 @@ export function createSboms({
         licenseDeclared: normalizePackageLicense(bundledRuntime.license),
         checksums: [{ algorithm: "SHA256", checksumValue: normalizeSha256(bundledRuntime.archiveSha256, "bundled runtime archive SHA-256") }],
         externalRefs: [{ referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: runtimeRef }],
+      }] : []),
+      ...(bundledLauncher ? [{
+        SPDXID: "SPDXRef-BlockwrightWindowsLauncher",
+        name: bundledLauncher.name,
+        versionInfo: bundledLauncher.version,
+        downloadLocation: "NOASSERTION",
+        filesAnalyzed: false,
+        licenseConcluded: normalizePackageLicense(bundledLauncher.license),
+        licenseDeclared: normalizePackageLicense(bundledLauncher.license),
+        checksums: [{ algorithm: "SHA256", checksumValue: normalizeSha256(bundledLauncher.sha256, "native launcher SHA-256") }],
+        externalRefs: [
+          { referenceCategory: "PACKAGE-MANAGER", referenceType: "purl", referenceLocator: launcherRef },
+          { referenceCategory: "OTHER", referenceType: "blockwright-installed-path", referenceLocator: bundledLauncher.path },
+        ],
       }] : []),
     ],
     relationships,

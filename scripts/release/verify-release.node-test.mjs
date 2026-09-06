@@ -12,6 +12,7 @@ const signedSourceRef = "refs/tags/v0.6.0";
 const signedThumbprint = "A".repeat(40);
 const signedSubject = "CN=Blockwright Release Signing";
 const timestampSubject = "CN=Blockwright Timestamp Authority";
+const launcherHash = "e".repeat(64);
 
 function createUnsignedFixture(releaseDirectoryName = "release") {
   const root = mkdtempSync(resolve(tmpdir(), "blockwright-verify-unsigned-"));
@@ -40,6 +41,7 @@ function createUnsignedFixture(releaseDirectoryName = "release") {
     version,
     license: "GPL-2.0-only",
     bundledRuntime: { name: config.runtime.name, version: config.runtime.version, source: config.runtime.url, archiveSha256: config.runtime.sha256, license: "MIT" },
+    bundledLauncher: { name: "Blockwright Windows Launcher", version, sha256: launcherHash, license: "GPL-2.0-only", path: "Blockwright.exe" },
   });
   writeJson(resolve(directory, names.cyclonedx), cyclonedx);
   writeJson(resolve(directory, names.spdx), spdx);
@@ -54,6 +56,7 @@ function createUnsignedFixture(releaseDirectoryName = "release") {
       { file: names.portable, sha256: sha256File(resolve(directory, names.portable)), authenticode: "not-applicable" },
       { file: names.installer, sha256: sha256File(resolve(directory, names.installer)), authenticode: "not-signed" },
     ],
+    embeddedArtifacts: [{ file: "Blockwright.exe", container: names.portable, sha256: launcherHash, authenticode: "not-signed", signerThumbprint: null }],
   };
   writeJson(resolve(directory, names.status), status);
   const artifactPaths = Object.values(names).map((name) => resolve(directory, name));
@@ -74,6 +77,9 @@ function verifyUnsigned(fixture, authenticodeStatus = "NotSigned") {
     platform: "win32",
     spawnProcess(command, args, options) {
       calls.push({ command, args, options });
+      if (args.some((value) => String(value).endsWith("Test-BlockwrightPortableLauncher.ps1"))) {
+        return { status: 0, stdout: `${JSON.stringify({ sha256: launcherHash, authenticode: "not-signed" })}\n`, stderr: "" };
+      }
       return { status: 0, stdout: `${authenticodeStatus}\n`, stderr: "" };
     },
   });
@@ -95,6 +101,15 @@ function createSignedFixture() {
     signerThumbprint: signedThumbprint,
     signerSubject: signedSubject,
     timestampCertificateSubject: timestampSubject,
+    launcher: {
+      file: "Blockwright.exe",
+      container: fixture.names.portable,
+      sha256: launcherHash,
+      status: "Valid",
+      signerThumbprint: signedThumbprint,
+      signerSubject: signedSubject,
+      timestampCertificateSubject: timestampSubject,
+    },
   };
   const update = {
     schemaVersion: 1,
@@ -121,6 +136,7 @@ function createSignedFixture() {
       authenticode: "valid",
       signerThumbprint: signedThumbprint,
     }],
+    embeddedArtifacts: [{ file: "Blockwright.exe", container: fixture.names.portable, sha256: launcherHash, authenticode: "valid", signerThumbprint: signedThumbprint }],
   };
   writeJson(proofPath, proof);
   writeJson(updatePath, update);
@@ -163,6 +179,9 @@ function verifySigned(fixture, {
       const overridden = spawnResult?.(call);
       if (overridden) return overridden;
       if (command === "gh") return { status: 0, stdout: "verified\n", stderr: "" };
+      if (args.some((value) => String(value).endsWith("Test-BlockwrightPortableLauncher.ps1"))) {
+        return { status: 0, stdout: `${JSON.stringify({ sha256: launcherHash, authenticode: "valid", signerThumbprint: actualThumbprint })}\n`, stderr: "" };
+      }
       return {
         status: 0,
         stdout: actualOutput ?? `${JSON.stringify({
@@ -183,10 +202,11 @@ test("unsigned release evidence binds package version, exact artifacts, hashes, 
   try {
     const { result, calls } = verifyUnsigned(fixture);
     assert.deepEqual(result, { directory: fixture.directory, files: 5, assets: 6, status: "unsigned", version: "0.6.0" });
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
     assert.equal(calls[0].command, "powershell.exe");
     assert.match(calls[0].args.join(" "), /Get-AuthenticodeSignature/);
     assert.equal(calls[0].options.env.BLOCKWRIGHT_AUTHENTICODE_ARTIFACT, resolve(fixture.directory, fixture.names.installer));
+    assert.match(calls[1].args.join(" "), /Test-BlockwrightPortableLauncher\.ps1/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -215,6 +235,12 @@ test("Windows Authenticode subprocess treats an installer path with spaces as li
       directory: fixture.directory,
       packagePath: fixture.packagePath,
       platform: "win32",
+      spawnProcess(command, args, options) {
+        if (args.some((value) => String(value).endsWith("Test-BlockwrightPortableLauncher.ps1"))) {
+          return { status: 0, stdout: `${JSON.stringify({ sha256: launcherHash, authenticode: "not-signed" })}\n`, stderr: "" };
+        }
+        return spawnSync(command, args, options);
+      },
     });
     assert.equal(result.status, "unsigned");
   } finally {
@@ -227,8 +253,9 @@ test("signed workflow evidence remains valid when proof and update metadata are 
   try {
     const { result, calls } = verifySigned(fixture);
     assert.deepEqual(result, { directory: fixture.directory, files: 7, assets: 8, status: "signed", version: "0.6.0" });
-    assert.equal(calls.length, 1);
+    assert.equal(calls.length, 2);
     assert.match(calls[0].args.join(" "), /TimeStamperCertificate/);
+    assert.match(calls[1].args.join(" "), /Test-BlockwrightPortableLauncher\.ps1/);
   } finally {
     rmSync(fixture.root, { recursive: true, force: true });
   }
@@ -240,9 +267,10 @@ test("signed GitHub provenance covers every checksummed candidate plus SHA256SUM
     const sourceDigest = "d".repeat(40);
     const { result, calls } = verifySigned(fixture, { requireGitHubAttestation: true, sourceDigest });
     assert.deepEqual(result, { directory: fixture.directory, files: 7, assets: 8, status: "signed", version: "0.6.0" });
-    assert.equal(calls.length, 9);
+    assert.equal(calls.length, 10);
     assert.equal(calls[0].command, "powershell.exe");
-    const attestationCalls = calls.slice(1);
+    assert.match(calls[1].args.join(" "), /Test-BlockwrightPortableLauncher\.ps1/);
+    const attestationCalls = calls.slice(2);
     assert.ok(attestationCalls.every(({ command }) => command === "gh"));
     const expectedSubjects = [...fixture.signedArtifactPaths, resolve(fixture.directory, "SHA256SUMS.txt")].sort();
     assert.deepEqual(attestationCalls.map(({ args }) => args[2]).sort(), expectedSubjects);

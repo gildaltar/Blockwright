@@ -82,16 +82,124 @@ try {
         Assert-Condition ($parseErrors.Count -eq 0) "PowerShell parsing failed for $($scriptFile.Name): $($parseErrors.Message -join '; ')"
     }
     Add-Pass "powershell-parse" "$($scriptFiles.Count) Windows scripts/modules parse under Windows PowerShell."
+    $repositoryVersion = [string]((Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot "..\..\package.json") | ConvertFrom-Json).version)
+    $launcherBuild = & (Join-Path $releaseScriptRoot "Build-BlockwrightLauncher.ps1") -OutputPath (Join-Path $installRoot "Blockwright.exe") -Version $repositoryVersion | ConvertFrom-Json
+    Assert-Condition ([string]$launcherBuild.authenticode -ceq "not-signed" -and [string]$launcherBuild.trust -ceq "unsigned-local-build") "Local native launcher build did not record its explicitly untrusted status."
+    $launcherEvidence = & (Join-Path $releaseScriptRoot "Test-BlockwrightLauncherBinary.ps1") -Artifact (Join-Path $installRoot "Blockwright.exe") -Version $repositoryVersion -ExpectedAuthenticodeStatus NotSigned | ConvertFrom-Json
+    Assert-Condition ([string]$launcherEvidence.architecture -ceq "x64" -and [string]$launcherEvidence.subsystem -ceq "windows-gui") "Native Blockwright.exe is not the required x64 WinExe."
+    Add-Pass "native-launcher-binary" "The product-owned x64 WinExe has version metadata, the Blockwright icon, and explicit unsigned-local evidence."
+
+    $packagedMcpLauncherPath = Join-Path $PSScriptRoot "Launch-Blockwright-Mcp.cmd"
+    $packagedMcpLauncherSource = [System.IO.File]::ReadAllText($packagedMcpLauncherPath)
+    foreach ($requiredMcpEnvironment in @(
+        'if exist "%BLOCKWRIGHT_ROOT%\portable.flag"',
+        'set "BLOCKWRIGHT_STATE_ROOT=%BLOCKWRIGHT_ROOT%\data\state"',
+        'set "NPM_CONFIG_CACHE=%BLOCKWRIGHT_STATE_ROOT%\npm-cache"',
+        'set "NPM_CONFIG_UPDATE_NOTIFIER=false"'
+    )) {
+        Assert-Condition ($packagedMcpLauncherSource.Contains($requiredMcpEnvironment)) "Packaged MCP launcher environment contract is missing: $requiredMcpEnvironment"
+    }
+    $bridgeFixtureRoot = Join-Path $testRoot "portable bridge fixture with spaces"
+    $bridgeRuntimeRoot = Join-Path $bridgeFixtureRoot "runtime\node"
+    $bridgeScriptsRoot = Join-Path $bridgeFixtureRoot "scripts\windows"
+    $bridgeMcpRoot = Join-Path $bridgeFixtureRoot "mcp"
+    $null = New-Item -ItemType Directory -Path $bridgeRuntimeRoot -Force
+    $null = New-Item -ItemType Directory -Path $bridgeScriptsRoot -Force
+    $null = New-Item -ItemType Directory -Path $bridgeMcpRoot -Force
+    [System.IO.File]::WriteAllText((Join-Path $bridgeFixtureRoot "portable.flag"), "")
+    [System.IO.File]::WriteAllText((Join-Path $bridgeMcpRoot "server.mjs"), "// fixture")
+    [System.IO.File]::Copy($packagedMcpLauncherPath, (Join-Path $bridgeScriptsRoot "Launch-Blockwright-Mcp.cmd"), $true)
+    $bridgeNodePath = Join-Path $bridgeRuntimeRoot "node.exe"
+    $bridgeNodeSource = @'
+using System;
+using System.IO;
+
+public static class BlockwrightBridgeNodeFixture
+{
+    public static int Main(string[] args)
+    {
+        string evidencePath = Environment.GetEnvironmentVariable("BLOCKWRIGHT_BRIDGE_TEST_EVIDENCE");
+        if (String.IsNullOrWhiteSpace(evidencePath)) return 12;
+        File.WriteAllLines(evidencePath, new[] {
+            "CACHE=" + Environment.GetEnvironmentVariable("NPM_CONFIG_CACHE"),
+            "UPDATE=" + Environment.GetEnvironmentVariable("NPM_CONFIG_UPDATE_NOTIFIER"),
+            "STATE=" + Environment.GetEnvironmentVariable("BLOCKWRIGHT_STATE_ROOT"),
+            "STATE_DIR=" + Environment.GetEnvironmentVariable("BLOCKWRIGHT_STATE_DIR"),
+            "LOCALAPPDATA=" + Environment.GetEnvironmentVariable("LOCALAPPDATA"),
+            "ARGS=" + String.Join("|", args)
+        });
+        return 0;
+    }
+}
+'@
+    Add-Type -TypeDefinition $bridgeNodeSource -Language CSharp -OutputAssembly $bridgeNodePath -OutputType ConsoleApplication
+    $bridgeEvidencePath = Join-Path $testRoot "portable bridge evidence.txt"
+    $bridgeExternalLocalAppDataProbe = Join-Path $testRoot "portable bridge external localappdata probe"
+    $bridgeExternalStateRootProbe = Join-Path $testRoot "portable bridge external state-root probe"
+    $bridgeExternalStateDirectoryProbe = Join-Path $testRoot "portable bridge external state-directory probe"
+    $null = New-Item -ItemType Directory -Path $bridgeExternalLocalAppDataProbe -Force
+    $null = New-Item -ItemType Directory -Path $bridgeExternalStateRootProbe -Force
+    $null = New-Item -ItemType Directory -Path $bridgeExternalStateDirectoryProbe -Force
+    $bridgeStartInfo = New-Object System.Diagnostics.ProcessStartInfo
+    $bridgeStartInfo.FileName = $env:ComSpec
+    $bridgeStartInfo.Arguments = '/d /s /c ""' + (Join-Path $bridgeScriptsRoot "Launch-Blockwright-Mcp.cmd") + '""'
+    $bridgeStartInfo.WorkingDirectory = $testRoot
+    $bridgeStartInfo.UseShellExecute = $false
+    $bridgeStartInfo.CreateNoWindow = $true
+    $bridgeStartInfo.RedirectStandardOutput = $true
+    $bridgeStartInfo.RedirectStandardError = $true
+    $bridgeStartInfo.EnvironmentVariables["LOCALAPPDATA"] = $bridgeExternalLocalAppDataProbe
+    $bridgeStartInfo.EnvironmentVariables["BLOCKWRIGHT_STATE_ROOT"] = $bridgeExternalStateRootProbe
+    $bridgeStartInfo.EnvironmentVariables["BLOCKWRIGHT_STATE_DIR"] = $bridgeExternalStateDirectoryProbe
+    $bridgeStartInfo.EnvironmentVariables["NPM_CONFIG_CACHE"] = "bridge-caller-cache"
+    $bridgeStartInfo.EnvironmentVariables["NPM_CONFIG_UPDATE_NOTIFIER"] = "bridge-caller-notifier"
+    $bridgeStartInfo.EnvironmentVariables["BLOCKWRIGHT_BRIDGE_TEST_EVIDENCE"] = $bridgeEvidencePath
+    $bridgeProcess = New-Object System.Diagnostics.Process
+    $bridgeProcess.StartInfo = $bridgeStartInfo
+    Assert-Condition ($bridgeProcess.Start()) "Packaged MCP launcher fixture did not start."
+    $bridgeStdoutTask = $bridgeProcess.StandardOutput.ReadToEndAsync()
+    $bridgeStderrTask = $bridgeProcess.StandardError.ReadToEndAsync()
+    if (-not $bridgeProcess.WaitForExit(30000)) {
+        try { $bridgeProcess.Kill() } catch {}
+        throw "Packaged MCP launcher fixture exceeded 30 seconds."
+    }
+    $bridgeExitCode = $bridgeProcess.ExitCode
+    $bridgeStandardOutput = $bridgeStdoutTask.Result
+    $bridgeStandardError = $bridgeStderrTask.Result
+    $bridgeProcess.Dispose()
+    Assert-Condition ($bridgeExitCode -eq 0 -and (Test-Path -LiteralPath $bridgeEvidencePath -PathType Leaf)) "Packaged MCP launcher fixture failed with exit $bridgeExitCode. $bridgeStandardOutput $bridgeStandardError"
+    $bridgeEvidence = @{}
+    foreach ($line in @(Get-Content -LiteralPath $bridgeEvidencePath)) {
+        $separator = $line.IndexOf('=')
+        if ($separator -gt 0) { $bridgeEvidence[$line.Substring(0, $separator)] = $line.Substring($separator + 1) }
+    }
+    $expectedBridgeState = [System.IO.Path]::GetFullPath((Join-Path $bridgeFixtureRoot "data\state"))
+    Assert-Condition ([System.IO.Path]::GetFullPath([string]$bridgeEvidence.STATE).Equals($expectedBridgeState, [StringComparison]::OrdinalIgnoreCase) -and [System.IO.Path]::GetFullPath([string]$bridgeEvidence.STATE_DIR).Equals($expectedBridgeState, [StringComparison]::OrdinalIgnoreCase)) "Portable MCP launcher did not override inherited state variables with package-local state."
+    Assert-Condition ([System.IO.Path]::GetFullPath([string]$bridgeEvidence.CACHE).Equals((Join-Path $expectedBridgeState "npm-cache"), [StringComparison]::OrdinalIgnoreCase) -and [string]$bridgeEvidence.UPDATE -ceq "false") "Portable MCP launcher did not route npm cache/notifier state beneath package-local state."
+    Assert-Condition (@(Get-ChildItem -LiteralPath $bridgeExternalLocalAppDataProbe -Force -Recurse).Count -eq 0 -and @(Get-ChildItem -LiteralPath $bridgeExternalStateRootProbe -Force -Recurse).Count -eq 0 -and @(Get-ChildItem -LiteralPath $bridgeExternalStateDirectoryProbe -Force -Recurse).Count -eq 0) "Portable MCP launcher mutated an inherited external state probe."
+    Add-Pass "packaged-mcp-env-isolation" "The packaged MCP wrapper forced portable state ahead of inherited overrides, routed npm state package-locally, and left external probes unchanged."
 
     $installerSource = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot "..\..\installer\windows\Blockwright.iss"))
     Assert-Condition (-not $installerSource.Contains('-Confirm:$false')) "Inno invokes PowerShell -File with a boolean common-parameter value that Windows PowerShell treats as a string."
-    Assert-Condition ($installerSource.Contains("PrivilegesRequired=lowest")) "Installer is not pinned to per-user, lowest-privilege execution."
-    Assert-Condition (-not $installerSource.Contains("PrivilegesRequiredOverridesAllowed")) "Installer permits a command-line or dialog override that can elevate user-writable uninstall hooks."
+    Assert-Condition ($installerSource.Contains("DefaultDirName={autopf}\Blockwright")) "Installer does not select a scope-appropriate Program Files directory."
+    Assert-Condition ($installerSource.Contains("PrivilegesRequired=admin")) "Installer does not default to an elevated all-users installation."
+    Assert-Condition ($installerSource.Contains("PrivilegesRequiredOverridesAllowed=dialog commandline")) "Installer does not expose explicit current-user/all-users selection."
     Assert-Condition (-not $installerSource.Contains("Check: ShouldRemoveUserData")) "Installer still records the user-data cleanup choice during installation rather than evaluating the uninstaller command line."
-    foreach ($required in @("-Unattended", "CurUninstallStepChanged", "usUninstall", "UninstallArgumentPresent('/REMOVEUSERDATA')", "-RemoveUserProjectsAndExports", "-InstalledUninstall", "GetInstallerStateRoot", "GetInstallerRoamingRoot", "-PreserveExistingConfiguration", "PrivilegesRequired=lowest", "RaiseException")) {
+    foreach ($required in @("-Unattended", "CurUninstallStepChanged", "usUninstall", "UninstallArgumentPresent('/REMOVEUSERDATA')", "-RemoveUserProjectsAndExports", "-InstalledUninstall", "GetInstallerStateRoot", "GetInstallerRoamingRoot", "-PreserveExistingConfiguration", "PrivilegesRequired=admin", "PrivilegesRequiredOverridesAllowed=dialog commandline", "RaiseException")) {
         Assert-Condition ($installerSource.Contains($required)) "Installer cleanup routing contract is missing: $required"
     }
+    foreach ($requiredStartupContract in @('Name: "startupui"', 'Name: "startupengine"', 'Root: HKA', 'ValueName: "Blockwright Control Center"', 'ValueName: "Blockwright Background Engine"', 'Flags: deletevalue; Check: IsStartupUiDisabled', 'Flags: deletevalue; Check: IsStartupEngineDisabled', '-StartMinimized')) {
+        Assert-Condition ($installerSource.Contains($requiredStartupContract)) "Installer sign-in contract is missing: $requiredStartupContract"
+    }
+    foreach ($requiredScopeBoundary in @('Check: IsCurrentUserInstall', 'runasoriginaluser', 'All-users install: deferring per-user state and integrations', 'All-users uninstall: preserving every account')) {
+        Assert-Condition ($installerSource.Contains($requiredScopeBoundary)) "Installer all-users/current-user boundary is missing: $requiredScopeBoundary"
+    }
+    Assert-Condition (-not $installerSource.Contains('{localappdata}')) "All-users-capable setup still expands a user-area constant."
+    Assert-Condition (-not $installerSource.Contains('{userappdata}')) "All-users-capable setup still expands a user-area constant."
     Assert-Condition (-not $installerSource.Contains("[UninstallRun]")) "Installer still records mutable integration/state cleanup commands instead of running one ordered uninstall-time sequence."
+    foreach ($nativeTarget in @('Filename: "{app}\Blockwright.exe"', 'ValueData: """{app}\Blockwright.exe"""', 'ValueData: """{app}\Blockwright.exe"" -StartMinimized', 'UninstallDisplayIcon={app}\Blockwright.exe')) {
+        Assert-Condition ($installerSource.Contains($nativeTarget)) "Installer native-launcher target is missing: $nativeTarget"
+    }
     $runSectionStart = $installerSource.IndexOf("[Run]")
     $codeSectionStart = $installerSource.IndexOf("[Code]")
     Assert-Condition ($runSectionStart -ge 0 -and $codeSectionStart -gt $runSectionStart) "Installer [Run]/[Code] sections could not be isolated."
@@ -160,6 +268,25 @@ try {
 
     Import-Module (Join-Path $PSScriptRoot "Blockwright-Paths.psm1") -Force
     Assert-Condition ((Get-BlockwrightPrivateNode -InstallRoot $installRoot) -eq (Join-Path $installRoot "runtime\node\node.exe")) "Private Node runtime resolution failed."
+    $managedRecordPath = Get-BlockwrightManagedRecordPath -InstallRoot $installRoot -StateRoot $stateRoot
+    $null = New-Item -ItemType Directory -Path (Split-Path -Parent $managedRecordPath) -Force
+    $staleManagedRecord = [ordered]@{
+        schemaVersion = 1
+        pid = 2147483000
+        processStartUtc = [datetimeoffset]::UtcNow.AddMinutes(-10).ToString("o")
+        executable = Join-Path $installRoot "runtime\node\node.exe"
+        installRoot = $installRoot
+    }
+    [System.IO.File]::WriteAllText($managedRecordPath, ($staleManagedRecord | ConvertTo-Json -Compress), (New-Object System.Text.UTF8Encoding($false)))
+    $staleManagedStatus = Get-BlockwrightManagedProcessStatus -InstallRoot $installRoot -StateRoot $stateRoot
+    Assert-Condition ([string]$staleManagedStatus.Status -ceq "StaleOwnedRecord" -and [bool]$staleManagedStatus.OwnedRecord) "A dead ownership-validated managed PID was not classified as a safely removable stale record."
+    Remove-Item -LiteralPath $managedRecordPath -Force
+    [System.IO.File]::WriteAllText($managedRecordPath, '{"schemaVersion":"invalid","pid":"not-a-pid"}', (New-Object System.Text.UTF8Encoding($false)))
+    $unsafeManagedStatus = Get-BlockwrightManagedProcessStatus -InstallRoot $installRoot -StateRoot $stateRoot
+    Assert-Condition ([string]$unsafeManagedStatus.Status -ceq "UnsafeRecord" -and -not [bool]$unsafeManagedStatus.OwnedRecord) "Malformed managed metadata was not preserved as unsafe."
+    Assert-Condition (Test-Path -LiteralPath $managedRecordPath -PathType Leaf) "Managed-process inspection deleted malformed unowned metadata."
+    Remove-Item -LiteralPath $managedRecordPath -Force
+    Add-Pass "managed-record-reconciliation" "Dead records are removable only after install-root/private-runtime ownership validation; malformed metadata is reported unsafe and left unchanged."
     $validLifecycleState = Join-Path ([System.IO.Path]::GetTempPath()) "Blockwright Installer Lifecycle 0123456789abcdef0123456789abcdef\state"
     $validLifecycleRoaming = Join-Path ([System.IO.Path]::GetTempPath()) "Blockwright Installer Lifecycle 0123456789abcdef0123456789abcdef\roaming"
     Assert-Condition (Test-BlockwrightInstalledStateRoot -Candidate $validLifecycleState) "Narrow disposable installer lifecycle state root was not accepted."
@@ -335,6 +462,8 @@ exit 2
     Assert-Condition ($association.Status -eq "Associated") "Disposable .schem association fixture was not registered."
     $associationMarker = [System.IO.File]::ReadAllText((Join-Path $stateRoot "integration\schem-association.json")) | ConvertFrom-Json
     Assert-Condition (-not [bool]$associationMarker.extensionKeyCreated) "Association marker did not record the pre-existing extension key."
+    Assert-Condition ([string]$associationMarker.command -ceq ('"' + (Join-Path $installRoot "Blockwright.exe") + '" --open-schematic "%1"')) "Schematic association does not target the native Blockwright launcher."
+    Assert-Condition ([string]$associationMarker.icon -ceq ((Join-Path $installRoot "Blockwright.exe") + ',0')) "Schematic association does not use the embedded Blockwright.exe icon."
     $associationRemoval = & (Join-Path $PSScriptRoot "Set-BlockwrightSchematicAssociation.ps1") -InstallRoot $installRoot -StateRoot $stateRoot -RegistryClassesRoot $associationClassesRoot -Remove -Confirm:$false -PassThru
     Assert-Condition ($associationRemoval.Status -eq "Removed") "Disposable .schem association fixture was not removed."
     $remainingAssociationPaths = @(if (Test-Path -LiteralPath $associationTestRoot) { Get-ChildItem -LiteralPath $associationTestRoot -Recurse | ForEach-Object { $_.Name } }) -join ","
@@ -374,6 +503,10 @@ exit 2
     [System.IO.File]::WriteAllText((Join-Path $stateRoot "projects\keep.blockwright"), "private project contents")
     [System.IO.File]::WriteAllText((Join-Path $stateRoot "exports\keep.schem"), "private schematic contents")
     [System.IO.File]::WriteAllText((Join-Path $stateRoot "palettes.json"), "private palette contents")
+    $null = New-Item -ItemType Directory -Path (Join-Path $stateRoot "npm-cache\_logs") -Force
+    $null = New-Item -ItemType Directory -Path (Join-Path $stateRoot "tasks") -Force
+    [System.IO.File]::WriteAllText((Join-Path $stateRoot "npm-cache\_logs\runtime-debug.log"), "installer-owned npm diagnostic")
+    [System.IO.File]::WriteAllText((Join-Path $stateRoot "tasks\tasks.json"), '{"schemaVersion":1,"tasks":[]}')
     $legacyPaletteRoot = Join-Path $env:APPDATA "Blockwright"
     $null = New-Item -ItemType Directory -Path $legacyPaletteRoot -Force
     [System.IO.File]::WriteAllText((Join-Path $legacyPaletteRoot "palettes.json"), "legacy private palette contents")
@@ -395,8 +528,10 @@ exit 2
     Assert-Condition ((Test-Path -LiteralPath (Join-Path $stateRoot "palettes.json") -PathType Leaf)) "Default cleanup removed user palettes."
     Assert-Condition ((Test-Path -LiteralPath (Join-Path $legacyPaletteRoot "palettes.json") -PathType Leaf)) "Default cleanup removed legacy user palettes."
     Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $stateRoot "config.json"))) "Default cleanup left installer-owned configuration behind."
+    Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $stateRoot "npm-cache")) -and -not (Test-Path -LiteralPath (Join-Path $stateRoot "tasks"))) "Default cleanup left state-local npm diagnostics or the managed task journal behind."
+    Assert-Condition (@($cleanup.Removed) -contains "npm-cache" -and @($cleanup.Removed) -contains "tasks") "Default cleanup did not report both newly covered runtime-state directories."
     Assert-Condition ($cleanup.Preserved.Count -eq 3) "Default cleanup did not report projects, exports, and palettes as preserved."
-    Add-Pass "safe-uninstall-cleanup" "Installer-owned state was removed while projects, exports, and palettes remained."
+    Add-Pass "safe-uninstall-cleanup" "Installer-owned state, including npm diagnostics and the managed task journal, was removed while projects, exports, and palettes remained."
 
     $explicitCleanup = & (Join-Path $PSScriptRoot "Remove-BlockwrightOwnedState.ps1") -InstallRoot $installRoot -StateRoot $stateRoot -RemoveUserProjectsAndExports -Confirm:$false -PassThru
     Assert-Condition (-not (Test-Path -LiteralPath (Join-Path $stateRoot "projects"))) "Explicit cleanup left projects behind."

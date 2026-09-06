@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -181,6 +182,7 @@ test("SBOM input is the installed production closure and excludes lockfile-only 
     assert.deepEqual(packagesFromLock(lock, { productionOnly: false }).map(({ name }) => name), ["dev-only", "prod-a"]);
 
     const runtimeHash = "a".repeat(64);
+    const nativeLauncherHash = "b".repeat(64);
     const runtimeUrl = "https://nodejs.org/dist/v26.8.1/node-v26.8.1-win-x64.zip";
     const { cyclonedx, spdx } = createSboms({
       applicationInventory,
@@ -189,16 +191,21 @@ test("SBOM input is the installed production closure and excludes lockfile-only 
       version: "0.6.0",
       license: "GPL-2.0-only",
       bundledRuntime: { name: "node", version: "26.8.1", source: runtimeUrl, archiveSha256: runtimeHash, license: "MIT" },
+      bundledLauncher: { name: "Blockwright Windows Launcher", version: "0.6.0", sha256: nativeLauncherHash, license: "GPL-2.0-only", path: "Blockwright.exe" },
     });
 
     assert.deepEqual(cyclonedx.metadata.component.licenses, [{ license: { id: "GPL-2.0-only" } }]);
-    assert.deepEqual(cyclonedx.components.map(({ name }) => name).sort(), ["@npmcli/agent", "@scope/tool", "node", "npm", "prod-a", "prod-a", "prod-b", "prod-expression"]);
+    assert.deepEqual(cyclonedx.components.map(({ name }) => name).sort(), ["@npmcli/agent", "@scope/tool", "Blockwright Windows Launcher", "node", "npm", "prod-a", "prod-a", "prod-b", "prod-expression"]);
     const nodeComponent = cyclonedx.components.find(({ name }) => name === "node");
     assert.deepEqual(nodeComponent.licenses, [{ license: { id: "MIT" } }]);
     assert.deepEqual(nodeComponent.hashes, [{ alg: "SHA-256", content: runtimeHash }]);
     assert.deepEqual(cyclonedx.components.find(({ name }) => name === "prod-b").licenses, [{ license: { id: "Apache-2.0" } }]);
     assert.deepEqual(cyclonedx.components.find(({ name }) => name === "prod-expression").licenses, [{ expression: "(MIT OR CC0-1.0)" }]);
     assert.equal(nodeComponent.externalReferences[0].url, runtimeUrl);
+    const launcherComponent = cyclonedx.components.find(({ name }) => name === "Blockwright Windows Launcher");
+    assert.deepEqual(launcherComponent.hashes, [{ alg: "SHA-256", content: nativeLauncherHash }]);
+    assert.deepEqual(launcherComponent.licenses, [{ license: { id: "GPL-2.0-only" } }]);
+    assert.ok(launcherComponent.properties.some(({ name, value }) => name === "blockwright:installed-path" && value === "Blockwright.exe"));
     const scopedComponent = cyclonedx.components.find(({ name }) => name === "@scope/tool");
     const runtimeScopedComponent = cyclonedx.components.find(({ name }) => name === "@npmcli/agent");
     assert.equal(scopedComponent.purl, "pkg:npm/%40scope/tool@3.0.0");
@@ -225,6 +232,7 @@ test("SBOM input is the installed production closure and excludes lockfile-only 
       applicationComponent("prod-a")["bom-ref"],
       applicationComponent("prod-expression")["bom-ref"],
       "pkg:generic/node@26.8.1",
+      launcherComponent["bom-ref"],
     ]));
     assert.ok(!rootDependency.dependsOn.includes(applicationComponent("prod-b")["bom-ref"]), "a transitive app package must not be emitted as a direct root dependency");
     const appProdDependency = cyclonedx.dependencies.find(({ ref }) => ref === applicationComponent("prod-a")["bom-ref"]);
@@ -235,11 +243,14 @@ test("SBOM input is the installed production closure and excludes lockfile-only 
 
     const spdxRoot = spdx.packages.find(({ SPDXID }) => SPDXID === "SPDXRef-RootPackage");
     const spdxNode = spdx.packages.find(({ SPDXID }) => SPDXID === "SPDXRef-BundledNodeRuntime");
+    const spdxLauncher = spdx.packages.find(({ SPDXID }) => SPDXID === "SPDXRef-BlockwrightWindowsLauncher");
     assert.equal(spdxRoot.licenseDeclared, "GPL-2.0-only");
     assert.equal(spdxRoot.licenseConcluded, "GPL-2.0-only");
     assert.equal(spdxNode.versionInfo, "26.8.1");
     assert.equal(spdxNode.licenseDeclared, "MIT");
     assert.deepEqual(spdxNode.checksums, [{ algorithm: "SHA256", checksumValue: runtimeHash }]);
+    assert.deepEqual(spdxLauncher.checksums, [{ algorithm: "SHA256", checksumValue: nativeLauncherHash }]);
+    assert.equal(spdxLauncher.licenseDeclared, "GPL-2.0-only");
     assert.ok(spdx.relationships.some(({ spdxElementId, relationshipType, relatedSpdxElement }) => spdxElementId === "SPDXRef-RootPackage" && relationshipType === "DEPENDS_ON" && relatedSpdxElement === "SPDXRef-BundledNodeRuntime"));
     assert.equal(spdx.packages.filter(({ name }) => name === "prod-a").length, 2);
     assert.ok(spdx.relationships.some(({ spdxElementId, relationshipType }) => spdxElementId === "SPDXRef-BundledNodeRuntime" && relationshipType === "CONTAINS"));
@@ -291,10 +302,13 @@ test("standalone SBOM generation requires and inventories an exact staged runtim
     writeFixtureFile(stage, "runtime/node/node_modules/npm/LICENSE", "npm test license fixture\n");
     writeFixtureFile(stage, "runtime/node/node_modules/npm/bin/npm-cli.js", 'console.log("11.19.0");\n');
     writeFixtureJson(stage, "runtime/node/node_modules/npm/node_modules/@npmcli/agent/package.json", { name: "@npmcli/agent", version: "4.0.2", license: "ISC" });
+    writeFixtureFile(stage, "Blockwright.exe", "native launcher fixture\n");
+    const stagedLauncherHash = createHash("sha256").update("native launcher fixture\n").digest("hex");
     writeFixtureJson(stage, "release-manifest.json", {
       schemaVersion: 1,
       version: "0.6.0",
       packagedRuntime: { name: config.runtime.name, version: config.runtime.version, source: config.runtime.url, archiveSha256: config.runtime.sha256, private: true },
+      launcher: { path: "Blockwright.exe", fileVersion: "0.6.0.0", sha256: stagedLauncherHash },
     });
     const generator = resolve(repositoryRoot, "scripts", "release", "generate-sbom.mjs");
     const missingStage = spawnSync(process.execPath, [generator], { encoding: "utf8" });
@@ -308,6 +322,7 @@ test("standalone SBOM generation requires and inventories an exact staged runtim
     assert.deepEqual(summary.applicationPurls, ["pkg:npm/%40scope/app@1.0.0"]);
     assert.deepEqual(summary.directApplicationPurls, ["pkg:npm/%40scope/app@1.0.0"]);
     assert.deepEqual(summary.runtimeNpmPurls, ["pkg:npm/%40npmcli/agent@4.0.2", "pkg:npm/npm@11.19.0"]);
+    assert.equal(summary.launcherRef, "pkg:generic/Blockwright%20Windows%20Launcher@0.6.0");
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

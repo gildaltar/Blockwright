@@ -133,6 +133,60 @@ const designElementBase = {
     requirementIds: z.array(z.string().describe("Hard-requirement identifier evidenced by this element.")).describe("All hard requirements for which this element supplies placement evidence."),
     offsets: z.array(outputVec3Schema.describe("Local translation used to repeat this generic operation.")).optional().describe("Optional translations that repeat the element without duplicating its definition."),
 };
+const designProfileOutputSchema = z.object({
+    plane: z.enum(["xy", "xz", "yz"]).describe("World-aligned plane in which the two-dimensional profile is defined."),
+    points: z.array(z.object({
+        u: z.number().int().describe("First integer coordinate in the declared profile plane."),
+        v: z.number().int().describe("Second integer coordinate in the declared profile plane."),
+    })).min(2).describe("Ordered integer points forming the reusable extrusion profile."),
+    filled: z.boolean().optional().describe("Whether the profile interior is filled before extrusion; false traces only its boundary."),
+});
+export const designPrimitiveOutputSchema = z.discriminatedUnion("type", [
+    z.object({ type: z.literal("line").describe("Selects a deterministic thick line primitive."), from: outputVec3Schema.describe("Inclusive line start coordinate."), to: outputVec3Schema.describe("Inclusive line end coordinate."), thickness: z.number().int().positive().optional().describe("Optional line thickness in blocks; defaults to one.") }),
+    z.object({ type: z.literal("plane").describe("Selects an axis-aligned plane primitive."), min: outputVec3Schema.describe("Minimum inclusive plane coordinate."), max: outputVec3Schema.describe("Maximum inclusive plane coordinate."), filled: z.boolean().optional().describe("Whether to fill the plane interior."), thickness: z.number().int().positive().optional().describe("Optional plane thickness in blocks.") }),
+    z.object({ type: z.literal("circle").describe("Selects a deterministic circle or disk primitive."), center: outputVec3Schema.describe("Center of the circle."), radius: z.number().int().positive().describe("Circle radius in blocks."), axis: z.enum(["x", "y", "z"]).optional().describe("Normal axis of the circle plane; defaults to y."), filled: z.boolean().optional().describe("Whether to emit a filled disk instead of the perimeter."), thickness: z.number().int().positive().optional().describe("Optional perimeter thickness in blocks.") }),
+    z.object({ type: z.literal("ellipse").describe("Selects a deterministic ellipse or filled elliptical disk."), center: outputVec3Schema.describe("Center of the ellipse."), radiusU: z.number().int().positive().describe("First in-plane radius in blocks."), radiusV: z.number().int().positive().describe("Second in-plane radius in blocks."), axis: z.enum(["x", "y", "z"]).optional().describe("Normal axis of the ellipse plane; defaults to y."), filled: z.boolean().optional().describe("Whether to fill the ellipse interior."), thickness: z.number().int().positive().optional().describe("Optional perimeter thickness in blocks.") }),
+    z.object({ type: z.literal("sphere").describe("Selects a deterministic sphere primitive."), center: outputVec3Schema.describe("Center of the sphere."), radius: z.number().int().positive().describe("Sphere radius in blocks."), hollow: z.boolean().optional().describe("Whether to emit only the spherical shell."), thickness: z.number().int().positive().optional().describe("Shell thickness when hollow is true.") }),
+    z.object({ type: z.literal("cone").describe("Selects a vertical deterministic cone primitive."), baseCenter: outputVec3Schema.describe("Center coordinate of the cone base."), radius: z.number().int().positive().describe("Base radius in blocks."), height: z.number().int().positive().describe("Vertical cone height in blocks."), direction: z.enum(["up", "down"]).optional().describe("Whether the cone tapers upward or downward."), hollow: z.boolean().optional().describe("Whether to emit only the cone shell."), thickness: z.number().int().positive().optional().describe("Shell thickness when hollow is true.") }),
+    z.object({ type: z.literal("pyramid").describe("Selects a vertical rectangular pyramid primitive."), min: outputVec3Schema.describe("Minimum inclusive pyramid envelope coordinate."), max: outputVec3Schema.describe("Maximum inclusive pyramid envelope coordinate."), hollow: z.boolean().optional().describe("Whether to emit only the pyramid shell."), thickness: z.number().int().positive().optional().describe("Shell thickness when hollow is true.") }),
+    z.object({ type: z.literal("polygon").describe("Selects an axis-aligned planar polygon primitive."), points: z.array(outputVec3Schema.describe("One ordered polygon vertex.")).min(3).describe("Ordered vertices of the planar polygon."), filled: z.boolean().optional().describe("Whether to fill the polygon interior.") }),
+    z.object({ type: z.literal("rounded_rectangle").describe("Selects an axis-aligned rounded rectangle primitive."), min: outputVec3Schema.describe("Minimum inclusive rectangle envelope coordinate."), max: outputVec3Schema.describe("Maximum inclusive rectangle envelope coordinate."), radius: z.number().int().nonnegative().describe("Corner radius in blocks."), filled: z.boolean().optional().describe("Whether to fill the rounded rectangle interior."), thickness: z.number().int().positive().optional().describe("Optional boundary thickness in blocks.") }),
+    z.object({ type: z.literal("rounded_square").describe("Selects an axis-aligned rounded square primitive."), min: outputVec3Schema.describe("Minimum inclusive square envelope coordinate."), max: outputVec3Schema.describe("Maximum inclusive square envelope coordinate."), radius: z.number().int().nonnegative().describe("Corner radius in blocks."), filled: z.boolean().optional().describe("Whether to fill the rounded square interior."), thickness: z.number().int().positive().optional().describe("Optional boundary thickness in blocks.") }),
+    z.object({ type: z.literal("extrusion").describe("Selects a straight profile extrusion primitive."), origin: outputVec3Schema.describe("World origin of the profile."), profile: designProfileOutputSchema.describe("Two-dimensional profile to extrude."), offset: outputVec3Schema.describe("Inclusive extrusion vector from the origin.") }),
+    z.object({ type: z.literal("profile_extrusion").describe("Selects a profile extrusion along a polyline."), profile: designProfileOutputSchema.describe("Two-dimensional profile copied along the path."), path: z.array(outputVec3Schema.describe("One ordered path control point.")).min(2).describe("Ordered world-space polyline control points.") }),
+    z.object({ type: z.literal("roof_plane").describe("Selects an axis-aligned sloped roof plane."), min: outputVec3Schema.describe("Minimum inclusive roof envelope coordinate."), max: outputVec3Schema.describe("Maximum inclusive roof envelope coordinate."), slopeAxis: z.enum(["x", "z"]).describe("Horizontal axis along which roof height changes."), highSide: z.enum(["min", "max"]).optional().describe("Envelope side containing the high edge."), thickness: z.number().int().positive().optional().describe("Roof thickness in blocks.") }),
+    z.object({ type: z.literal("roof_ridge").describe("Selects a symmetric two-sided roof ridge."), min: outputVec3Schema.describe("Minimum inclusive roof envelope coordinate."), max: outputVec3Schema.describe("Maximum inclusive roof envelope coordinate."), ridgeAxis: z.enum(["x", "z"]).describe("Horizontal direction followed by the ridge line."), ridgeOffset: z.number().int().optional().describe("Optional integer offset of the ridge within the envelope."), thickness: z.number().int().positive().optional().describe("Roof thickness in blocks.") }),
+    z.object({ type: z.literal("terrain_surface").describe("Selects a seeded deterministic terrain height field."), min: outputVec3Schema.describe("Minimum inclusive terrain envelope coordinate."), max: outputVec3Schema.describe("Maximum inclusive terrain envelope coordinate."), baseY: z.number().int().describe("Baseline surface elevation."), amplitude: z.number().nonnegative().describe("Maximum seeded height variation in blocks."), scale: z.number().positive().describe("Positive horizontal noise scale."), seed: z.string().min(1).describe("Stable terrain seed."), fillToY: z.number().int().optional().describe("Optional lowest elevation to fill beneath the surface.") }),
+]).describe("One compact deterministic procedural primitive; it expands to exact blocks only during compilation.");
+const proceduralMaterialTargetOutputSchema = z.union([
+    z.string().min(1).describe("Material-library key or namespaced Minecraft block identifier."),
+    z.object({ id: z.string().min(1).describe("Namespaced Minecraft block identifier."), state: z.record(z.string(), blockStateValueSchema).optional().describe("Exact block-state properties."), tags: z.array(z.string().describe("Open-ended material classification tag.")).optional().describe("Planning and audit tags attached to this target.") }),
+]);
+const proceduralWeightedMaterialOutputSchema = z.union([
+    z.object({ material: z.string().min(1).describe("Material-library key or namespaced block identifier."), weight: z.number().positive().describe("Positive relative selection weight.") }),
+    z.object({ id: z.string().min(1).describe("Namespaced Minecraft block identifier."), state: z.record(z.string(), blockStateValueSchema).optional().describe("Exact block-state properties."), tags: z.array(z.string().describe("Open-ended material classification tag.")).optional().describe("Planning and audit tags attached to this candidate."), weight: z.number().positive().describe("Positive relative selection weight.") }),
+]);
+export const proceduralMaterialDefinitionOutputSchema = z.union([
+    designMaterialOutputSchema,
+    z.discriminatedUnion("distribution", [
+        z.object({ distribution: z.literal("weighted_random").describe("Selects seeded independent weighted material sampling."), seed: z.string().min(1).describe("Stable distribution seed."), blocks: z.array(proceduralWeightedMaterialOutputSchema).min(1).describe("Weighted material candidates.") }),
+        z.object({ distribution: z.literal("weighted_noise").describe("Selects coherent seeded weighted-noise sampling."), seed: z.string().min(1).describe("Stable distribution seed."), scale: z.number().positive().describe("Positive coordinate noise scale."), blocks: z.array(proceduralWeightedMaterialOutputSchema).min(1).describe("Weighted material candidates.") }),
+        z.object({ distribution: z.literal("clustered_noise").describe("Selects coherent seeded clustered material sampling."), seed: z.string().min(1).describe("Stable distribution seed."), scale: z.number().positive().describe("Positive cluster scale."), blocks: z.array(proceduralWeightedMaterialOutputSchema).min(1).describe("Weighted material candidates.") }),
+        z.object({ distribution: z.literal("gradient").describe("Selects normalized axis-aligned material gradients."), axis: z.enum(["x", "y", "z"]).describe("World axis used to evaluate the gradient."), stops: z.array(z.object({ at: z.number().min(0).max(1).describe("Normalized stop position from zero to one."), material: proceduralMaterialTargetOutputSchema.describe("Material selected at this gradient stop.") })).min(1).describe("Ordered normalized material stops.") }),
+        z.object({ distribution: z.literal("checker").describe("Selects a repeating three-dimensional checker pattern."), size: outputVec3Schema.refine(({ x, y, z }) => x > 0 && y > 0 && z > 0, "Checker cell dimensions must be positive.").describe("Positive checker-cell dimensions."), materials: z.array(proceduralMaterialTargetOutputSchema).min(2).describe("Materials cycled between checker cells.") }),
+        z.object({ distribution: z.literal("pattern").describe("Selects a repeating material sequence."), axis: z.enum(["x", "y", "z"]).describe("World axis used to advance the pattern."), stride: z.number().int().positive().optional().describe("Positive number of blocks per material step."), materials: z.array(proceduralMaterialTargetOutputSchema).min(1).describe("Ordered material sequence.") }),
+        z.object({
+            distribution: z.literal("weathering").describe("Selects context-aware deterministic weathering."),
+            seed: z.string().min(1).describe("Stable weathering seed."),
+            base: proceduralMaterialTargetOutputSchema.describe("Unweathered base material."),
+            weathered: proceduralMaterialTargetOutputSchema.describe("Material used where the weathering threshold is met."),
+            amount: z.number().min(0).max(1).describe("Base weathering probability from zero to one."),
+            edge: z.object({ exposedAxesAtLeast: z.union([z.literal(2), z.literal(3)]).optional().describe("Minimum exposed coordinate axes considered an edge."), weight: z.number().min(-1).max(1).describe("Signed contribution of edge exposure to weathering probability.") }).optional().describe("Optional edge-exposure weathering rule."),
+            height: z.object({ minY: z.number().int().optional().describe("Optional lowest elevation affected by this height rule."), maxY: z.number().int().optional().describe("Optional highest elevation affected by this height rule."), weight: z.number().min(-1).max(1).describe("Signed contribution of elevation to weathering probability.") }).optional().describe("Optional elevation-aware weathering rule."),
+            surfaceDirection: z.object({ directions: z.array(z.enum(["up", "down", "north", "south", "east", "west"]).describe("One exposed face direction eligible for the rule.")).min(1).describe("Exposed face directions eligible for directional weathering."), weight: z.number().min(-1).max(1).describe("Signed contribution of matching surface direction to weathering probability.") }).optional().describe("Optional surface-direction weathering rule."),
+        }),
+    ]),
+]).describe("Exact or deterministic distributed material definition for Design IR v2.");
 export const designElementOutputSchema = z.discriminatedUnion("kind", [
     z.object({
         ...designElementBase,
@@ -213,6 +267,15 @@ export const designElementOutputSchema = z.discriminatedUnion("kind", [
         material: z.string().describe("Material reference used for the ramp surface and structure."),
         railingMaterial: z.string().optional().describe("Optional material reference used for edge railings."),
     }).describe("Generic ramp operation."),
+    z.object({
+        ...designElementBase,
+        kind: z.literal("procedural").describe("Generate or filter coordinates using a Design IR v2 procedural primitive."),
+        primitive: designPrimitiveOutputSchema.describe("Compact geometry primitive expanded only during deterministic compilation."),
+        operation: z.enum(["add", "union", "clear", "subtract", "cut", "intersect"]).optional().describe("Sparse constructive operation applied to the component occupancy map; defaults to add."),
+        material: z.string().min(1).optional().describe("Material-library key or exact block identifier used by additive operations."),
+        clip: z.object({ min: outputVec3Schema.describe("Minimum inclusive clipping coordinate."), max: outputVec3Schema.describe("Maximum inclusive clipping coordinate.") }).optional().describe("Optional inclusive axis-aligned clipping envelope."),
+        masks: z.array(z.object({ primitive: designPrimitiveOutputSchema.describe("Procedural mask volume."), invert: z.boolean().optional().describe("Whether to retain coordinates outside rather than inside this mask.") })).optional().describe("Optional ordered masks that filter generated coordinates."),
+    }).describe("High-level deterministic primitive plus optional boolean, clip, and mask controls."),
 ]).describe("One domain-independent voxel operation in a generic design program.");
 const assertionSourceSpanOutputSchema = z.object({
     start: z.number().int().nonnegative().describe("Zero-based first character of the cited wording within requirement.text."),
@@ -254,7 +317,7 @@ export const designAssertionOutputSchema = z.discriminatedUnion("kind", [
     z.object({
         ...assertionScopeOutputShape,
         kind: z.literal("element_kind").describe("Require generated mapped elements of a generic operation kind."),
-        elementKind: z.enum(["fill", "shell", "carve", "cylinder", "basin", "sweep", "stairs", "ramp"]).describe("Generic Design IR operation kind to require."),
+        elementKind: z.enum(["fill", "shell", "carve", "cylinder", "basin", "sweep", "stairs", "ramp", "procedural"]).describe("Generic Design IR operation kind to require."),
         minimum: z.number().int().positive().describe("Minimum generated mapped elements of this kind."),
     }).describe("Typed generic-operation evidence; it does not by itself satisfy the structural-strength rule."),
     z.object({
@@ -283,8 +346,7 @@ export const designAssertionOutputSchema = z.discriminatedUnion("kind", [
         minimumPlacementsPerSide: z.number().int().positive().describe("Minimum canonical placements on each requested face."),
     }).describe("Measurable build-envelope connection evidence."),
 ]).describe("One typed, source-grounded assertion evaluated against canonical geometry.");
-export const designProgramOutputSchema = z.object({
-    schemaVersion: z.literal(1).describe("Generic-design schema version; currently exactly 1."),
+const designProgramBaseOutputShape = {
     description: z.string().describe("Concise explanation of how the operations realize the retained source brief."),
     requirements: z.array(z.object({
         id: z.string().describe("Stable hard-requirement identifier referenced by design elements."),
@@ -296,11 +358,53 @@ export const designProgramOutputSchema = z.object({
             predicate: z.enum(["extent", "quantity", "path", "containment", "enclosure", "access", "support", "boundary", "material", "fixture", "surface"]).describe("Allowlisted geometric predicate that determines which assertion families may prove this claim."),
             status: z.enum(["asserted", "unsupported"]).describe("Asserted claims need structural evidence; unsupported claims invalidate the hard requirement."),
             reason: z.string().optional().describe("Concise explanation when no implemented geometric predicate can verify this exact claim."),
-        }).describe("One non-overlapping atomic source claim.")).min(1).describe("Atomic claims covering every substantive part of requirement.text; compound wording must be decomposed."),
-        assertions: z.array(designAssertionOutputSchema).min(1).describe("Source-grounded machine checks; at least one must be stronger than placement count or an element-kind label."),
-    }).describe("Hard requirement, explicit element mapping, and typed geometric acceptance assertions.")).describe("All hard requirements represented by this generic design program; there is no arbitrary cardinality cap."),
-    elements: z.array(designElementOutputSchema).describe("Ordered generic geometry operations; there is no domain-object catalog or arbitrary element-count cap."),
-}).describe("Domain-independent design program compiled directly into canonical voxel placements.");
+        }).describe("One non-overlapping atomic source claim.")).min(1).describe("Atomic source claims that collectively preserve the hard requirement."),
+        assertions: z.array(designAssertionOutputSchema).min(1).describe("Typed structural assertions used to verify the requirement against compiled geometry."),
+    })).describe("All hard requirements represented by this generic design program; there is no arbitrary cardinality cap."),
+    elements: z.array(designElementOutputSchema).describe("Canonical geometry operations referenced directly or through v2 components and templates."),
+};
+export const designProgramV1OutputSchema = z.object({
+    schemaVersion: z.literal(1).describe("Generic-design schema version; currently exactly 1."),
+    ...designProgramBaseOutputShape,
+}).describe("Backward-compatible Design IR v1 program.");
+const designOperationPhaseOutputSchema = z.enum(["terrain_foundation", "primary_mass", "structure", "walls", "roof", "cuts_openings", "trim", "detail", "lighting", "landscaping", "explicit_overrides"])
+    .describe("Canonical construction phase used for stable merge priority and conflict attribution.");
+const designRepetitionOutputSchema = z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("linear").describe("Repeat a template at a constant vector step."), count: z.number().int().positive().describe("Number of linear instances including the origin."), step: outputVec3Schema.describe("Translation between consecutive instances.") }),
+    z.object({ kind: z.literal("grid").describe("Repeat a template on a three-dimensional grid."), count: z.object({ x: z.number().int().positive().describe("Grid instance count along x."), y: z.number().int().positive().describe("Grid instance count along y."), z: z.number().int().positive().describe("Grid instance count along z.") }).describe("Positive instance counts along each axis."), step: outputVec3Schema.describe("Translation between adjacent grid cells.") }),
+    z.object({ kind: z.literal("radial").describe("Repeat a template around a horizontal circle."), count: z.number().int().positive().describe("Number of radial instances."), center: outputVec3Schema.describe("Center of the repetition circle."), radius: z.number().int().nonnegative().describe("Horizontal circle radius in blocks."), startAngleDegrees: z.number().optional().describe("Optional starting angle in degrees.") }),
+    z.object({ kind: z.literal("mirrored").describe("Mirror a template once across an axis-aligned plane."), axis: z.enum(["x", "z"]).describe("Horizontal axis normal to the mirror plane."), coordinate: z.number().int().describe("World coordinate of the mirror plane.") }),
+    z.object({ kind: z.literal("alternating").describe("Repeat a template linearly with an alternating secondary offset."), count: z.number().int().positive().describe("Number of alternating instances."), step: outputVec3Schema.describe("Base translation between consecutive instances."), alternateOffset: outputVec3Schema.describe("Additional translation applied to every second instance.") }),
+    z.object({ kind: z.literal("position_list").describe("Repeat a template at an explicit bounded list of offsets."), positions: z.array(outputVec3Schema.describe("One explicit template offset.")).min(1).describe("Ordered explicit template offsets.") }),
+]).describe("Compact repetition rule that expands template references without duplicating their definitions.");
+const designTemplateInstanceOutputSchema = z.object({
+    id: z.string().min(1).describe("Stable template-instance identifier used in conflict attribution."),
+    templateId: z.string().min(1).describe("Identifier of the reusable template definition."),
+    origin: outputVec3Schema.optional().describe("Base translation applied before repetition."),
+    repetition: designRepetitionOutputSchema.optional().describe("Optional compact repetition rule; omission emits one instance."),
+    materialOverrides: z.record(z.string(), z.string()).optional().describe("Per-instance mapping from source material references to replacement references."),
+}).describe("Reference to one reusable template plus origin, repetition, and material overrides.");
+export const designComponentOutputSchema = z.object({
+    id: z.string().min(1).describe("Stable component identifier used by dependencies, cache keys, and revisions."),
+    name: z.string().min(1).describe("Human-readable component name."),
+    type: z.string().min(1).describe("Open-ended semantic component type used for inspection and editing."),
+    bounds: z.object({ min: outputVec3Schema.describe("Minimum inclusive component coordinate."), max: outputVec3Schema.describe("Maximum inclusive component coordinate.") }).describe("Declared inclusive component envelope."),
+    dependencies: z.array(z.string().describe("Identifier of a component that must compile before this component.")).describe("Direct component dependencies; transitive dependents are rebuilt when needed."),
+    elementIds: z.array(z.string().describe("Identifier of a design element owned by this component.")).describe("Direct design elements owned by the component."),
+    templateInstances: z.array(designTemplateInstanceOutputSchema).optional().describe("Reusable template references instantiated by this component."),
+    seed: z.string().min(1).describe("Stable component seed included in its cache identity."),
+    operationPhase: designOperationPhaseOutputSchema.describe("Canonical merge phase for the component."),
+    revision: z.object({ revision: z.number().int().nonnegative().describe("Monotonic component revision number."), parentRevision: z.number().int().nonnegative().optional().describe("Optional previous component revision."), message: z.string().optional().describe("Optional human-readable revision note.") }).describe("Monotonic component revision metadata."),
+}).describe("Stable independently cacheable component in Design IR v2.");
+export const designProgramV2OutputSchema = z.object({
+    schemaVersion: z.literal(2).describe("Componentized procedural Design IR schema version; exactly 2."),
+    ...designProgramBaseOutputShape,
+    materials: z.record(z.string(), proceduralMaterialDefinitionOutputSchema).optional().describe("Optional Design IR v2 material library including deterministic distributions."),
+    templates: z.array(z.object({ id: z.string().min(1).describe("Stable reusable-template identifier."), name: z.string().optional().describe("Optional human-readable template name."), elementIds: z.array(z.string().describe("Design element referenced by this template.")).min(1).describe("Elements reused whenever this template is instantiated.") })).describe("Reusable element groups referenced by component template instances."),
+    components: z.array(designComponentOutputSchema).min(1).describe("Independently cacheable dependency-ordered components."),
+}).describe("Canonical componentized Design IR v2 program with reusable templates and distributed materials.");
+export const designProgramOutputSchema = z.discriminatedUnion("schemaVersion", [designProgramV1OutputSchema, designProgramV2OutputSchema])
+    .describe("Domain-independent design program compiled directly into canonical voxel placements.");
 export const normalizedBuildInputOutputSchema = z.object({
     name: z.string(),
     edition: z.enum(["java", "bedrock"]),
@@ -427,6 +531,46 @@ export const buildRegistryOutputSchema = z.object({
     resourcePackVersion: resourcePackVersionOutputSchema.optional(),
     note: z.string().optional(),
 }).passthrough();
+const componentConflictSourceOutputSchema = z.object({
+    componentId: z.string(),
+    elementId: z.string().optional(),
+    elementInstanceId: z.string().optional(),
+    operationPhase: designOperationPhaseOutputSchema,
+});
+export const componentGraphOutputSchema = z.object({
+    schemaVersion: z.literal(1),
+    order: z.array(z.string()),
+    components: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        type: z.string(),
+        dependencies: z.array(z.string()),
+        bounds: z.object({ min: outputVec3Schema, max: outputVec3Schema }),
+        seed: z.string(),
+        operationPhase: designOperationPhaseOutputSchema,
+        revision: z.object({ revision: z.number().int().nonnegative(), parentRevision: z.number().int().nonnegative().optional(), message: z.string().optional() }),
+        geometryHash: sha256Schema,
+        materialHash: sha256Schema,
+        combinedHash: sha256Schema,
+        cacheKey: z.string(),
+    })),
+    graphHash: sha256Schema,
+});
+export const componentCompileReportOutputSchema = z.object({
+    changed: z.array(z.string()),
+    rebuilt: z.array(z.string()),
+    reused: z.array(z.string()),
+    cacheHits: nonNegativeInteger,
+    cacheMisses: nonNegativeInteger,
+    conflicts: z.array(z.object({
+        coordinate: outputVec3Schema,
+        kind: z.enum(["replacement", "removal"]),
+        previous: componentConflictSourceOutputSchema.optional(),
+        incoming: componentConflictSourceOutputSchema,
+    })),
+    conflictCount: nonNegativeInteger,
+    evictions: nonNegativeInteger,
+});
 export const buildSummaryOutputSchema = z.object({
     schemaVersion: z.literal(2),
     id: z.string().describe("Stable id derived from the deterministic build hash."),
@@ -447,6 +591,8 @@ export const buildSummaryOutputSchema = z.object({
     materialCounts: z.record(z.string(), nonNegativeInteger),
     layerCounts: z.record(z.string(), nonNegativeInteger),
     phases: z.array(z.object({ name: z.string(), count: nonNegativeInteger })),
+    componentGraph: componentGraphOutputSchema.optional().describe("Design IR v2 dependency graph and canonical component hashes."),
+    compileReport: componentCompileReportOutputSchema.optional().describe("Incremental component reuse, rebuild, cache, and conflict evidence for this compile."),
     validation: buildValidationOutputSchema,
     registry: buildRegistryOutputSchema,
     contract: buildContractResultOutputSchema,

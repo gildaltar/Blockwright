@@ -1,5 +1,97 @@
 # Blockwright — Minecraft Build Architect
 
+## v0.8.0 Platform Upgrade Contract
+
+This section defines the production-platform upgrade that follows the v0.7.0 recovery work. It is a target contract, not evidence that an item is implemented. Completion is determined by the implementation ledger, automated tests, release verification, and the reference-build report.
+
+**Canonical pipeline**
+
+```text
+user intent
+→ normalized build specification
+→ architectural plan
+→ component dependency graph
+→ canonical procedural build
+→ sparse deterministic voxel compilation
+→ validation / audit / review
+→ export or guarded world installation
+```
+
+- The canonical procedural build is the editable source of truth. Exact voxels are a deterministic derived representation generated only for consumers that require them.
+- Undefined coordinates are sparse and mean no placement. Intentional removal is represented explicitly by clear, carve, subtract, or cut operations; default air is never expanded into conversational or MCP payloads.
+- A component owns stable identity, dependency edges, procedural operations, seed, bounds, geometry hash, referenced-material hash, combined hash, cache key, and revision metadata.
+- Compilation is component-aware. A revision rebuilds the changed component and dependency closure only, then reports changed, rebuilt, reused, cache-hit, conflict, and timing evidence.
+- Merge order is deterministic across terrain/foundation, primary mass, structure, walls, roof, cuts/openings, trim, detail, lighting, landscaping, and explicit overrides. Conflicting writes retain exact source attribution and are never silently nondeterministic.
+- Geometry references named material definitions. Deterministic weighted, noise, gradient, pattern, and context-aware weathering use explicit seeds and exact edition/version-valid block states.
+- Version 1 Design IR remains readable. Version 2 adds reusable templates, typed repetition, component graphs, operation priority, richer primitives, material distributions, and constructive operations without changing legacy build hashes unless the caller adopts the new representation.
+
+**TerrainFit / WorldBlend**
+
+- TerrainFit consumes a canonical build or imported schematic plus a bounded world-region snapshot containing height, biome, surface/subsurface, water, vegetation, path, structure, and protection data.
+- Candidate placement considers bounded X/Z offsets, Y, rotation, and permitted mirroring. Scores expose cut, fill, disturbance, slope, foundation, burial, water, protection, structure, and path-alignment factors.
+- Supported attachment strategies are `flat_pad`, `raised_foundation`, `natural_slope`, `terraced`, `retaining_wall`, `stilts`, `sunken`, `cliff_embedded`, `waterfront`, and `bridge_span`.
+- The analysis produces an immutable, expiring, hash-bound preview containing proposed transform, cut/fill map, changed area, blend zones, retaining structures, path connections, biome/material sampling, water handling, vegetation restoration, conflicts, and risk.
+- Terrain writes are two-phase. Analysis and preview are read-only. Final terrain generation or WorldEdit installation requires explicit confirmation of the identical preview hash and still obeys the existing no-direct-region-edit boundary.
+
+**Model-independent core and provider routing**
+
+- Compilation, procedural editing, validation, export, schematic import, TerrainFit analysis, project history, and manual build creation work with no model configured.
+- Model assistance is optional and routed through capability-based adapters. Initial local adapters cover Ollama, llama.cpp/LM Studio, and generic OpenAI-compatible HTTP endpoints; cloud adapters remain opt-in and provider-agnostic.
+- Settings support local-only and cloud-disabled modes, task-specific provider/model overrides, timeouts, retries, concurrency, context/output limits, and provider health. Deterministic work never invokes a model merely because one is available.
+- Secrets are referenced by credential identifiers and stored through the operating-system credential service. They are excluded from JSON configuration, logs, crash records, diagnostics, and command history.
+
+**Task runtime and failure contract**
+
+- Long work runs as a managed task with the states queued, preparing, planning, generating, compiling, validating, auditing, rendering, exporting, installing, completed, cancelled, or failed.
+- Progress reports real work units only: phase, subtask, elapsed time, affected component, completed/total units when known, and cache reuse. Unknown precision is omitted.
+- Cancellation uses abort signals across provider calls, generation, compilation, TerrainFit, rendering, export, and installation. Partial output is never committed as a valid cache entry or project version.
+- Failures include phase, operation, component when known, underlying error, likely cause, retry safety, recommended action, sanitized log location, and a diagnostic identifier.
+
+**No-model editor flow**
+
+1. Create or open a procedural project without configuring a model.
+2. Add, delete, duplicate, group, lock, hide, isolate, move, resize, rotate, or mirror primitives and components.
+3. Create reusable templates and linear, grid, radial, mirrored, alternating, or position-list repetitions.
+4. Edit exact coordinates, dimensions, radii, thickness, counts, spacing, seeds, materials, distributions, terrain strategy, blend radius, and path connections.
+5. Compile incrementally, inspect validation/conflict/cache evidence, compare the revision, and export or begin a guarded terrain preview.
+
+The editor uses the established dark Blockwright workbench system: a navigation rail, component tree, dominant 3D canvas, exact property inspector, and persistent task/status rail. Essential values and state remain visible without hover, controls remain keyboard/touch accessible, and large geometry is rendered on demand rather than serialized into UI state.
+
+**Desktop and service flow**
+
+1. Install per-user or, when elevated and explicitly selected, all-users; portable mode remains separate.
+2. Launch one branded desktop instance. A second launch focuses the existing instance.
+3. The desktop shell and tray connect to one loopback-only Blockwright service that owns MCP/API, task execution, component caches, providers, exports, updates, and world integration.
+4. Start, stop, restart, pause work, open the workbench, create a build, inspect tasks, check updates, open settings/diagnostics, or exit from the tray without killing unrelated processes.
+5. Detect ports and stale owned processes, recover from crashes, rotate/redact logs, preserve autosaved procedural state, and produce a bounded support bundle.
+6. Update only from an allowed release channel after digest and trusted-signature verification; stop the owned service, stage the install, verify versioned health/readiness, and roll back on failure without overwriting user data.
+7. Repair and uninstall distinguish application-owned files from settings, credentials, caches, palettes, templates, history, and user builds. User builds are retained by default.
+
+**New high-level APIs**
+
+- `plan_build`: normalize intent into persisted planning state and a deterministic architectural plan without expanding voxels.
+- `compile_procedural_build`: compile a canonical procedural build through the component graph and return a stable build reference plus an incremental report.
+- `revise_component`: apply a procedural component/material/terrain revision and recompile only the affected dependency closure.
+- `analyze_terrain_fit`: inspect region data and score bounded placement candidates without mutation.
+- `preview_terrain_fit`: create the hash-bound procedural adaptation and exact impact preview without installation.
+- `confirm_terrain_install`: accept the identical preview hash and perform only the already-guarded installation method.
+- `get_task_status` and `cancel_task` expose observable background work without returning large payloads. An explicit retry resubmits the reviewed input through `start_compile_task` with `retryOf`; Blockwright does not persist potentially sensitive prompt/build input inside the task journal merely to synthesize an implicit retry.
+- `get_model_status` and `test_model_provider`: report configured capability, privacy boundary, availability, and latency without exposing credentials.
+- `get_diagnostics`: return sanitized application, service, hardware, provider, task, cache, and version evidence.
+
+Existing compile, review, validation, audit, project, import, export, and WorldEdit tools remain supported. Large procedural and voxel records stay server-side behind scoped references.
+
+To keep MCP discovery bounded, repeated build inputs, build references, and build summaries advertise Design IR as one compact object boundary instead of inlining the roughly 210 KB primitive union into every tool. The complete v1/v2 contract remains documented here and is still parsed against the full runtime schema on every input and structured output. A packaged bridge regression gate requires the entire 57-tool `tools/list` response to remain within the Control Center's 4 MiB bounded reader; exact build data continues to move by stable reference and explicit pages.
+
+**v0.8.0 verification gates**
+
+- Focused tests prove primitive semantics, templates/repetition, explicit air, booleans, phase ordering, deterministic materials, same-seed identity, dependency-only rebuilds, and cache eviction without semantic drift.
+- TerrainFit fixtures cover flat, hill, valley, cliff, shoreline, protected structure, water conflict, path connection, retaining wall, and biome blending. Confirmation with a stale or altered preview hash fails closed.
+- Provider tests cover no-model, local provider, unavailable local provider, cloud-disabled mode, provider failure, fallback policy, timeout, cancellation, and redaction.
+- Task tests cover progress, cancellation, restart recovery, partial failure, safe retry, and refusal to publish incomplete cache/project state.
+- Windows lifecycle tests cover fresh per-user install, elevated all-users install, same-version repair, upgrade, service/tray startup, single instance, port collision, crash recovery, signed update verification/rollback, settings preservation, and controlled uninstall. The v0.8 release gate also checks the native launcher's x64 GUI PE identity, product/version/icon metadata, activation and arbitrary-argument forwarding, redirected diagnostic output, child exit-code propagation, exact packaged hash, and actual nested Authenticode state.
+- A substantial reference build records procedural operation count, occupied blocks, avoided-air volume, representation reduction, compile/export time, peak memory where practical, cache hit rate, rebuilt/reused components, TerrainFit preview, schematic round trip, isolated revision, and unchanged-output determinism.
+
 ## v0.7.0 Recovery Contract
 
 This section supersedes conflicting v0.6.0 behavior. It was added after the Aqua Meridian mobile test proved that a valid ZIP and a below-budget placement count can still be a knowingly unusable result.
@@ -355,7 +447,7 @@ The painful part today is the gap between inspiration and construction: screensh
 
 - **Input:** Local plugin checkout/package location and an optional preferred loopback port.
 - **Output:** Dependency and required-file checks, process status, endpoint/readiness, PID, uptime, recent bounded logs, and exportable diagnostics.
-- **Behavior:** Uses built-in Windows/.NET UI, owns only the server process it launches, rejects duplicate managed starts, and provides explicit start, stop, restart, refresh, repair, copy, and diagnostics actions.
+- **Behavior:** The packaged `Blockwright.exe` is a product-owned x64 .NET Framework WinExe bootstrap with embedded Blockwright icon and version metadata. It resolves its own install root, faithfully forwards activation arguments, and waits for the existing hidden Windows PowerShell/WPF Control Center, returning that controller's exit code. The controller remains the logged-in-session UI and process supervisor, and the Node.js application remains the background engine; the launcher does not misrepresent either layer as a rewritten native service. The controller owns only the server process it launches, rejects duplicate managed starts, and provides explicit start, stop, restart, refresh, repair, copy, and diagnostics actions.
 
 **Tool: `analyze_world_region`**
 

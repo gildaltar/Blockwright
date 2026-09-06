@@ -28,7 +28,7 @@ $allowedRoot = if ($InstalledUninstall) {
 if (-not $allowedRoot) { throw "Refusing cleanup outside the exact Blockwright state roots: $resolvedStateRoot" }
 
 $stopResult = Stop-BlockwrightManagedProcess -InstallRoot $resolvedInstallRoot -StateRoot $resolvedStateRoot -Confirm:$false
-$ownedEntries = @("config.json", "install-state.json", "cache", "crashes", "integration", "logs", "run", "support-work", "updates")
+$ownedEntries = @("config.json", "install-state.json", "cache", "crashes", "integration", "logs", "npm-cache", "run", "support-work", "tasks", "updates")
 $userEntries = @("projects", "exports", "palettes.json")
 $removed = New-Object 'System.Collections.Generic.List[string]'
 $preserved = New-Object 'System.Collections.Generic.List[string]'

@@ -1,6 +1,6 @@
 {
   "name": "blockwright",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Contract-driven Minecraft Java and Bedrock architect with generic requirement-mapped geometry, open-ended materials, semantic verification, and certified construction artifacts.",
   "author": {
     "name": "Gildaltar",

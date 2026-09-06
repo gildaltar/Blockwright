@@ -129,13 +129,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Windows distribution tests failed with exit code $LASTEXITCODE." }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-ControlCenter.ps1"
           if ($LASTEXITCODE -ne 0) { throw "Control Center tests failed with exit code $LASTEXITCODE." }
-      - name: Assemble unsigned release candidate
+          npm run test:windows-launcher
+          if ($LASTEXITCODE -ne 0) { throw "Native launcher tests failed with exit code $LASTEXITCODE." }
+      - name: Build application payload and unsigned native launcher input
+        id: launcher
         shell: powershell
-        env:
-          SIGNING_THUMBPRINT: ${{ vars.BLOCKWRIGHT_SIGNING_THUMBPRINT }}
         run: |
-          node scripts/release/build-windows-release.mjs --installer --iscc "${{ steps.inno.outputs.iscc_path }}" --trusted-publisher-thumbprint $env:SIGNING_THUMBPRINT
-          if ($LASTEXITCODE -ne 0) { throw "Windows release assembly failed with exit code $LASTEXITCODE." }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw "Application build failed with exit code $LASTEXITCODE." }
+          npm run package:plugin
+          if ($LASTEXITCODE -ne 0) { throw "Plugin packaging failed with exit code $LASTEXITCODE." }
+          $launcherDirectory = Join-Path $env:RUNNER_TEMP "blockwright-native-launcher"
+          $launcherPath = Join-Path $launcherDirectory "Blockwright.exe"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\release\Build-BlockwrightLauncher.ps1" `
+            -OutputPath $launcherPath -Version "${{ needs.validate-release-ref.outputs.release_version }}"
+          if ($LASTEXITCODE -ne 0) { throw "Native launcher build failed with exit code $LASTEXITCODE." }
+          "launcher_path=$launcherPath" >> $env:GITHUB_OUTPUT
       - name: Require external signing configuration
         shell: powershell
         env:
@@ -146,7 +155,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:SIGNING_PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:SIGNING_PFX_PASSWORD) -or [string]::IsNullOrWhiteSpace($env:SIGNING_THUMBPRINT)) {
             throw "A protected PFX, password, and separately configured trusted thumbprint are required. Unsigned tags are not releasable."
           }
-      - name: Authenticode sign installer and record proof
+      - name: Sign native launcher, assemble candidate, sign installer, and record proof
         shell: powershell
         env:
           SIGNING_PFX_BASE64: ${{ secrets.BLOCKWRIGHT_SIGNING_PFX_BASE64 }}
@@ -154,7 +163,7 @@ jobs:
           SIGNING_THUMBPRINT: ${{ vars.BLOCKWRIGHT_SIGNING_THUMBPRINT }}
         run: |
           $version = "${{ needs.validate-release-ref.outputs.release_version }}"
-          $installer = (Resolve-Path ".\release\windows\Blockwright-$version-windows-x64-setup.exe").Path
+          $launcher = "${{ steps.launcher.outputs.launcher_path }}"
           $pfxPath = Join-Path $env:RUNNER_TEMP "blockwright-signing.pfx"
           $certificate = $null
           try {
@@ -165,12 +174,23 @@ jobs:
             if ($certificate.Thumbprint.ToUpperInvariant() -ne $expected) { throw "Imported signing certificate does not match the configured publisher thumbprint." }
             $signTool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName -Descending | Select-Object -First 1
             if ($null -eq $signTool) { throw "Windows SignTool was not found." }
+            & $signTool.FullName sign /sha1 $expected /fd SHA256 /td SHA256 /tr "https://timestamp.digicert.com" $launcher
+            if ($LASTEXITCODE -ne 0) { throw "SignTool failed for Blockwright.exe." }
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\release\Test-BlockwrightLauncherBinary.ps1" `
+              -Artifact $launcher -Version $version -ExpectedAuthenticodeStatus Valid -ExpectedThumbprint $expected -RequireTimestamp
+            if ($LASTEXITCODE -ne 0) { throw "Post-signing native launcher verification failed with exit code $LASTEXITCODE." }
+            node scripts/release/build-windows-release.mjs --skip-source-build --installer `
+              --iscc "${{ steps.inno.outputs.iscc_path }}" --launcher-binary $launcher --trusted-publisher-thumbprint $expected
+            if ($LASTEXITCODE -ne 0) { throw "Windows release assembly failed with exit code $LASTEXITCODE." }
+            $installer = (Resolve-Path ".\release\windows\Blockwright-$version-windows-x64-setup.exe").Path
+            $portable = (Resolve-Path ".\release\windows\Blockwright-$version-windows-x64-portable.zip").Path
             & $signTool.FullName sign /sha1 $expected /fd SHA256 /td SHA256 /tr "https://timestamp.digicert.com" $installer
-            if ($LASTEXITCODE -ne 0) { throw "SignTool failed." }
+            if ($LASTEXITCODE -ne 0) { throw "SignTool failed for the Blockwright installer." }
             powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\release\Test-BlockwrightAuthenticode.ps1" `
               -Artifact $installer -ExpectedThumbprint $expected `
               -ProofPath ".\release\windows\authenticode-proof.json" `
-              -StatusPath ".\release\windows\blockwright-$version-signature-status.json" -Version $version
+              -StatusPath ".\release\windows\blockwright-$version-signature-status.json" -Version $version `
+              -LauncherArtifact $launcher -PortableArtifact $portable
             if ($LASTEXITCODE -ne 0) { throw "Post-signing Authenticode verification failed with exit code $LASTEXITCODE." }
           } finally {
             if ($null -ne $certificate) { Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $certificate.Thumbprint) -Force -ErrorAction SilentlyContinue }

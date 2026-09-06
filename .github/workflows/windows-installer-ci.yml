@@ -14,6 +14,7 @@ on:
       - "assets/github/**"
       - "data/java/**"
       - "installer/windows/**"
+      - "launcher/**"
       - "LICENSE"
       - "mcp/**"
       - "package.json"
@@ -69,7 +70,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Windows distribution tests failed with exit code $LASTEXITCODE." }
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\scripts\windows\Test-ControlCenter.ps1"
           if ($LASTEXITCODE -ne 0) { throw "Control Center tests failed with exit code $LASTEXITCODE." }
-      - name: Build unsigned portable package and per-user installer
+          npm run test:windows-launcher
+          if ($LASTEXITCODE -ne 0) { throw "Native launcher tests failed with exit code $LASTEXITCODE." }
+      - name: Build unsigned portable package and dual-scope installer
         shell: powershell
         run: |
           node scripts/release/build-windows-release.mjs --installer --keep-work --iscc "${{ steps.inno.outputs.iscc_path }}"
@@ -85,11 +88,22 @@ jobs:
           $null = New-Item -ItemType Directory -Path $output -Force
           $manifestPath = Join-Path $stage "release-manifest.json"
           $appManifestPath = Join-Path $stage "app\package.json"
+          $launcherPath = Join-Path $stage "Blockwright.exe"
           $manifestOriginal = [IO.File]::ReadAllText($manifestPath)
           $appManifestOriginal = [IO.File]::ReadAllText($appManifestPath)
+          $launcherOriginal = [IO.File]::ReadAllBytes($launcherPath)
           try {
             $manifest = $manifestOriginal | ConvertFrom-Json
             $manifest.version = "0.0.1"
+            $launcherEvidenceText = & ".\scripts\release\Build-BlockwrightLauncher.ps1" -OutputPath $launcherPath -Version "0.0.1"
+            if ($LASTEXITCODE -ne 0) { throw "Prior-version native launcher fixture failed to build." }
+            $launcherEvidence = $launcherEvidenceText | ConvertFrom-Json
+            $manifest.launcher.sha256 = [string]$launcherEvidence.sha256
+            $manifest.launcher.sizeBytes = [long]$launcherEvidence.sizeBytes
+            $manifest.launcher.fileVersion = "0.0.1.0"
+            $manifest.launcher.authenticode = "not-signed"
+            $manifest.launcher.signerThumbprint = $null
+            $manifest.launcher.timestampCertificateSubject = $null
             [IO.File]::WriteAllText($manifestPath, (($manifest | ConvertTo-Json -Depth 10) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))
             $appManifest = $appManifestOriginal | ConvertFrom-Json
             $appManifest.version = "0.0.1"
@@ -100,6 +114,7 @@ jobs:
           } finally {
             [IO.File]::WriteAllText($manifestPath, $manifestOriginal, [Text.UTF8Encoding]::new($false))
             [IO.File]::WriteAllText($appManifestPath, $appManifestOriginal, [Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllBytes($launcherPath, $launcherOriginal)
           }
       - name: Exercise install, diagnostics, primary workflow, upgrade, repair, stop, and uninstall
         shell: powershell

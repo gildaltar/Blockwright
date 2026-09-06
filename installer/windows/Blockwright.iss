@@ -19,10 +19,11 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={localappdata}\Programs\Blockwright
+DefaultDirName={autopf}\Blockwright
 DefaultGroupName=Blockwright
 DisableProgramGroupPage=yes
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
+PrivilegesRequiredOverridesAllowed=dialog commandline
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.17763
@@ -40,25 +41,33 @@ VersionInfoVersion={#MyAppVersion}
 VersionInfoProductName={#MyAppName}
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoCompany={#MyAppPublisher}
-VersionInfoDescription=Blockwright per-user Windows installer
+VersionInfoDescription=Blockwright Windows installer
 SetupIconFile=assets\blockwright-v060.ico
-UninstallDisplayIcon={app}\assets\blockwright-v060.ico
+UninstallDisplayIcon={app}\Blockwright.exe
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
-Name: "codexintegration"; Description: "Register Blockwright's private-runtime MCP bridge with &Codex"; GroupDescription: "Optional integrations:"; Flags: unchecked
-Name: "schemassociation"; Description: "Associate &.schem files with Blockwright for this Windows user"; GroupDescription: "Optional integrations:"; Flags: unchecked
+Name: "codexintegration"; Description: "Register Blockwright's private-runtime MCP bridge with &Codex"; GroupDescription: "Optional integrations (current-user installs):"; Flags: unchecked; Check: IsCurrentUserInstall
+Name: "schemassociation"; Description: "Associate &.schem files with Blockwright for this Windows user"; GroupDescription: "Optional integrations (current-user installs):"; Flags: unchecked; Check: IsCurrentUserInstall
+Name: "startupui"; Description: "Launch the Blockwright Control Center at &sign-in"; GroupDescription: "Sign-in behavior:"; Flags: unchecked
+Name: "startupengine"; Description: "Run the Blockwright background engine at sign-in in the &notification area"; GroupDescription: "Sign-in behavior:"; Flags: unchecked
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "portable.flag"
 
 [Icons]
-Name: "{group}\Blockwright Control Center"; Filename: "{sys}\wscript.exe"; Parameters: "//nologo ""{app}\scripts\windows\Launch-Blockwright-ControlCenter.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\blockwright-v060.ico"
+Name: "{group}\Blockwright Control Center"; Filename: "{app}\Blockwright.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Blockwright.exe"
 Name: "{group}\Create redacted support bundle"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoLogo -NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\windows\New-BlockwrightSupportBundle.ps1"" -InstallRoot ""{app}"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\blockwright-v060.ico"
-Name: "{autodesktop}\Blockwright"; Filename: "{sys}\wscript.exe"; Parameters: "//nologo ""{app}\scripts\windows\Launch-Blockwright-ControlCenter.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\assets\blockwright-v060.ico"; Tasks: desktopicon
+Name: "{autodesktop}\Blockwright"; Filename: "{app}\Blockwright.exe"; WorkingDir: "{app}"; IconFilename: "{app}\Blockwright.exe"; Tasks: desktopicon
+
+[Registry]
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Blockwright Control Center"; Flags: deletevalue; Check: IsStartupUiDisabled
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Blockwright Control Center"; ValueData: """{app}\Blockwright.exe"""; Flags: uninsdeletevalue; Tasks: startupui
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "Blockwright Background Engine"; Flags: deletevalue; Check: IsStartupEngineDisabled
+Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Blockwright Background Engine"; ValueData: """{app}\Blockwright.exe"" -StartMinimized"; Flags: uninsdeletevalue; Tasks: startupengine
 
 [Run]
-Filename: "{sys}\wscript.exe"; Parameters: "//nologo ""{app}\scripts\windows\Launch-Blockwright-ControlCenter.vbs"""; Description: "Launch Blockwright Control Center"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Blockwright.exe"; Description: "Launch Blockwright Control Center"; Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [Code]
 var
@@ -168,17 +177,57 @@ begin
 end;
 
 function GetInstallerStateRoot(Param: String): String;
+var
+  LocalAppData: String;
 begin
   Result := GetValidatedLifecycleTestRoot('BLOCKWRIGHT_INSTALLER_TEST_STATE_ROOT', 'state');
   if Result = '' then
-    Result := ExpandConstant('{localappdata}\Blockwright');
+  begin
+    if IsAdminInstallMode then
+      RaiseException('Per-user Blockwright state is initialized by the application, not by an all-users installer.');
+    LocalAppData := GetEnv('LOCALAPPDATA');
+    if LocalAppData = '' then
+      RaiseException('LOCALAPPDATA is required to initialize current-user Blockwright state.');
+    Result := AddBackslash(LocalAppData) + 'Blockwright';
+  end;
 end;
 
 function GetInstallerRoamingRoot(Param: String): String;
+var
+  RoamingAppData: String;
 begin
   Result := GetValidatedLifecycleTestRoot('BLOCKWRIGHT_INSTALLER_TEST_ROAMING_ROOT', 'roaming');
   if Result = '' then
-    Result := ExpandConstant('{userappdata}');
+  begin
+    if IsAdminInstallMode then
+      RaiseException('Per-user roaming data is not modified by an all-users uninstaller.');
+    RoamingAppData := GetEnv('APPDATA');
+    if RoamingAppData = '' then
+      RaiseException('APPDATA is required to inspect current-user Blockwright roaming state.');
+    Result := RoamingAppData;
+  end;
+end;
+
+function IsCurrentUserInstall: Boolean;
+begin
+  Result := not IsAdminInstallMode;
+end;
+
+function IsStartupUiDisabled: Boolean;
+begin
+  Result := not WizardIsTaskSelected('startupui');
+end;
+
+function IsStartupEngineDisabled: Boolean;
+begin
+  Result := not WizardIsTaskSelected('startupengine');
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  { Per-user state owns the configurable port. An all-users install defers
+    state initialization to each user session and uses packaged defaults. }
+  Result := IsAdminInstallMode and Assigned(PortPage) and (PageID = PortPage.ID);
 end;
 
 function RunSetupPowerShellScript(ScriptName: String; ScriptArguments: String;
@@ -247,6 +296,11 @@ var
   CommonArguments: String;
   StepSucceeded: Boolean;
 begin
+  if IsAdminInstallMode then
+  begin
+    Log('All-users install: deferring per-user state and integrations to each user session.');
+    Exit;
+  end;
   CodexIntegrationStatus := 'not-selected';
   SchematicAssociationStatus := 'not-selected';
   IntegrationWarnings := '';
@@ -351,6 +405,11 @@ begin
   if (CurUninstallStep <> usUninstall) or UninstallCleanupExecuted then
     Exit;
   UninstallCleanupExecuted := True;
+  if IsAdminInstallMode then
+  begin
+    Log('All-users uninstall: preserving every account''s per-user Blockwright state and integrations.');
+    Exit;
+  end;
   CleanupParameters := '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
     ExpandConstant('{app}\scripts\windows\Register-BlockwrightCodex.ps1') + '" -InstallRoot "' +
     ExpandConstant('{app}') + '" -StateRoot "' + GetInstallerStateRoot('') + '" -Remove';

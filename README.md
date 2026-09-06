@@ -100,6 +100,8 @@ Running Blockwright from a Windows PC does not require babysitting a terminal. T
 
 Launch [`scripts/windows/Launch-Blockwright-ControlCenter.vbs`](scripts/windows/Launch-Blockwright-ControlCenter.vbs), or use the optional [shortcut installer](scripts/windows/README.md).
 
+The v0.8 source package adds an all-users/current-user installer choice and two independent, opt-in sign-in modes: visible Control Center or minimized background engine. All-users setup keeps configuration, credentials, projects, Codex registration, and `.schem` association per account. This source change does not itself publish or sign a v0.8 installer.
+
 ## Quick start
 
 For Windows, download the exact v0.6.0 MVP prerelease as either the [per-user installer](https://github.com/gildaltar/Blockwright/releases/download/v0.6.0/Blockwright-0.6.0-windows-x64-setup.exe) or the [portable ZIP](https://github.com/gildaltar/Blockwright/releases/download/v0.6.0/Blockwright-0.6.0-windows-x64-portable.zip). Both carry a private pinned Node.js runtime and do not modify a machine-wide Node installation. The installer uses `%LOCALAPPDATA%\Programs\Blockwright` and does not require administrator access; for the portable build, extract the whole ZIP before running `scripts\windows\Start-Blockwright-Portable.cmd`.
@@ -127,7 +129,7 @@ Open `http://localhost:3000`, run `compile_build`, then choose **Open workbench*
 | Local workbench + MCP | `npm run dev` |
 | ChatGPT App development | `npm run dev:tunnel`, then connect `{forwarding-url}/mcp` in ChatGPT Developer Mode |
 | Codex plugin | Use the checked-in `.codex-plugin/plugin.json`, bundled skill, local stdio bridge, and production workbench |
-| Self-contained Windows app | Install the per-user package or run `scripts/windows/Start-Blockwright-Portable.cmd` from the extracted portable package |
+| Self-contained Windows app | Install the Windows package (v0.8 source supports current-user or all-users scope) or run `scripts/windows/Start-Blockwright-Portable.cmd` from the extracted portable package |
 | Container or hosted MCP | Build the included `Dockerfile` and run the bounded Node listener with a persistent private volume; production serverless adapters deliberately refuse hosted mode |
 
 <p align="center">

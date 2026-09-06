@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import JSZip from "jszip";
-import { compileBuild } from "./compiler.js";
+import { compileBuild, planBuildInput } from "./compiler.js";
 import { chunkMcfunction, createBundle, toCsv, toMcfunction } from "./exports.js";
 import { architecturalPlanOutputSchema } from "./output-schemas.js";
 import { estimateBuild } from "./preflight.js";
@@ -41,6 +41,14 @@ const bedrockInput = {
 };
 
 describe("compileBuild", () => {
+  it("can plan and preflight without compiling placements", () => {
+    const planned = planBuildInput(input);
+    expect(planned.input.dimensions).toEqual(input.dimensions);
+    expect(planned.plan.schemaVersion).toBe(1);
+    expect(planned.preflight.estimatedPlacementAttempts).toBeGreaterThan(0);
+    expect(planned).not.toHaveProperty("placements");
+  });
+
   it("is deterministic", () => {
     const first = compileBuild(input);
     const second = compileBuild(input);
