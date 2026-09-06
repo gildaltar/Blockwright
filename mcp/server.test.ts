@@ -1834,6 +1834,19 @@ describe("Blockwright stdio bridge helpers", () => {
         }
       };
 
+      const assertChatGptArrayCompatibility = (schema: any, toolName: string, path: string) => {
+        if (!schema || typeof schema !== "object") return;
+        if (!Array.isArray(schema)) {
+          expect(schema.additionalItems, `${toolName} ${path} must not advertise the unsupported tuple keyword additionalItems`).toBeUndefined();
+          if (Object.prototype.hasOwnProperty.call(schema, "items")) {
+            expect(Array.isArray(schema.items), `${toolName} ${path}.items must be one homogeneous schema, not a tuple array`).toBe(false);
+          }
+        }
+        for (const [key, value] of Object.entries(schema)) {
+          if (value && typeof value === "object") assertChatGptArrayCompatibility(value, toolName, `${path}.${key}`);
+        }
+      };
+
       for (const tool of tools.result?.tools ?? []) {
         expect(tool, `${tool.name} should expose the complete MCP presentation contract`).toMatchObject({
           name: expect.any(String),
@@ -1852,6 +1865,8 @@ describe("Blockwright stdio bridge helpers", () => {
           }),
         });
         assertInputPropertyDescriptions(tool.inputSchema, tool.name);
+        assertChatGptArrayCompatibility(tool.inputSchema, tool.name, "inputSchema");
+        assertChatGptArrayCompatibility(tool.outputSchema, tool.name, "outputSchema");
       }
       const professionalToolNames = [
         "create_project",
@@ -1888,6 +1903,18 @@ describe("Blockwright stdio bridge helpers", () => {
       expect(exportTool?._meta?.ui?.resourceUri).toBeUndefined();
       expect(bedrockProjectTool?._meta?.["ui/resourceUri"]).toEqual(expect.stringContaining("export-bedrock-project"));
       expect(bedrockProjectTool?._meta?.ui?.resourceUri).toEqual(bedrockProjectTool?._meta?.["ui/resourceUri"]);
+      expect(bedrockProjectTool?.inputSchema?.properties?.manifestVersion).toEqual(expect.objectContaining({
+        type: "array",
+        items: expect.objectContaining({ type: "integer" }),
+        minItems: 3,
+        maxItems: 3,
+      }));
+      expect(bedrockProjectTool?.outputSchema?.properties?.manifestVersion).toEqual(expect.objectContaining({
+        type: "array",
+        items: expect.objectContaining({ type: "integer" }),
+        minItems: 3,
+        maxItems: 3,
+      }));
       processHandle.stdin?.write(`${JSON.stringify({
         jsonrpc: "2.0",
         id: "bedrock-download-view-resource",

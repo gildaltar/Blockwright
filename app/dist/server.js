@@ -115,6 +115,10 @@ const buildReferenceSchema = z.union([
         input: z.object(buildToolInputSchema).passthrough().describe("Normalized build input used to deterministically reconstruct and integrity-check the build; Design IR is fully validated at runtime."),
     }).passthrough(),
 ]).describe("A PC-local build id, a hosted short-lived cacheRef returned with a build summary, or a canonical build summary/record containing normalized input. Hosted cache references are random capabilities; deterministic ids alone never cross a public cache boundary. Uncached summaries are recompiled and integrity-checked.");
+// ChatGPT accepts fixed-length arrays when they use one homogeneous item schema
+// with minItems/maxItems. Zod tuples serialize as draft-07 `items: []` plus
+// `additionalItems`, which ChatGPT rejects while importing an MCP connector.
+const bedrockManifestVersionSchema = z.array(z.number().int().min(0).max(65_535).describe("One Bedrock manifest version component.")).min(3).max(3).describe("Exactly three non-negative integers in major, minor, patch order.");
 const contractClauseInputSchema = z.union([
     z.string().min(1).max(500).describe("Requirement text; hard by default, or prefix with warning: or aesthetic: when appropriate."),
     z.object({
@@ -2489,16 +2493,12 @@ const server = new McpServer({ name: APP_NAME, version: APP_VERSION }, { capabil
         name: z.string().min(1).max(80).describe("Human-readable project and behavior-pack name shown by Minecraft."),
         description: z.string().min(1).max(256).optional().describe("Optional behavior-pack description shown by Minecraft; defaults to a Blockwright project description."),
         packId: z.string().min(1).max(256).describe("Stable logical pack identity. Reuse this exact value and increment manifestVersion when replacing an installed pack."),
-        manifestVersion: z.tuple([
-            z.number().int().min(0).max(65_535).describe("Manifest major version."),
-            z.number().int().min(0).max(65_535).describe("Manifest minor version."),
-            z.number().int().min(0).max(65_535).describe("Manifest patch version."),
-        ]).default([1, 0, 0]).describe("Three-part Bedrock manifest version. Increase it when publishing an update with the same stable packId."),
+        manifestVersion: bedrockManifestVersionSchema.default([1, 0, 0]).describe("Three-part Bedrock manifest version in major, minor, patch order. Increase it when publishing an update with the same stable packId."),
     },
     outputSchema: {
         projectName: z.string().describe("Human-readable name embedded in the Bedrock behavior pack."),
         packId: z.string().describe("Stable logical identity used to derive deterministic manifest UUIDs."),
-        manifestVersion: z.tuple([z.number().int(), z.number().int(), z.number().int()]).describe("Three-part version embedded in the pack manifest."),
+        manifestVersion: bedrockManifestVersionSchema.describe("Three-part version embedded in the pack manifest in major, minor, patch order."),
         format: z.literal("mcpack").describe("Generated Bedrock behavior-pack container format."),
         filename: z.string().describe("Safe suggested .mcpack download filename."),
         bytes: z.number().int().positive().describe("Exact compressed artifact size in bytes."),
@@ -2521,7 +2521,7 @@ const server = new McpServer({ name: APP_NAME, version: APP_VERSION }, { capabil
             ...(description ? { description } : {}),
             packId,
             builds,
-        }, { manifestVersion });
+        }, { manifestVersion: manifestVersion });
         assertHostedArtifactOutputSize(mcpack.bytes.byteLength);
         return {
             structuredContent: {

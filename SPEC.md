@@ -284,6 +284,7 @@ The painful part today is the gap between inspiration and construction: screensh
 - App UI is functional on desktop and mobile, keyboard accessible, and responsive.
 - Core server, compiler, exporter, and HTTP/MCP behavior are covered by automated tests.
 - Core build, candidate, preflight, audit, palette, and guarded-install responses publish concrete MCP schemas that are validated against their real handler data.
+- Every advertised MCP input and output array uses a homogeneous `items` schema; fixed-length values use matching `minItems` and `maxItems` instead of tuple-only keywords rejected by ChatGPT connector discovery.
 - Public claims distinguish verified behavior from unavailable capabilities.
 - Java 26.2 compiles against an exact locally synchronized 26.2 block registry rather than a 1.21.x fallback.
 - Resource-pack loading reports how many build materials were resolved and falls back per material when a texture is missing.
